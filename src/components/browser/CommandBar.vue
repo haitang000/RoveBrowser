@@ -1,169 +1,224 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { address, host } from "../../lib/address";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
+import {
+  commandContext,
+  completionAllowed,
+  completionFor,
+  displayUrl,
+  matchSite,
+  nextCompletion,
+  rankCommands,
+  scopedResults,
+  suggestionQuery,
+  type CommandRow,
+  type CompletionMatch,
+  type SiteSearch,
+} from "../../lib/command";
 const b = useBrowser(),
-  query = ref(""),
+  typed = ref(""),
   selected = ref(0),
   field = ref<HTMLInputElement>(),
-  panel = ref<HTMLElement>();
+  panel = ref<HTMLElement>(),
+  scope = ref<SiteSearch>(),
+  completion = ref<CompletionMatch>(),
+  composing = ref(false);
 let previous: HTMLElement | null = null,
-  timer: ReturnType<typeof setTimeout>;
+  historyTimer: ReturnType<typeof setTimeout>,
+  suggestTimer: ReturnType<typeof setTimeout>,
+  typedBeforeScope = "",
+  pointer: { x: number; y: number } | undefined;
+const currentUrl = computed(() => (b.peek ?? b.active)?.url || "");
+const hinted = computed(() => scope.value ? undefined : matchSite(typed.value));
+const suffix = computed(() => {
+  const match = completion.value;
+  if (!match || match.text.length <= typed.value.length) return "";
+  return match.text.toLowerCase().startsWith(typed.value.toLowerCase()) ? match.text.slice(typed.value.length) : "";
+});
+const kept = () => [...b.state.tabs.map((tab) => tab.url), ...b.state.favorites.map((item) => item.url), ...(b.state.pins || []).map((item) => item.url)];
 const results = computed(() => {
-  const q = query.value.trim().toLowerCase();
-  const list: {
-    title: string;
-    detail: string;
-    url: string;
-    id?: string;
-    kind: string;
-  }[] = [];
-  if (q)
-    list.push({
-      title: query.value,
-      detail: /[.\/]/.test(q) ? "打开网址" : "使用 Google 搜索",
-      url: query.value,
-      kind: "navigate",
-    });
-  list.push(
-    ...b.state.tabs
-      .filter(
-        (t) =>
-          t.url !== "era://newtab" &&
-          (!q || `${t.title} ${t.url}`.toLowerCase().includes(q)),
-      )
-      .map((t) => ({
-        title: t.title,
-        detail: `切换标签页 · ${host(t.url)}`,
-        url: t.url,
-        id: t.id,
-        kind: "tab",
-      })),
-  );
-  list.push(
-    ...[...b.state.favorites, ...(b.state.pins || [])]
-      .filter((f) => (!q || `${f.title} ${f.url}`.toLowerCase().includes(q)) && !list.some((r) => r.id === f.id || b.state.tabs.some((t) => t.id === r.id && t.bookmarkId === f.id)))
-      .map((f) => ({ title: f.title, detail: `${f.spaceId ? '打开固定标签' : '打开常用网站'} · ${host(f.url)}`, url: f.url, id: f.id, kind: 'bookmark' })),
-  );
-  list.push(
-    ...b.history
-      .filter(
-        (h) =>
-          (!q || `${h.title} ${h.url}`.toLowerCase().includes(q)) &&
-          !list.some((x) => x.url === h.url),
-      )
-      .map((h) => ({
-        ...h,
-        detail: `历史记录 · ${host(h.url)}`,
-        kind: "history",
-      })),
-  );
-  return list.slice(0, 8);
+  if (scope.value) return scopedResults(scope.value, typed.value, b.suggestions, b.history);
+  const editing = b.commandMode === "edit" && typed.value === currentUrl.value;
+  const ranked = rankCommands(typed.value, { state: b.state, recent: b.recent, history: b.history, suggestions: b.suggestions, editingCurrent: editing });
+  const match = completion.value;
+  if (!match || !typed.value.trim()) return ranked;
+  const top: CommandRow = { kind: { type: "open", url: match.url }, title: displayUrl(match.url), detail: "", icon: "globe", action: "Open", key: `completion:${match.url}` };
+  const next = ranked.filter((row) => row.title !== top.title && !(row.kind.type === "open" && row.kind.url === match.url));
+  const existing = b.state.tabs.find((tab) => tab.url.replace(/\/$/, "") === match.url.replace(/\/$/, "") && tab.id !== b.state.activeTab);
+  if (existing) next.unshift({ kind: { type: "switchTo", id: existing.id }, title: existing.title, detail: displayUrl(match.url), icon: "globe", action: "Switch to Tab", key: `switch:${existing.id}` });
+  return [top, ...next].slice(0, 8);
 });
-watch(query, () => {
+function domain(site: SiteSearch) { return site.home.replace(/^https?:\/\//, "").split(".").slice(-2).join("."); }
+function refreshRemote() {
+  clearTimeout(historyTimer);
+  clearTimeout(suggestTimer);
+  const query = scope.value && !typed.value.trim() ? domain(scope.value) : typed.value;
+  historyTimer = setTimeout(() => b.send({ type: "history", query }), 100);
+  const suggest = suggestionQuery(typed.value);
+  if (suggest) suggestTimer = setTimeout(() => b.suggest(suggest), 90);
+  else b.suggestions = [];
+}
+function onInput(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const text = input.value;
+  const previousMatch = completion.value;
+  const deleting = (event as InputEvent).inputType?.startsWith("delete") === true;
+  const caretAtEnd = input.selectionStart === text.length && input.selectionEnd === text.length;
+  const allowed = !scope.value && completionAllowed(text, typed.value + suffix.value, typed.value, deleting, caretAtEnd, composing.value);
+  typed.value = text;
+  completion.value = allowed ? nextCompletion(previousMatch, completionFor(text, b.history, kept()), text) : undefined;
   selected.value = 0;
-  clearTimeout(timer);
-  timer = setTimeout(
-    () => b.send({ type: "history", query: query.value }),
-    100,
-  );
+  refreshRemote();
+}
+function acceptCompletion() {
+  if (!completion.value) return;
+  typed.value = completion.value.text;
+  completion.value = nextCompletion(completion.value, completion.value, typed.value);
+}
+function enterScope(site: SiteSearch) {
+  typedBeforeScope = typed.value;
+  scope.value = site;
+  typed.value = "";
+  completion.value = undefined;
+  selected.value = 0;
+  refreshRemote();
+  nextTick(() => field.value?.focus());
+}
+function leaveScope() {
+  scope.value = undefined;
+  typed.value = typedBeforeScope;
+  completion.value = undefined;
+  selected.value = 0;
+  refreshRemote();
+  nextTick(() => {
+    const end = typed.value.length;
+    field.value?.setSelectionRange(end, end);
+  });
+}
+function step(delta: number) {
+  if (!results.value.length) return;
+  selected.value = (selected.value + delta + results.value.length) % results.value.length;
+}
+function runAction(id: string) {
+  const active = b.peek ?? b.active;
+  if (id === "settings") { b.commandOpen = false; b.settingsOpen = true; return; }
+  if (id === "pin" || id === "unpin") b.send({ type: "pin", id: active?.id });
+  else if (id === "favorite" && active) b.send({ type: "favoriteTab", id: active.id });
+  else if (id === "separate") b.send({ type: "unsplit" });
+  else if (id === "split") {
+    const partner = commandContext(b.state, b.recent).splitPartner;
+    if (partner && active) b.send({ type: "split", id: active.id, other: partner.id });
+  } else if (id === "close-others") b.send({ type: "closeOthers" });
+  else if (id === "close-below") b.send({ type: "closeBelow" });
+  else if (id === "reopen") b.send({ type: "restore" });
+  else if (id === "new-space") {
+    const colors = ["sky", "sage", "sand", "rose", "lavender", "mint", "peach", "graphite"];
+    b.send({ type: "spaceCreate", name: `Space ${b.state.spaces.length + 1}`, color: colors[b.state.spaces.length % colors.length] });
+  } else if (id.startsWith("space:")) b.send({ type: "space", id: id.slice(6) });
+  else if (id.startsWith("move:") && active) b.send({ type: "move", id: active.id, spaceId: id.slice(5) });
+  b.commandOpen = false;
+}
+function open(url: string) {
+  b.send({ type: b.commandMode === "edit" ? "navigate" : "new", url });
+  b.commandOpen = false;
+}
+function run(index = selected.value) {
+  const item = results.value[index];
+  if (!item) {
+    if (b.commandMode === "edit" && typed.value === currentUrl.value) b.send({ type: "reload" });
+    b.commandOpen = false;
+    return;
+  }
+  const kind = item.kind;
+  try {
+    if (kind.type === "open" || kind.type === "history" || kind.type === "searchOn") open(kind.url);
+    else if (kind.type === "search" || kind.type === "suggestion") open(`https://www.google.com/search?q=${encodeURIComponent(kind.query)}`);
+    else if (kind.type === "switchTo" || kind.type === "bookmark") { b.send({ type: "activate", id: kind.id }); b.commandOpen = false; }
+    else if (kind.type === "action") runAction(kind.id);
+  } catch (error) { b.error = String(error); }
+}
+function rowUrl(item: CommandRow) {
+  const kind = item.kind;
+  if (kind.type === "open" || kind.type === "history" || kind.type === "searchOn") return kind.url;
+  if (kind.type === "switchTo") return b.state.tabs.find((tab) => tab.id === kind.id)?.url || "";
+  if (kind.type === "bookmark") return [...b.state.favorites, ...(b.state.pins || [])].find((mark) => mark.id === kind.id)?.url || "";
+  return "";
+}
+function point(event: PointerEvent, index: number) {
+  if (!pointer) { pointer = { x: event.clientX, y: event.clientY }; return; }
+  if (event.clientX !== pointer.x || event.clientY !== pointer.y) selected.value = index;
+}
+function key(event: KeyboardEvent) {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); step(event.key === "ArrowDown" ? 1 : -1); }
+  if (event.key === "Enter") { event.preventDefault(); run(); }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    if (scope.value) leaveScope();
+    else if (suffix.value) completion.value = undefined;
+    else b.commandOpen = false;
+  }
+  if (event.key === "Tab") {
+    event.preventDefault();
+    if (event.shiftKey) step(-1);
+    else if (hinted.value) enterScope(hinted.value);
+    else if (suffix.value) acceptCompletion();
+    else step(1);
+  }
+  if (event.key === "ArrowRight" && suffix.value && field.value?.selectionStart === typed.value.length) acceptCompletion();
+  if (event.key === "Backspace" && scope.value && !typed.value) { event.preventDefault(); leaveScope(); }
+}
+watch([typed, scope, () => b.history], () => {
+  if (scope.value || !completion.value) return;
+  completion.value = nextCompletion(completion.value, completionFor(typed.value, b.history, kept()), typed.value);
 });
-watch(
-  () => b.commandOpen,
-  async (open) => {
-    if (open) {
-      previous = document.activeElement as HTMLElement;
-      query.value =
-        b.commandMode === "edit" && (b.peek ?? b.active)?.url !== "era://newtab"
-          ? (b.peek ?? b.active)?.url || ""
-          : "";
-      selected.value = 0;
-      await nextTick();
-      field.value?.focus();
-      field.value?.select();
-    } else {
-      previous?.focus();
-      clearTimeout(timer);
-    }
-  },
-);
 watch(selected, async () => {
   await nextTick();
-  panel.value
-    ?.querySelector('[aria-selected="true"]')
-    ?.scrollIntoView({ block: "nearest" });
+  panel.value?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+});
+watch(() => b.commandOpen, async (open) => {
+  if (open) {
+    previous = document.activeElement as HTMLElement;
+    scope.value = undefined;
+    completion.value = undefined;
+    pointer = undefined;
+    typed.value = b.commandMode === "edit" && currentUrl.value !== "era://newtab" ? currentUrl.value : "";
+    selected.value = 0;
+    refreshRemote();
+    await nextTick();
+    field.value?.focus();
+    field.value?.select();
+  } else {
+    clearTimeout(historyTimer);
+    clearTimeout(suggestTimer);
+    previous?.focus();
+  }
 });
 watch([() => b.commandBackdrop, () => b.commandOpen], async ([backdrop, open]) => {
   if (!open || !backdrop?.ready) return;
   const current = () => b.commandOpen && b.commandBackdrop?.ticket === backdrop.ticket;
   await nextTick();
   try {
-    // Native pages keep rendering behind the UI until every pane has painted.
-    await Promise.all(Array.from(document.querySelectorAll<HTMLImageElement>(".command-background"))
-      .map((image) => image.decode()));
+    await Promise.all(Array.from(document.querySelectorAll<HTMLImageElement>(".command-background")).map((image) => image.decode()));
   } catch {
     if (current()) b.send({ type: "commandBackdropFailed", ticket: backdrop.ticket });
     return;
   }
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-  if (current()) {
-    b.send({ type: "commandBackdropReady", ticket: backdrop.ticket });
-  }
+  if (current()) b.send({ type: "commandBackdropReady", ticket: backdrop.ticket });
 });
-watch(() => b.commandBackdrop?.shown, async (shown) => {
-  if (shown && b.commandOpen) {
-    await nextTick();
-    field.value?.focus();
-  }
-});
+watch(() => b.commandBackdrop?.shown, async (shown) => { if (shown && b.commandOpen) { await nextTick(); field.value?.focus(); } });
 function dismissOutside(event: PointerEvent) {
   if (b.commandOpen && panel.value && event.target instanceof Node && !panel.value.contains(event.target)) {
     if (event.target instanceof Element && event.target.closest(".command-scrim")) event.preventDefault();
     b.commandOpen = false;
   }
 }
-function run(index = selected.value) {
-  const r = results.value[index];
-  if (!r) return;
-  try {
-    if (r.id) b.send({ type: "activate", id: r.id });
-    else
-      b.send({
-        type: b.commandMode === "edit" ? "navigate" : "new",
-        url: address(r.url),
-      });
-    b.commandOpen = false;
-  } catch (e) {
-    b.error = String(e);
-  }
-}
-function key(e: KeyboardEvent) {
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    e.preventDefault();
-    selected.value =
-      (selected.value +
-        (e.key === "ArrowDown" ? 1 : -1) +
-        results.value.length) %
-      Math.max(results.value.length, 1);
-  }
-  if (e.key === "Enter") {
-    e.preventDefault();
-    run();
-  }
-  if (e.key === "Escape") {
-    e.preventDefault();
-    b.commandOpen = false;
-  }
-  if (e.key === "Tab") {
-    e.preventDefault();
-    field.value?.focus();
-  }
-}
 onMounted(() => document.addEventListener("pointerdown", dismissOutside, true));
 onBeforeUnmount(() => {
-  clearTimeout(timer);
+  clearTimeout(historyTimer);
+  clearTimeout(suggestTimer);
   document.removeEventListener("pointerdown", dismissOutside, true);
 });
 </script>
@@ -176,50 +231,47 @@ onBeforeUnmount(() => {
       @pointerdown.self="b.commandOpen = false"
       @keydown="key"
     >
-      <section
-        ref="panel"
-        class="command-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="搜索或输入地址"
-      >
+      <section ref="panel" class="command-panel" role="dialog" aria-modal="true" aria-label="搜索或输入地址">
         <div class="command-input">
-          <Icon name="search" :size="18" /><input
-            ref="field"
-            v-model="query"
-            role="combobox"
-            aria-label="搜索或输入地址"
-            aria-controls="command-results"
-            :aria-activedescendant="`command-${selected}`"
-            aria-expanded="true"
-            placeholder="Search or enter address"
-            autocomplete="off"
-            spellcheck="false"
-          /><kbd>Esc</kbd>
+          <Icon v-if="!scope" name="search" :size="18" />
+          <span v-if="scope" class="command-chip">{{ scope.name }}</span>
+          <span class="command-field">
+            <span class="command-ghost" aria-hidden="true">{{ typed }}<span>{{ suffix }}</span></span>
+            <input
+              ref="field"
+              :value="typed"
+              role="combobox"
+              aria-label="搜索或输入地址"
+              aria-controls="command-results"
+              :aria-activedescendant="results.length ? `command-${selected}` : undefined"
+              :aria-expanded="results.length > 0"
+              :placeholder="scope ? `Search ${scope.name}` : 'Search or enter address'"
+              autocomplete="off"
+              spellcheck="false"
+              @input="onInput"
+              @compositionstart="composing = true"
+              @compositionend="composing = false"
+            />
+          </span>
+          <span v-if="hinted" class="command-hint">Search {{ hinted.name }} <kbd>Tab</kbd></span>
+          <kbd v-else>Esc</kbd>
         </div>
         <div id="command-results" class="command-results" role="listbox">
           <div
-            v-for="(r, i) in results"
-            :id="`command-${i}`"
-            :key="r.kind + r.url + r.id"
+            v-for="(item, index) in results"
+            :id="`command-${index}`"
+            :key="item.key"
             class="command-result"
-            :class="{ chosen: i === selected }"
+            :class="{ chosen: index === selected }"
             role="option"
-            :aria-selected="i === selected"
-            @pointermove="selected = i"
-            @click="run(i)"
+            :aria-selected="index === selected"
+            @pointermove="point($event, index)"
+            @click="run(index)"
           >
-            <Icon
-              v-if="r.kind === 'navigate'"
-              name="search"
-              :size="18"
-            /><Favicon v-else :url="r.url" /><span class="result-title">{{
-              r.title
-            }}</span
-            ><span class="result-detail">{{ r.detail }}</span
-            ><span v-if="i === selected" class="result-action"
-              >{{ r.kind === "tab" ? "Switch" : "Open" }} <kbd>↵</kbd></span
-            >
+            <Favicon v-if="rowUrl(item)" :url="rowUrl(item)" /><Icon v-else :name="item.icon" :size="18" />
+            <span class="result-title">{{ item.title }}</span>
+            <span class="result-detail">{{ item.detail }}</span>
+            <span v-if="index === selected" class="result-action">{{ item.action }} <kbd>↵</kbd></span>
           </div>
         </div>
         <div v-if="b.error" class="inline-error">{{ b.error }}</div>

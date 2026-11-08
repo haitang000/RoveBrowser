@@ -90,6 +90,7 @@ enum Event {
     PeekBackground(String, usize, Option<String>),
     PeekSurface(String, u64, Option<String>),
     CommandBackground(u64, usize, Option<String>),
+    Suggestions(u64, Vec<String>),
     CaptureTabs,
     Thumbnail(String, String, u64, Option<String>),
 }
@@ -881,6 +882,8 @@ impl App {
                     | Command::Activate { .. }
                     | Command::OpenBookmark { .. }
                     | Command::Close { .. }
+                    | Command::CloseOthers
+                    | Command::CloseBelow
                     | Command::SwitchSpace { .. }
                     | Command::CreateSpace { .. }
                     | Command::Restore
@@ -1118,6 +1121,13 @@ impl App {
                 }
                 return;
             }
+            Command::Suggest { query, ticket } => {
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let _ = proxy.send_event(Event::Suggestions(ticket, crate::suggestions::fetch(&query)));
+                });
+                return;
+            }
             Command::History { query } => {
                 match self
                     .storage
@@ -1157,6 +1167,8 @@ impl App {
                         | Command::Activate { .. }
                         | Command::OpenBookmark { .. }
                         | Command::Close { .. }
+                        | Command::CloseOthers
+                        | Command::CloseBelow
                         | Command::SwitchSpace { .. }
                         | Command::CreateSpace { .. }
                         | Command::Restore
@@ -1284,6 +1296,9 @@ impl ApplicationHandler<Event> for App {
                     }
                 }
                 self.pump_thumbnails();
+            }
+            Event::Suggestions(ticket, items) => {
+                self.emit(json!({"type":"suggestions","ticket":ticket,"suggestions":items}));
             }
             Event::Command(c) => self.command(c, Some(event_loop)),
             Event::PeekRequest(source, url, point) => {

@@ -219,6 +219,12 @@ pub enum Command {
     Window { action: String },
     #[serde(rename = "history")]
     History { query: String },
+    #[serde(rename = "suggest")]
+    Suggest { query: String, ticket: u64 },
+    #[serde(rename = "closeOthers")]
+    CloseOthers,
+    #[serde(rename = "closeBelow")]
+    CloseBelow,
     #[serde(rename = "peekOpen")]
     PeekOpen { url: String, origin: Option<Point> },
     #[serde(rename = "peekClose")]
@@ -399,6 +405,46 @@ impl State {
         self.active_tab = id;
         Ok(())
     }
+    fn partner_of(&self, id: &str) -> Option<String> {
+        let tab = self.tabs.iter().find(|tab| tab.id == id)?;
+        tab.split_with.clone().or_else(|| {
+            self.tabs
+                .iter()
+                .find(|tab| tab.split_with.as_deref() == Some(id))
+                .map(|tab| tab.id.clone())
+        })
+    }
+    fn regular_pages(&self) -> Vec<String> {
+        self.tabs
+            .iter()
+            .filter(|tab| tab.space_id == self.active_space && tab.bookmark_id.is_none())
+            .map(|tab| tab.id.clone())
+            .collect()
+    }
+    /// `below` closes regular tabs under the current one. Otherwise it closes the other regular tabs.
+    /// A pinned page treats every regular tab as both other and below. A split partner stays.
+    fn tabs_to_dismiss(&self, below: bool) -> Vec<String> {
+        let pages = self.regular_pages();
+        let active = self.active();
+        let partner = active.and_then(|tab| self.partner_of(&tab.id));
+        let pinned = active.is_some_and(|tab| tab.bookmark_id.is_some());
+        if pinned {
+            return if below {
+                pages
+            } else {
+                pages.into_iter().filter(|id| Some(id) != partner.as_ref()).collect()
+            };
+        }
+        let Some(active) = active else { return vec![] };
+        if !below {
+            return pages
+                .into_iter()
+                .filter(|id| id != &active.id && Some(id) != partner.as_ref())
+                .collect();
+        }
+        let last = pages.iter().rposition(|id| id == &active.id || Some(id) == partner.as_ref());
+        pages.into_iter().skip(last.map(|index| index + 1).unwrap_or(0)).collect()
+    }
     pub fn close(&mut self, id: &str) {
         if let Some(i) = self.tabs.iter().position(|t| t.id == id) {
             let mut t = self.tabs.remove(i);
@@ -488,6 +534,16 @@ impl State {
                 }
             }
             Command::Close { id } => self.close(&id.clone().unwrap_or(self.active_tab.clone())),
+            Command::CloseOthers => {
+                for id in self.tabs_to_dismiss(false) {
+                    self.close(&id);
+                }
+            }
+            Command::CloseBelow => {
+                for id in self.tabs_to_dismiss(true) {
+                    self.close(&id);
+                }
+            }
             Command::Restore => {
                 if let Some(mut t) = self.closed.pop() {
                     t.split_with = None;
@@ -781,5 +837,23 @@ mod tests {
             ..Rect::default()
         }
         .valid());
+    }
+    #[test]
+    fn close_others_and_below_keep_pins_and_the_current_page() {
+        let mut s = State::default();
+        s.new_tab("https://alpha.example").unwrap();
+        s.new_tab("https://beta.example").unwrap();
+        let beta = s.active_tab.clone();
+        let alpha = s.tabs.iter().find(|tab| tab.url.contains("alpha")).unwrap().id.clone();
+        s.activate(&alpha);
+        s.apply(&Command::CloseBelow).unwrap();
+        assert!(s.tabs.iter().all(|tab| tab.id != beta));
+        assert!(s.tabs.iter().any(|tab| tab.id == alpha));
+        assert!(s.tabs.iter().any(|tab| tab.bookmark_id.is_some()));
+        s.new_tab("https://gamma.example").unwrap();
+        s.activate(&alpha);
+        s.apply(&Command::CloseOthers).unwrap();
+        assert_eq!(s.active_tab, alpha);
+        assert!(s.tabs.iter().filter(|tab| tab.bookmark_id.is_none()).all(|tab| tab.id == alpha));
     }
 }

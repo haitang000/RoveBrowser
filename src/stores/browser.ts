@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { defineStore } from "pinia";
 import { initialState, reduce } from "../lib/preview";
 import type {
@@ -14,6 +14,8 @@ export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || initialState())),
     history = ref<HistoryEntry[]>([]),
+    suggestions = ref<string[]>([]),
+    recent = ref<string[]>([]),
     error = ref("");
   const commandOpen = ref(false),
     commandBackdrop = ref<{ ticket: number; images: (string | null)[]; ready: boolean; shown: boolean } | null>(null),
@@ -63,6 +65,7 @@ export const useBrowser = defineStore("browser", () => {
         "peekMotionStart",
         "peekMotionComplete",
         "history",
+        "suggest",
         "overlay",
         "thumbnails",
         "windowChrome",
@@ -238,6 +241,7 @@ export const useBrowser = defineStore("browser", () => {
       );
     }
     if (e.type === "history" && e.entries) history.value = e.entries;
+    if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions) suggestions.value = e.suggestions;
     if (e.type === "error") error.value = e.message || "操作失败";
     if (e.type === "shortcut") {
       if (e.action === "address") openCommand("edit");
@@ -245,6 +249,17 @@ export const useBrowser = defineStore("browser", () => {
       if (e.action === "desk") deskOpen.value = !deskOpen.value;
     }
   };
+  let suggestTicket = 0;
+  watch(() => state.value.activeTab, (id) => {
+    if (!id) return;
+    recent.value = [id, ...recent.value.filter((item) => item !== id)].slice(0, 24);
+  }, { immediate: true });
+  function suggest(query: string) {
+    suggestions.value = [];
+    const ticket = ++suggestTicket;
+    send({ type: "suggest", query, ticket });
+    return ticket;
+  }
   send({ type: "ready" });
   return {
     native,
@@ -259,6 +274,8 @@ export const useBrowser = defineStore("browser", () => {
     peekSurface,
     state,
     history,
+    suggestions,
+    recent,
     error,
     active,
     space,
@@ -277,5 +294,6 @@ export const useBrowser = defineStore("browser", () => {
     send,
     openCommand,
     cycle,
+    suggest,
   };
 });

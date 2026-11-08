@@ -66,6 +66,7 @@ declare global {
       type: string;
       state?: BrowserState;
       entries?: HistoryEntry[];
+      suggestions?: string[];
       message?: string;
       action?: string;
       peek?: Tab | null;

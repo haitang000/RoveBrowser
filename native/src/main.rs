@@ -7,6 +7,7 @@ mod host;
 mod model;
 mod shadow;
 mod storage;
+mod suggestions;
 mod thumbnails;
 fn main() {
     if let Err(e) = host::run() {

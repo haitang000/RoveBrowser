@@ -682,13 +682,47 @@ kbd {
   padding: 0 20px;
   border-bottom: 1px solid var(--separator);
 }
-.command-input input {
+.command-chip {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 560;
+  padding-right: 10px;
+  border-right: 1px solid var(--separator);
+}
+.command-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+.command-ghost {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+  color: transparent;
+  font-size: 17px;
+  line-height: 56px;
+}
+.command-ghost span { color: var(--tertiary); }
+.command-field input {
+  position: relative;
+  width: 100%;
   border: 0;
   background: transparent;
   font-size: 17px;
-  flex: 1;
+  line-height: 56px;
   height: 100%;
   outline: none;
+}
+.command-hint {
+  flex-shrink: 0;
+  color: var(--tertiary);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .command-input input:focus-visible {
   outline: none;
