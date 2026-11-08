@@ -420,6 +420,34 @@ unsafe extern "system" fn procedure(
     // SAFETY: this pointer comes from Caption::new and is removed before Box drop.
     let s = &*(data as *const State);
     match msg {
+        WM_GETMINMAXINFO if hwnd != s.surface.get() && lparam.0 != 0 => {
+            // Keep winit's minimum/maximum tracking sizes, then constrain the
+            // outer HWND as well as its client area. Without WS_CAPTION,
+            // USER32 otherwise maximizes over the taskbar; winit only adjusts
+            // the client rectangle in WM_NCCALCSIZE, leaving a black frame there.
+            let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+            let mut monitor = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(
+                MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                &mut monitor,
+            )
+            .as_bool()
+            {
+                let limits = &mut *(lparam.0 as *mut MINMAXINFO);
+                limits.ptMaxPosition = POINT {
+                    x: monitor.rcWork.left - monitor.rcMonitor.left,
+                    y: monitor.rcWork.top - monitor.rcMonitor.top,
+                };
+                limits.ptMaxSize = POINT {
+                    x: monitor.rcWork.right - monitor.rcWork.left,
+                    y: monitor.rcWork.bottom - monitor.rcWork.top,
+                };
+            }
+            return result;
+        }
         WM_STYLECHANGING if hwnd != s.surface.get() && wparam.0 as i32 == GWL_STYLE.0 => {
             let result = DefSubclassProc(hwnd, msg, wparam, lparam);
             if lparam.0 != 0 {
@@ -725,6 +753,21 @@ mod tests {
                 window.set_enabled_buttons(WindowButtons::all());
                 window.set_maximized(true);
                 assert_custom_frame();
+                let mut monitor = MONITORINFO {
+                    cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                    ..Default::default()
+                };
+                assert!(GetMonitorInfoW(
+                    MonitorFromWindow(root, MONITOR_DEFAULTTONEAREST),
+                    &mut monitor,
+                )
+                .as_bool());
+                let mut outer = RECT::default();
+                GetWindowRect(root, &mut outer).unwrap();
+                assert_eq!(
+                    outer, monitor.rcWork,
+                    "maximized outer bounds must leave the taskbar uncovered"
+                );
                 window.set_maximized(false);
                 assert_custom_frame();
                 window.set_minimized(true);
