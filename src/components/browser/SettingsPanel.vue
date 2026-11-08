@@ -106,11 +106,6 @@ function save(create = false) {
       </div>
       <p class="settings-note">通透时，工作区颜色罩在模糊的桌面之上。清透更薄，磨砂更实。</p>
       <hr />
-      <button class="theme-button" @click="b.send({ type: 'borderless' })">
-        <Icon name="sidebar" />{{ b.state.borderless === false ? "开启无边框页面" : "关闭无边框页面" }}
-      </button>
-      <p class="settings-note">无边框时，网页贴齐窗口边缘。关闭后，网页作为卡片浮在边框里。</p>
-      <hr />
       <button class="theme-button" @click="b.favoritesOpen = true; b.settingsOpen = false">
         <Icon name="pin" />管理顶部常用网站
       </button>

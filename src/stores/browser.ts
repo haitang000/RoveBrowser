@@ -20,6 +20,12 @@ export const useBrowser = defineStore("browser", () => {
   const commandOpen = ref(false),
     commandBackdrop = ref<{ ticket: number; images: (string | null)[]; ready: boolean; shown: boolean } | null>(null),
     thumbnails = ref<Record<string, string>>({}),
+    previewTarget = ref<string>(),
+    previewHiddenTicket = ref(0),
+    previewDismissals = ref(0),
+    previewBackdrop = ref<{ ticket: number; images: (string | null)[] } | null>(null),
+    previewPresentedTicket = ref(0),
+    previewFailures = ref<Record<string, boolean>>({}),
     peek = ref<Tab | null>(null),
     peekBackground = ref<Record<number, string>>({}),
     peekBackgroundReady = ref(true),
@@ -69,6 +75,11 @@ export const useBrowser = defineStore("browser", () => {
         "suggest",
         "overlay",
         "thumbnails",
+        "tabPreview",
+        "tabPreviewRefresh",
+        "tabPreviewClose",
+        "tabPreviewReady",
+        "tabPreviewFailed",
         "windowChrome",
         "commandBackdropReady",
         "commandBackdropFailed",
@@ -77,7 +88,11 @@ export const useBrowser = defineStore("browser", () => {
       error.value = "";
     try {
       if (native) window.ipc!.postMessage(JSON.stringify(c));
-      else if (c.type === "peekOpen") {
+      else if (c.type === "tabPreview") {
+        if (!c.rect) previewHiddenTicket.value = Number(c.ticket);
+      } else if (c.type.startsWith("tabPreview")) {
+        // Standalone UI previews never create or capture real pages.
+      } else if (c.type === "peekOpen") {
         const url = address(String(c.url));
         if (!url.startsWith("http")) throw Error("Peek 仅支持网页");
         peek.value = {
@@ -177,6 +192,12 @@ export const useBrowser = defineStore("browser", () => {
     if (t) send({ type: "activate", id: t.id });
   }
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "tabPreviewBackdrop" && e.ticket !== undefined && e.backgrounds)
+      previewBackdrop.value = { ticket: e.ticket, images: e.backgrounds };
+    if (e.type === "tabPreviewPresented" && e.ticket !== undefined) previewPresentedTicket.value = e.ticket;
+    if (e.type === "tabPreviewUnavailable" && e.id) previewFailures.value[e.id] = true;
+    if (e.type === "tabPreviewHidden" && e.ticket !== undefined) previewHiddenTicket.value = e.ticket;
+    if (e.type === "tabPreviewDismissed") previewDismissals.value++;
     if (e.type === "commandBackdrop") {
       commandBackdrop.value = e.backgrounds && e.ticket !== undefined
         ? { ticket: e.ticket, images: e.backgrounds, ready: Boolean(e.backgroundReady), shown: false }
@@ -191,7 +212,7 @@ export const useBrowser = defineStore("browser", () => {
       const next = Object.fromEntries(
         Object.entries(thumbnails.value).filter(([id]) => allowed.has(id)),
       );
-      if (e.image) next[e.id] = e.image;
+      if (e.image) { next[e.id] = e.image; delete previewFailures.value[e.id]; }
       else delete next[e.id];
       thumbnails.value = next;
     }
@@ -235,10 +256,12 @@ export const useBrowser = defineStore("browser", () => {
       if (e.backgroundReady) peekBackgroundReady.value = true;
     }
     if (e.type === "state" && e.state) {
+      const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
+      const previous = sources(state.value);
       state.value = upgradeLibrary(e.state);
-      const ids = new Set(e.state.tabs.map((t) => t.id));
+      const current = sources(state.value);
       thumbnails.value = Object.fromEntries(
-        Object.entries(thumbnails.value).filter(([id]) => ids.has(id)),
+        Object.entries(thumbnails.value).filter(([id]) => current.has(id) && current.get(id) === previous.get(id)),
       );
     }
     if (e.type === "history" && e.entries) history.value = e.entries;
@@ -266,6 +289,12 @@ export const useBrowser = defineStore("browser", () => {
   return {
     native,
     thumbnails,
+    previewTarget,
+    previewHiddenTicket,
+    previewDismissals,
+    previewBackdrop,
+    previewPresentedTicket,
+    previewFailures,
     peek,
     peekBackground,
     peekBackgroundReady,

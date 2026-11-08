@@ -14,6 +14,8 @@ Full upstream license: [Apache 2.0](licenses/zigzag-APACHE-2.0.txt). Original at
 
 The saved-page lifecycle and selected algorithms in `native/src/bookmarks.rs` and `src/lib/bookmarks.ts` are additionally translated from Zigzag's `Tabs/TabManager.swift`, `App/Library.swift`, `Sidebar/SidebarMenus.swift` and `Tabs/Tab.swift`. They are modified for the existing SQLite session schema, stable bookmark IDs, Vue rendering and Windows WebView2 navigation and controller ownership. See `docs/PINNED_TABS_PORT.md` for the behavior mapping and adaptation limits. Copyright 2026 Zigao Wang; Apache-2.0.
 
+The hover-preview delay, dismissal rules, grouped captions and snapshot-refresh behavior in `src/components/browser/TabPreview.vue` and `src/lib/tab-preview.ts` are adapted from Zigzag's `Sidebar/TabPreview.swift` and `Design/Tokens.swift`. Copyright 2026 Zigao Wang; Apache-2.0. The native cutout, rendering order, bounded in-memory thumbnail refresh and close acknowledgment are new Windows/WebView2 adaptations; no Swift implementation is compiled.
+
 ## Direct implementation dependencies
 
 Versions are fixed in package-lock.json and native/Cargo.lock. This list distinguishes direct dependencies from upstream features that Rove does not use.

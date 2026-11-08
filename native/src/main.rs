@@ -6,6 +6,7 @@ mod clip;
 mod glass;
 mod host;
 mod model;
+mod preview;
 mod shadow;
 mod storage;
 mod suggestions;

@@ -221,34 +221,6 @@ kbd {
   height: calc(100% - var(--titlebar-height));
   display: flex;
 }
-.browser-shell.borderless .browser-body {
-  height: 100%;
-}
-.browser-shell.borderless .titlebar {
-  position: absolute;
-  z-index: 5;
-  top: 0;
-  right: 0;
-  left: var(--sidebar-width);
-  background: transparent;
-  transition: left var(--motion-slide) var(--ease-out);
-}
-.browser-shell.borderless.collapsed .titlebar {
-  left: 0;
-}
-.browser-shell.borderless .sidebar-toolbar {
-  app-region: drag;
-}
-.browser-shell.borderless .sidebar-toolbar button {
-  app-region: no-drag;
-}
-.browser-shell.borderless.collapsed .reveal-sidebar {
-  position: absolute;
-  z-index: 6;
-  top: 40px;
-  left: 8px;
-  margin: 0;
-}
 .sidebar-track {
   width: var(--sidebar-width);
   flex-shrink: 0;
@@ -540,35 +512,12 @@ kbd {
   display: flex;
   gap: 0;
   position: relative;
-  margin: 8px 8px 8px 0;
+  margin: 0 8px 8px 0;
   border-radius: 8px;
-  background: transparent;
+  background: var(--surface);
   overflow: hidden;
   border: 1px solid var(--separator);
   box-shadow: 0 1px 2px var(--shadow);
-}
-.browser-shell.collapsed:not(.borderless) .page-area {
-  margin: 8px;
-}
-.browser-shell.borderless .page-area {
-  margin: 0;
-  padding-top: var(--titlebar-height);
-  border: 0;
-  border-radius: var(--radius-window) 0 0 var(--radius-window);
-  box-shadow: -1px 0 0 color-mix(in srgb, var(--ink) 12%, transparent);
-}
-.browser-shell.borderless .page-area::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: var(--titlebar-height);
-  background: var(--surface);
-}
-.browser-shell.borderless.collapsed .page-area {
-  border-radius: 0;
-  box-shadow: none;
 }
 .page-pane {
   flex: 1;

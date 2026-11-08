@@ -117,6 +117,20 @@ pub enum Command {
     Presented,
     #[serde(rename = "thumbnails")]
     Thumbnails,
+    #[serde(rename = "tabPreview")]
+    TabPreview {
+        id: Option<String>,
+        rect: Option<Rect>,
+        ticket: u64,
+    },
+    #[serde(rename = "tabPreviewRefresh")]
+    TabPreviewRefresh { id: String },
+    #[serde(rename = "tabPreviewReady")]
+    TabPreviewReady { ticket: u64 },
+    #[serde(rename = "tabPreviewClose")]
+    TabPreviewClose { ticket: u64 },
+    #[serde(rename = "tabPreviewFailed")]
+    TabPreviewFailed { ticket: u64 },
     #[serde(rename = "windowChrome")]
     WindowChrome {
         maximize: Rect,
