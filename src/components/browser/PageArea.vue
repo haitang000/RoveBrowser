@@ -105,6 +105,7 @@ function split(e: DragEvent) {
         </button>
       </div>
       <div ref="primary" class="webview-slot">
+        <img v-if="b.commandBackdrop?.images[0]" class="command-background" :src="b.commandBackdrop.images[0]" alt="" draggable="false" />
         <div
           v-if="b.active?.url === 'era://newtab' || !b.active"
           class="new-tab-page"
@@ -155,6 +156,7 @@ function split(e: DragEvent) {
           </button>
         </div>
         <div ref="secondary" class="webview-slot">
+          <img v-if="b.commandBackdrop?.images[1]" class="command-background" :src="b.commandBackdrop.images[1]" alt="" draggable="false" />
           <div
             v-if="other.url === 'era://newtab' || !b.native"
             class="preview-page"
@@ -170,5 +172,6 @@ function split(e: DragEvent) {
       <Icon name="split" :size="24" /><span>拖到这里，打开左右分屏</span>
     </div>
     <Peek />
+    <slot />
   </main>
 </template>

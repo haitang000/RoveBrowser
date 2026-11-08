@@ -16,6 +16,7 @@ describe("address boundary", () => {
 describe("preview state invariants", () => {
   it("restores a closed tab and changes its workspace", () => {
     let s = initialState();
+    s = reduce(s, { type: "pin", id: "wiki" });
     s = reduce(s, { type: "close", id: "wiki" });
     expect(s.tabs.some((t) => t.id === "wiki")).toBe(false);
     s = reduce(s, { type: "restore" });

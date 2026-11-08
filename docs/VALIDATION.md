@@ -1,22 +1,39 @@
 # 实际验证记录
 
+## 命令栏在当前网页上展开
+
+命令栏现在位于 `.page-area` 内，按网页区域定位、限制宽高，侧栏收起或最小窗口下仍保持在网页范围内。原生宿主通过内存快照显示单页、分屏及 Peek 的背景；全部图片解码并经过绘制帧后才抬高 UI 层。底下的 WebView2 保持可见渲染，关闭时先恢复原生层级，再释放背景图片，并将焦点返回当前网页或 Peek。命令栏展开期间显示打开时的静态快照；图片不写入历史、会话或磁盘。
+
+本次验证：`npm run build`、22 项前端单元测试、40 项完整界面端到端测试、22 项 Rust 测试及 Clippy（`-D warnings`）通过。`npm run test:native:command` 的 4 项原生专项通过，覆盖真实网页像素、DOM/滚动/可见性与焦点、分屏和 Peek、延迟解码、快速关闭重开时拒绝旧回调、坏图片恢复，以及 Ctrl+T 取消后不创建空白标签。
+
+原生专项使用独立临时 profile 和 19646/19647 调试端口，结果及截图位于 `.local/command-native-results/focused/`。已有 Debug 可执行文件运行中，因此使用 `.local/command-build` 源码快照和独立 crate 名构建，未关闭原有窗口。完整原生 smoke 曾在命令栏检查之前的固定页返回起始网址步骤超时；以上通过结论来自独立的命令栏专项，不表示完整原生 smoke 全部通过。CDP 截图也不等同于桌面逐帧录像。
+
 日期：2026-11-07。Windows 本机，MSVC Build Tools 18，Rust 1.99.1，Node 24.18.0，WebView2 Evergreen 156/157 已安装。没有使用 Electron、完整 Chromium 源码或 iframe。
 
 | 检查 | 实际结果 |
 |---|---|
 | 上游检出 | `git clone --depth 1` 成功；提交 `5338e99f58aa9a75a0696d5d96ec74353c3b3c7d` |
 | Vue/TypeScript | `npm run build` 成功，vue-tsc 严格类型检查 + Vite 生产构建 |
-| 前端单元测试 | `npm test`：12/12，覆盖 URL、预览状态、分屏引用、圆角、Peek布局、链接缩放几何及常用网站校验/编辑/排序 |
-| 界面端到端 | `npm run test:e2e -- --workers=1`：22/22；含布局/快捷键/空间/主题/分屏、480px最小宽度、Peek 动画、标签中键/排序/减少动态效果及顶部常用网站自定义 |
-| Rust 单元/存储测试 | `cargo test --manifest-path native/Cargo.toml`：17/17，含真实 HWND/DPI 命中区域、GDI裁切、缩略图压缩与缓存边界、状态/SQLite及常用网站保存/清空后重新加载 |
+| 前端单元测试 | `npm test`：22/22，覆盖 URL、标签/固定项生命周期、工作区滑动、Peek几何等 |
+| 界面端到端 | 完整回归37项通过；新增固定分屏用例后固定标签专项5/5通过，后续复测与偶发失败记录见下文 |
+| Rust 单元/存储测试 | `cargo test --manifest-path native/Cargo.toml`：22/22，含真实 HWND/GDI、固定项卸载/迁移/控制器身份、分屏关系及SQLite |
 | Rust 静态检查 | `cargo clippy --manifest-path native/Cargo.toml -- -D warnings` 通过 |
 | Debug 构建 | `cargo build --manifest-path native/Cargo.toml` 成功 |
-| Release 构建 | `cargo build --release --manifest-path native/Cargo.toml` 成功；exe 约4.14 MiB（含本地 Inter 字体和图片编解码，不含系统 WebView2 Runtime） |
-| 原生集成 | `npm run test:native`：29项通过；本地固定页面 + 实际 Windows 宿主/WebView2，含真实缩略图像素、整体圆角、中键关闭、侧栏过渡、Peek 动画、常用网站自定义和会话恢复 |
+| Release 构建 | `cargo build --release --manifest-path native/Cargo.toml` 成功；exe 约4.33 MiB（含本地 Inter 字体和图片编解码，不含系统 WebView2 Runtime） |
+| 原生集成 | `npm run test:native`：31项通过；本地固定页面 + 实际 Windows 宿主/WebView2，含固定项跨工作区复用、跨站/登录导航、控制器身份及会话恢复 |
 | Windows 实机 | 使用 computer-use/sky 打开 Debug 和 Release；加载外部 example.com 与 github.com，观察实际网页文档和标题同步，网页与240宽侧栏边界分离；从网页焦点触发 Ctrl+L 打开受信 UI；Release 最大化后布局正确 |
 | 来源/许可 | 保存上游 LICENSE/NOTICE/商标说明；提取162项锁定依赖记录（含 Rust 构建依赖）及256份可用许可/notice文本，包含 Inter 的 OFL 和 image 编解码依赖 |
 
 原生集成8项：Inter 字体实际加载；真实页面加载/标题；网页 `window.ipc` 不存在且伪造 WebMessage 不执行内部命令；前进/后退；UI Ctrl+L/浮层恢复；双独立 WebView 分屏；正常退出并重启后恢复标签、固定和分屏关系；SQLite 历史检索。使用临时 profile，不触碰用户已有浏览数据。执行后 `test-results/native-smoke.json` 保存结果和临时目录。
+
+## Zigzag 固定标签核心逻辑迁移验证
+
+本次实际阅读 Swift `Library`、`TabManager`、`SidebarMenus` 和 `Tab` 的固定页规则，将保存项与运行中页面分离；源码映射及未覆盖项详见 [固定标签移植记录](PINNED_TABS_PORT.md)。
+
+- `npm test`：22项通过；Rust状态/存储及平台测试22项通过；`cargo clippy ... -- -D warnings`通过。
+- 完整界面回归37项通过；随后新增固定分屏专项检查，固定标签专项5项均通过，覆盖卸载后重开、名称/网址独立编辑、跨类型拖动、Favorites移除后保留页面及固定分屏补回已关闭的一侧。后续15项复测中14项通过，既有标签离场动画的宽度断言曾读到0，单独复测通过；未改动动画实现。
+- `.local/bookmark-native-results/native-smoke.json`记录31项原生集成检查通过：真实WebView2中转换普通标签/固定项/Favorites以及跨工作区切换，DOM标记不丢失；跨站链接保留来源固定页，登录链接留在原控制器，返回保存网址正常；SQLite重启恢复检查通过。全部使用临时profile，没有修改日常用户目录。
+- 原生Peek快照检查曾两次超时，诊断复测最终完整通过；捕获仍沿用750ms等待和失败回退策略，本次未修改该策略。自动验证不能保证所有机器上每次捕获均及时成功。
 
 ## 顶部常用网站自定义
 
@@ -52,7 +69,7 @@
 
 ## 覆盖限制
 
-尚未完成标签悬停预览、触控板惯性空间切换、浮动侧栏边缘呼出。分屏比例不跨重启保存。Peek 已提供临时页面及背景快照，其他浮层仍隐藏网页而不保留页面快照背景。
+尚未完成标签悬停预览、触控板惯性空间切换、浮动侧栏边缘呼出。分屏比例不跨重启保存。Peek 与命令栏已提供背景快照，设置、全部标签页等其他浮层仍隐藏网页而不保留页面快照背景。
 
 ## 真实缩略图与原生 Snap 菜单
 
@@ -70,7 +87,7 @@ Desk 卡片使用 WebView2 CapturePreview 获取实际页面，再在工作线�
 
 使用两个高对比纯色的本地真实网页检查了单页四角、双实例分屏底部外角、顶部标题条直角接缝，以及最大化后的边界。字体从自定义协议提供 `font/woff2` 资源，原生集成测试确认 FontFace 状态为 loaded；无需外部字体服务。
 
-尚未覆盖多屏混合 DPI、全部 Windows 10/11 版本、系统 Snap 的完整行为、音视频会议、复杂登录/弹窗及大规模长时间使用。窗口当前使用 winit 真实 drag/drag_resize/maximize；上述未覆盖项不作为通过声明。所有剩余平台差异和功能范围也在 README 中列出。
+尚未覆盖多屏混合 DPI、全部 Windows 10/11 版本、系统 Snap 的完整行为、音视频会议、复杂登录/弹窗及大规模长时间使用。窗口拖动与缩放后续改为 WebView2 原生拖动区域和 Win32 命中测试，见下方修复记录；上述未覆盖项不作为通过声明。所有剩余平台差异和功能范围也在 README 中列出。
 
 ## Peek 后续实现与验证
 
@@ -105,3 +122,37 @@ Desk 卡片使用 WebView2 CapturePreview 获取实际页面，再在工作线�
 `tests/e2e/window-layout.spec.ts` 验证首屏深色和折叠布局，并在侧栏收起、展开及中途反向时，对比分屏两侧每个 ResizeObserver 绘制帧的上报宽度与 DOM 宽度（误差小于 0.1 CSS px）。原生集成暂停过渡并检查四个中间位置，真实单页/分屏 viewport 与槽位宽度误差不超过 1 CSS px，期间没有页面 visibilitychange。重启检查保存的深色/折叠状态，并通过进程的可见主窗口句柄确认窗口实际显示。测试使用临时 profile。
 
 本次最终验证：前端构建、9 项前端单元测试、`npx playwright test --workers=1` 的 11 项 UI 测试、14 项 Rust 测试、Clippy（`-D warnings`）、Debug/Release 构建及 25 项原生集成检查全部通过。并行运行 UI 测试时曾出现 Peek 动画时序用例失败，串行全套通过；未将 CDP 检查等同于屏幕录像或多屏 DPI 验证。
+
+## 侧栏 Space 轻扫与背景过渡
+
+移植基线仍为 `5338e99f58aa9a75a0696d5d96ec74353c3b3c7d`。`tests/space-swipe.test.ts` 覆盖原 Swift 的方向/落点、速度采样、首尾阻尼及逆变换，以及携带速度且无过冲的临界阻尼收尾；当前22项单元测试通过。TypeScript/Vite 与 Windows Debug/Release 构建通过。
+
+新增 `tests/e2e/spaces.spec.ts` 的11项 Edge 用例全部通过：真实横向滚轮输入、相邻真实列表与数字键跟手进度、惯性尾流不连续跳空间、小幅回退/轻扫落点/反向取消、纵向锁定与 Ctrl 滚轮、首尾阻尼、离散横向滚轮、动画中断时的位置连续、点击/键盘方向与背景颜色连续、各空间滚动位置、溢出的数字栏、减少动态效果下的原地切换与取消、浮层取消，以及同色状态广播不会重启背景动画。
+
+UI 共覆盖37项，最终全量执行中36项首轮通过。书签拖放用例曾在连续拖动时超时；原检查通过角色查询认为旧行已消失，此时该行仅被标记 inert，离场动画仍保留实际 DOM。补上等待源行实际移除后，该用例连续5次复验通过。测试使用独立5179端口与输出目录，避免和其他开发会话的 Vite/测试清理相互影响。
+
+新增 `scripts/native-spaces-smoke.mjs`，可在 `npm run build` 与 `cargo build --manifest-path native/Cargo.toml` 后运行 `npm run test:native:spaces`。它使用独立临时用户目录、两个本地固定网页和19546/19547调试端口，4项原生检查通过：真实 UI WebView2 横向滚轮经 Space IPC 切换 Rust 状态与颜色；双向切换保留两个页面的 DOM 标记与滚动位置、服务器没有重复访问；SQLite 保存滑动落点并在重启首屏恢复；原生 UI 的减少动态效果模式不产生列表位移。测试关闭自身启动的进程。
+
+上述验证覆盖浏览器/原生 WebView2 实际动画与事件路径，没有使用物理触控板测量驱动的松手/惯性手感。DOM 无 macOS 手势阶段信号，120ms松手与250ms轮次间隔是平台适配值，仍需不同触控板硬件覆盖。具体源码映射和参数见 `SOURCE_ANALYSIS.md`。
+
+## 窗口拖动与自由缩放修复
+
+旧实现通过 DOM pointerdown → IPC → winit 启动移动/缩放；实际窗口复现标题栏拖动无效。当前改用 WebView2 原生 `app-region: drag` 标题栏，按钮区域为 `no-drag`，支持系统移动、双击最大化/还原及右键系统菜单。移除 DOM 缩放覆盖层和对应拖动 IPC。
+
+`caption.rs` 将 UI HWND 的四边与最大化按钮区域让给同线程原生绘制子窗口，子窗口返回 `HTTRANSPARENT`，根窗口直接接收非客户区输入。四边宽6逻辑像素，角落命中范围12逻辑像素；按 DPI 换算物理坐标，最大化时取消缩放边框，还原后恢复。GDI 临时区域采用 RAII 管理，成功安装后将所有权交给 Windows。
+
+真实 HWND 回归检查覆盖 DOM 上报前的边框、八个缩放方向、负屏幕坐标、1×/1.5×/2× DPI、内部网页及相邻窗口按钮不被覆盖，以及相同尺寸下最大化/还原区域更新。computer-use 使用独立测试 profile 实测标题栏连续移动、上/左边缘缩放、右下角双向缩放、480×400最小尺寸、双击最大化、原生按钮还原、还原后继续缩放和系统 Snap 悬停菜单。
+
+前端构建、22项前端单元测试、22项 Rust 测试、Clippy（`-D warnings`）、Debug/Release 构建、5项窗口布局及基础交互 UI 测试、35项原生集成检查通过。原生结果保留在 `.local/window-fix/native-results/native-smoke.json`；测试进程已退出，用户原有运行窗口未关闭。多屏混合 DPI 和其他 Windows 版本仍需实机覆盖。
+
+接口依据：[WebView2 原生拖动区域](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/win32/icorewebview2settings9)、[Win32 WM_NCHITTEST](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-nchittest)。
+
+## 整个窗口的圆角投影
+
+`native/src/shadow.rs` 为保留12px原生圆角的主窗口增加独立透明投影层。主窗口的 `SetWindowRgn` 裁切会阻止普通 DWM 阴影显示，因此投影由后方的 layered tool window 绘制：黑色预乘 BGRA，12px柔和衰减、6px向下偏移与较窄的接触阴影，保留48px透明外缘。随窗口尺寸和 DPI 重绘；单纯移动复用已上传的位图，仅同步位置。
+
+`caption.rs` 在原生位置、显示、尺寸和激活消息中同步阴影。投影层使用 `WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`，始终位于主窗口后方；不拦截鼠标、不抢焦点、不出现在任务栏。主窗口隐藏、最小化或最大化时隐藏投影，还原后恢复；退出时由 RAII 销毁窗口和临时 GDI 资源。
+
+新增像素回归检查覆盖四边衰减、圆角、内部透明、外缘归零和1×/1.5×/2× DPI。23项 Rust 测试、Clippy（`-D warnings`）、Debug/Release 构建通过。computer-use 在独立 profile 和本地对比背景下观察了真实窗口外侧的四边投影，并实测缩放、移动、最大化/还原、最小化/恢复。35项原生集成检查最终通过，结果位于 `.local/shadow-review/native-retry/native-smoke.json`；首轮既有 Peek 离场动画的 `.peek-surface` 检查超时，重跑通过，原失败证据保留在 `.local/shadow-review/native-results`。
+
+接口依据：[UpdateLayeredWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatelayeredwindow)、[Layered Windows](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows)。尚未覆盖多屏混合 DPI 和其他 Windows 版本。

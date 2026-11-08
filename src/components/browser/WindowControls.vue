@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
-import WindowResizeEdges from "./WindowResizeEdges.vue";
 import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 const b = useBrowser();
 const maximize = ref<HTMLButtonElement>();
@@ -50,20 +49,8 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <header
-    class="titlebar"
-    @pointerdown="
-      (e) => {
-        if (e.button === 0 && e.target === e.currentTarget)
-          b.send({ type: 'window', action: 'drag' });
-      }
-    "
-    @dblclick.self="b.send({ type: 'window', action: 'maximize' })"
-  >
-    <span
-      class="app-name"
-      @pointerdown="b.send({ type: 'window', action: 'drag' })"
-      >Rove</span
+  <header class="titlebar">
+    <span class="app-name">Rove</span
     ><span v-if="!b.native" class="preview-label"
       >界面预览 · 网页由 Windows 应用加载</span
     >
@@ -91,5 +78,4 @@ onBeforeUnmount(() => {
       </button>
     </div>
   </header>
-  <WindowResizeEdges />
 </template>

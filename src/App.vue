@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, watch } from "vue";
+import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useBrowser } from "./stores/browser";
 import Sidebar from "./components/browser/Sidebar.vue";
 import WindowControls from "./components/browser/WindowControls.vue";
@@ -9,20 +9,32 @@ import Desk from "./components/browser/Desk.vue";
 import SettingsPanel from "./components/browser/SettingsPanel.vue";
 import FavoritesPanel from "./components/browser/FavoritesPanel.vue";
 import Icon from "./components/common/Icon.vue";
+import { SPACE_SWIPE } from "./lib/space-swipe";
 const b = useBrowser();
+const shell = ref<HTMLElement>();
+let frameAnimation: Animation | undefined;
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+function finishFrameAnimation() { frameAnimation?.cancel(); frameAnimation = undefined; }
+// ColorView.setColor/CALayer.set: retarget from the color currently on screen.
+// Submit only a background-color effect; the titlebar, list and native page stay live.
 watch(
-  () => b.state.theme,
-  (t) => (document.documentElement.dataset.theme = t),
+  [() => b.state.theme, () => b.space.color] as const,
+  ([theme, color]) => {
+    const from = shell.value ? getComputedStyle(shell.value).backgroundColor : undefined;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.color = color;
+    finishFrameAnimation();
+    if (!shell.value || !from || reducedMotion.matches) return;
+    const to = getComputedStyle(document.documentElement).getPropertyValue("--frame").trim();
+    frameAnimation = shell.value.animate([{ backgroundColor: from }, { backgroundColor: to }], {
+      duration: SPACE_SWIPE.backgroundDuration, easing: "ease",
+    });
+  },
   { immediate: true },
 );
 watch(
-  () => b.space.color,
-  (c) => (document.documentElement.dataset.color = c),
-  { immediate: true },
-);
-watch(
-  () => b.overlay,
-  (v) => b.send({ type: "overlay", visible: v }),
+  [() => b.overlay, () => b.commandOpen],
+  ([visible, command]) => b.send({ type: "overlay", visible, command }),
 );
 function key(e: KeyboardEvent) {
   const k = e.key.toLowerCase();
@@ -71,6 +83,7 @@ function key(e: KeyboardEvent) {
 }
 onMounted(async () => {
   window.addEventListener("keydown", key);
+  reducedMotion.addEventListener("change", finishFrameAnimation);
   if (b.native) {
     // Wait for the mounted shell, fonts and a paint opportunity before revealing
     // the native window. Its session and theme are already present on first render.
@@ -80,10 +93,14 @@ onMounted(async () => {
     });
   }
 });
-onBeforeUnmount(() => window.removeEventListener("keydown", key));
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", key);
+  reducedMotion.removeEventListener("change", finishFrameAnimation);
+  finishFrameAnimation();
+});
 </script>
 <template>
-  <div class="browser-shell" :class="{ collapsed: b.state.sidebarCollapsed }">
+  <div ref="shell" class="browser-shell" :class="{ collapsed: b.state.sidebarCollapsed }">
     <WindowControls />
     <div class="browser-body">
       <div
@@ -101,9 +118,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", key));
         @click="b.send({ type: 'sidebar' })"
       >
         <Icon name="sidebar" /></button
-      ><PageArea />
+      ><PageArea><CommandBar /></PageArea>
     </div>
-    <Desk /><CommandBar /><SettingsPanel /><FavoritesPanel />
+    <Desk /><SettingsPanel /><FavoritesPanel />
     <div v-if="b.error && !b.commandOpen" class="error-toast" role="alert">
       {{ b.error
       }}<button aria-label="关闭提示" @click="b.error = ''">×</button>

@@ -2,8 +2,9 @@
 import type { BrowserState, Command, Tab } from "./types";
 import { address, host } from "./address";
 import { favorite, MAX_FAVORITES, sameFavoriteUrl } from "./favorites";
+import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, upgradeLibrary } from "./bookmarks";
 export function initialState(): BrowserState {
-  return {
+  return upgradeLibrary({
     spaces: [
       { id: "personal", name: "Personal", color: "sky" },
       { id: "work", name: "Work", color: "sage" },
@@ -15,14 +16,14 @@ export function initialState(): BrowserState {
     sidebarCollapsed: false,
     closed: [],
     favorites: [
-      { title: "GitHub", url: "https://github.com" },
-      { title: "Figma", url: "https://figma.com" },
-      { title: "Notion", url: "https://notion.so" },
-      { title: "Claude", url: "https://claude.ai" },
-      { title: "Gmail", url: "https://mail.google.com" },
-      { title: "YouTube", url: "https://youtube.com" },
-      { title: "Spotify", url: "https://open.spotify.com" },
-      { title: "Linear", url: "https://linear.app" },
+      { id: "favorite-github", title: "GitHub", url: "https://github.com" },
+      { id: "favorite-figma", title: "Figma", url: "https://figma.com" },
+      { id: "favorite-notion", title: "Notion", url: "https://notion.so" },
+      { id: "favorite-claude", title: "Claude", url: "https://claude.ai" },
+      { id: "favorite-gmail", title: "Gmail", url: "https://mail.google.com" },
+      { id: "favorite-youtube", title: "YouTube", url: "https://youtube.com" },
+      { id: "favorite-spotify", title: "Spotify", url: "https://open.spotify.com" },
+      { id: "favorite-linear", title: "Linear", url: "https://linear.app" },
     ],
     tabs: [
       {
@@ -47,16 +48,15 @@ export function initialState(): BrowserState {
         pinned: false,
       },
     ],
-  };
+  });
 }
 export function reduce(s: BrowserState, c: Command): BrowserState {
+  upgradeLibrary(s);
   const tab = () => s.tabs.find((t) => t.id === String(c.id || s.activeTab));
   const activate = (t?: Tab) => {
-    if (t) {
-      s.activeTab = t.id;
-      s.activeSpace = t.spaceId;
-    }
+    activateTab(s, t);
   };
+  if (bookmarkCommand(s, c, (id) => { Object.assign(s, reduce(s, { type: "close", id })); })) return { ...s };
   switch (c.type) {
     case "favoriteSave": {
       const next = favorite(String(c.title || ""), String(c.url || ""));
@@ -65,15 +65,15 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       if (c.previousUrl !== undefined && index < 0) throw Error("该常用网站已被移除");
       if (s.favorites.some((f, i) => i !== index && sameFavoriteUrl(f.url, next.url)))
         throw Error("该网址已在顶部常用网站中");
-      if (index >= 0) s.favorites[index] = next;
+      if (index >= 0) s.favorites[index] = { ...s.favorites[index], ...next };
       else {
         if (s.favorites.length >= MAX_FAVORITES) throw Error("最多添加 32 个常用网站");
-        s.favorites.push(next);
+        s.favorites.push({ id: crypto.randomUUID(), ...next });
       }
       break;
     }
     case "favoriteRemove":
-      s.favorites = s.favorites.filter((f) => f.url !== c.url);
+      { const f = s.favorites.find((f) => f.url === c.url); if (f) removeBookmark(s, f.id); }
       break;
     case "favoriteMove": {
       const index = s.favorites.findIndex((f) => f.url === c.url);
@@ -97,7 +97,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
     case "activate":
-      activate(tab());
+      if (savedPage(s, String(c.id))) openBookmark(s, String(c.id)); else activate(tab());
       break;
     case "navigate": {
       const t = tab();
@@ -110,14 +110,14 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     case "close": {
       const t = tab();
       if (t) {
-        s.closed.push({ ...t });
-        s.closed = s.closed.slice(-30);
+        const partner = t.splitWith || s.tabs.find((x) => x.splitWith === t.id)?.id;
+        if (!t.bookmarkId) { s.closed.push({ ...t }); s.closed = s.closed.slice(-30); }
         s.tabs = s.tabs.filter((x) => x.id !== t.id);
         s.tabs.forEach((x) => {
           if (x.splitWith === t.id) delete x.splitWith;
         });
         if (t.id === s.activeTab)
-          activate(s.tabs.filter((x) => x.spaceId === s.activeSpace).at(-1));
+          activate(s.tabs.find((x) => x.id === partner) || s.tabs.filter((x) => x.spaceId === s.activeSpace).at(-1));
         if (!s.tabs.some((x) => x.id === s.activeTab)) {
           s.activeTab = "";
           return reduce(s, { type: "new" });
@@ -129,14 +129,11 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       const t = s.closed.pop();
       if (t) {
         t.splitWith = undefined;
+        t.bookmarkId = undefined;
+        t.pinned = false;
         s.tabs.push(t);
         activate(t);
       }
-      break;
-    }
-    case "pin": {
-      const t = tab();
-      if (t) t.pinned = !t.pinned;
       break;
     }
     case "move": {
@@ -148,19 +145,6 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         });
         delete t.splitWith;
         if (t.id === s.activeTab) s.activeSpace = t.spaceId;
-      }
-      break;
-    }
-    case "reorder": {
-      const a = s.tabs.findIndex((t) => t.id === c.id),
-        b = s.tabs.findIndex((t) => t.id === c.before);
-      if (a >= 0 && b >= 0 && s.tabs[a].spaceId === s.tabs[b].spaceId) {
-        const [t] = s.tabs.splice(a, 1);
-        s.tabs.splice(
-          s.tabs.findIndex((x) => x.id === c.before),
-          0,
-          t,
-        );
       }
       break;
     }

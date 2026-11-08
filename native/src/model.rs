@@ -9,6 +9,8 @@ pub struct Tab {
     pub title: String,
     pub url: String,
     pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bookmark_id: Option<String>,
     #[serde(default)]
     pub loading: bool,
     #[serde(default)]
@@ -23,9 +25,19 @@ pub struct Space {
     pub color: String,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Favorite {
+    #[serde(default = "new_id")]
+    pub id: String,
     pub title: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_with: Option<String>,
+}
+pub fn new_id() -> String {
+    Uuid::new_v4().to_string()
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +47,10 @@ pub struct State {
     pub active_space: String,
     pub active_tab: String,
     pub favorites: Vec<Favorite>,
+    #[serde(default)]
+    pub pins: Vec<Favorite>,
+    #[serde(default)]
+    pub library_version: u8,
     pub closed: Vec<Tab>,
     pub theme: String,
     pub sidebar_collapsed: bool,
@@ -113,6 +129,34 @@ pub enum Command {
     Restore,
     #[serde(rename = "pin")]
     Pin { id: Option<String> },
+    #[serde(rename = "bookmarkOpen")]
+    OpenBookmark { id: String },
+    #[serde(rename = "bookmarkUnload")]
+    UnloadBookmark { id: String },
+    #[serde(rename = "bookmarkReset")]
+    ResetBookmark { id: String },
+    #[serde(rename = "bookmarkSeparate")]
+    SeparateBookmark { id: String },
+    #[serde(rename = "bookmarkUpdate")]
+    UpdateBookmark {
+        id: String,
+        title: String,
+        url: String,
+    },
+    #[serde(rename = "bookmarkUnpin")]
+    UnpinBookmark {
+        id: String,
+        #[serde(rename = "spaceId")]
+        space_id: Option<String>,
+    },
+    #[serde(rename = "bookmarkPin")]
+    PinBookmark {
+        id: String,
+        #[serde(rename = "spaceId")]
+        space_id: Option<String>,
+    },
+    #[serde(rename = "favoriteTab")]
+    FavoriteTab { id: String, before: Option<String> },
     #[serde(rename = "favoriteSave")]
     SaveFavorite {
         title: String,
@@ -162,7 +206,15 @@ pub enum Command {
         secondary: Option<Rect>,
     },
     #[serde(rename = "overlay")]
-    Overlay { visible: bool },
+    Overlay {
+        visible: bool,
+        #[serde(default)]
+        command: bool,
+    },
+    #[serde(rename = "commandBackdropReady")]
+    FloatingBackdropReady { ticket: u64 },
+    #[serde(rename = "commandBackdropFailed")]
+    FloatingBackdropFailed { ticket: u64 },
     #[serde(rename = "window")]
     Window { action: String },
     #[serde(rename = "history")]
@@ -216,7 +268,7 @@ pub fn is_web(url: &str) -> bool {
     url::Url::parse(url)
         .is_ok_and(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some())
 }
-fn favorite_url(input: &str) -> Result<String, String> {
+pub(crate) fn favorite_url(input: &str) -> Result<String, String> {
     let text = input.trim();
     if text.is_empty() || text.chars().count() > 2048 {
         return Err("请输入有效网址（最多 2048 个字符）".into());
@@ -257,6 +309,9 @@ impl Default for State {
         ]
         .iter()
         .map(|(t, u)| Favorite {
+            id: new_id(),
+            space_id: None,
+            split_with: None,
             title: t.to_string(),
             url: u.to_string(),
         })
@@ -278,6 +333,8 @@ impl Default for State {
             active_space: "personal".into(),
             active_tab: String::new(),
             favorites,
+            pins: vec![],
+            library_version: 0,
             closed: vec![],
             theme: "light".into(),
             sidebar_collapsed: false,
@@ -292,6 +349,7 @@ impl Default for State {
             t.pinned = true;
         }
         s.new_tab("").unwrap();
+        s.repair_bookmarks();
         s
     }
 }
@@ -300,6 +358,17 @@ impl State {
         self.tabs.iter().find(|t| t.id == self.active_tab)
     }
     pub fn activate(&mut self, id: &str) {
+        let favorite = self
+            .tabs
+            .iter()
+            .find(|t| t.id == id)
+            .and_then(|t| t.bookmark_id.as_ref())
+            .is_some_and(|id| self.favorites.iter().any(|f| &f.id == id));
+        if favorite {
+            if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                t.space_id = self.active_space.clone();
+            }
+        }
         if let Some(t) = self.tabs.iter().find(|t| t.id == id) {
             self.active_tab = t.id.clone();
             self.active_space = t.space_id.clone()
@@ -322,6 +391,7 @@ impl State {
             title,
             url,
             pinned: false,
+            bookmark_id: None,
             loading: false,
             favicon: None,
             split_with: None,
@@ -333,9 +403,17 @@ impl State {
         if let Some(i) = self.tabs.iter().position(|t| t.id == id) {
             let mut t = self.tabs.remove(i);
             t.loading = false;
-            self.closed.push(t);
-            if self.closed.len() > 30 {
-                self.closed.remove(0);
+            let partner = t.split_with.clone().or_else(|| {
+                self.tabs
+                    .iter()
+                    .find(|x| x.split_with.as_deref() == Some(id))
+                    .map(|x| x.id.clone())
+            });
+            if t.bookmark_id.is_none() {
+                self.closed.push(t);
+                if self.closed.len() > 30 {
+                    self.closed.remove(0);
+                }
             }
             for t in &mut self.tabs {
                 if t.split_with.as_deref() == Some(id) {
@@ -343,11 +421,14 @@ impl State {
                 }
             }
             if self.active_tab == id {
-                self.active_tab = self
-                    .tabs
-                    .iter()
-                    .rfind(|t| t.space_id == self.active_space)
-                    .map(|t| t.id.clone())
+                self.active_tab = partner
+                    .filter(|id| self.tabs.iter().any(|t| &t.id == id))
+                    .or_else(|| {
+                        self.tabs
+                            .iter()
+                            .rfind(|t| t.space_id == self.active_space)
+                            .map(|t| t.id.clone())
+                    })
                     .unwrap_or_default();
                 if self.active_tab.is_empty() {
                     let _ = self.new_tab("");
@@ -363,6 +444,7 @@ impl State {
         if !self.spaces.iter().any(|s| s.id == self.active_space) {
             self.active_space = self.spaces[0].id.clone()
         }
+        self.repair_bookmarks();
         let ids: Vec<_> = self.tabs.iter().map(|t| t.id.clone()).collect();
         for t in &mut self.tabs {
             t.loading = false;
@@ -386,6 +468,9 @@ impl State {
         }
     }
     pub fn apply(&mut self, c: &Command) -> Result<(), String> {
+        if self.apply_bookmark_command(c)? {
+            return Ok(());
+        }
         match c {
             Command::New { url } => self.new_tab(url)?,
             Command::Navigate { url } => {
@@ -395,23 +480,25 @@ impl State {
                     t.favicon = None
                 }
             }
-            Command::Activate { id } => self.activate(id),
+            Command::Activate { id } => {
+                if self.bookmark(id).is_some() {
+                    self.open_bookmark(id)?;
+                } else {
+                    self.activate(id);
+                }
+            }
             Command::Close { id } => self.close(&id.clone().unwrap_or(self.active_tab.clone())),
             Command::Restore => {
                 if let Some(mut t) = self.closed.pop() {
                     t.split_with = None;
+                    t.pinned = false;
+                    t.bookmark_id = None;
                     let id = t.id.clone();
                     if !self.spaces.iter().any(|s| s.id == t.space_id) {
                         t.space_id = self.active_space.clone()
                     }
                     self.tabs.push(t);
                     self.activate(&id)
-                }
-            }
-            Command::Pin { id } => {
-                let id = id.as_ref().unwrap_or(&self.active_tab);
-                if let Some(t) = self.tabs.iter_mut().find(|t| &t.id == id) {
-                    t.pinned = !t.pinned
                 }
             }
             Command::SaveFavorite {
@@ -450,7 +537,15 @@ impl State {
                 {
                     return Err("该网址已在顶部常用网站中".into());
                 }
-                let favorite = Favorite { title, url };
+                let favorite = Favorite {
+                    id: index
+                        .map(|i| self.favorites[i].id.clone())
+                        .unwrap_or_else(new_id),
+                    title,
+                    url,
+                    space_id: None,
+                    split_with: index.and_then(|i| self.favorites[i].split_with.clone()),
+                };
                 if let Some(i) = index {
                     self.favorites[i] = favorite;
                 } else {
@@ -460,15 +555,9 @@ impl State {
                     self.favorites.push(favorite);
                 }
             }
-            Command::RemoveFavorite { url } => self.favorites.retain(|f| &f.url != url),
-            Command::MoveFavorite { url, offset } => {
-                if matches!(offset, -1 | 1) {
-                    if let Some(i) = self.favorites.iter().position(|f| &f.url == url) {
-                        let target = i as isize + *offset as isize;
-                        if target >= 0 && (target as usize) < self.favorites.len() {
-                            self.favorites.swap(i, target as usize);
-                        }
-                    }
+            Command::RemoveFavorite { url } => {
+                if let Some(f) = self.favorites.iter().find(|f| &f.url == url).cloned() {
+                    self.remove_bookmark(&f.id);
                 }
             }
             Command::Move { id, space_id } => {
@@ -484,20 +573,6 @@ impl State {
                     }
                     if &self.active_tab == id {
                         self.active_space = space_id.clone()
-                    }
-                }
-            }
-            Command::Reorder { id, before } => {
-                if id != before {
-                    if let (Some(a), Some(b)) = (
-                        self.tabs.iter().position(|t| &t.id == id),
-                        self.tabs.iter().position(|t| &t.id == before),
-                    ) {
-                        if self.tabs[a].space_id == self.tabs[b].space_id {
-                            let t = self.tabs.remove(a);
-                            let i = self.tabs.iter().position(|t| &t.id == before).unwrap();
-                            self.tabs.insert(i, t)
-                        }
                     }
                 }
             }
@@ -640,8 +715,10 @@ mod tests {
     #[test]
     fn split_close_restore() {
         let mut s = State::default();
-        let a = s.tabs[0].id.clone();
-        let b = s.tabs[1].id.clone();
+        s.new_tab("https://example.com/first").unwrap();
+        let a = s.active_tab.clone();
+        s.new_tab("https://example.com/second").unwrap();
+        let b = s.active_tab.clone();
         s.apply(&Command::Split {
             id: a.clone(),
             other: b.clone(),

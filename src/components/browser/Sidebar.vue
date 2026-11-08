@@ -3,18 +3,23 @@ import { nextTick, ref } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { host } from "../../lib/address";
 import type { Tab } from "../../lib/types";
-import { MAX_FAVORITES, sameFavoriteUrl } from "../../lib/favorites";
+import { MAX_FAVORITES } from "../../lib/favorites";
+import { savedPage, samePinnedUrl } from "../../lib/bookmarks";
 import Icon from "../common/Icon.vue";
 import Favorites from "./Favorites.vue";
-import PinnedTabs from "./PinnedTabs.vue";
-import TabList from "./TabList.vue";
+import SpaceDeck from "./SpaceDeck.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 const b = useBrowser(),
   menu = ref<{ x: number; y: number; tab: Tab }>();
+const edit = ref(false), editTitle = ref(""), editUrl = ref("");
+const spaceDeck = ref<InstanceType<typeof SpaceDeck>>();
+const swipeShares = ref<Record<string, number> | null>(null);
+function bookmark() { return menu.value?.tab.bookmarkId ? savedPage(b.state, menu.value.tab.bookmarkId) : undefined; }
+function beginEdit() { const f = bookmark(); if (f) { editTitle.value = f.title; editUrl.value = f.url; edit.value = true; nextTick(() => document.querySelector<HTMLInputElement>(".bookmark-menu-form input")?.focus()); } }
 function showMenu(e: MouseEvent, tab: Tab) {
   menu.value = {
     x: Math.min(e.clientX, innerWidth - 220),
-    y: Math.max(32, Math.min(e.clientY, innerHeight - 300)),
+    y: Math.max(32, Math.min(e.clientY, innerHeight - 420)),
     tab,
   };
   b.send({ type: "overlay", visible: true });
@@ -22,6 +27,7 @@ function showMenu(e: MouseEvent, tab: Tab) {
 }
 function closeMenu() {
   menu.value = undefined;
+  edit.value = false;
   b.send({ type: "overlay", visible: b.overlay });
 }
 function act(type: string, extra = {}) {
@@ -30,7 +36,7 @@ function act(type: string, extra = {}) {
 }
 </script>
 <template>
-  <aside class="sidebar" aria-label="浏览器侧栏">
+  <aside class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)">
     <div class="sidebar-toolbar">
       <button
         class="icon-button"
@@ -70,23 +76,9 @@ function act(type: string, extra = {}) {
     >
       <span>{{ host(b.active?.url || "") || "Search or enter address" }}</span
       ><Icon name="settings" :size="13" /></button
-    ><Favorites /><Transition name="space" mode="out-in"
-      ><section :key="b.state.activeSpace" class="space-list">
-        <h1 class="space-name">{{ b.space.name }}</h1>
-        <PinnedTabs @menu="showMenu" />
-        <div class="section-label">
-          <span>Tabs</span
-          ><span>{{ b.tabs.filter((t) => !t.pinned).length }}</span>
-        </div>
-        <button class="new-tab" @click="b.openCommand()">
-          <Icon name="plus" :size="16" /><span>New Tab</span><kbd>Ctrl T</kbd>
-        </button>
-        <TabList
-          :tabs="b.tabs.filter((t) => !t.pinned)"
-          aria-label="标签页"
-          @menu="showMenu"
-        /></section></Transition
-    ><WorkspaceSwitcher /><Teleport to="body"
+    ><Favorites />
+    <SpaceDeck ref="spaceDeck" :blocked="b.overlay || Boolean(b.peek) || Boolean(menu)" @menu="showMenu" @progress="swipeShares = $event" />
+    <WorkspaceSwitcher :swipe-shares="swipeShares" /><Teleport to="body"
       ><div
         v-if="menu"
         class="menu-scrim"
@@ -98,14 +90,20 @@ function act(type: string, extra = {}) {
           role="menu"
           :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
         >
+          <form v-if="edit" class="bookmark-menu-form" @submit.prevent="b.send({ type: 'bookmarkUpdate', id: bookmark()?.id, title: editTitle, url: editUrl }); closeMenu()">
+            <label>名称<input v-model="editTitle" aria-label="固定标签名称" maxlength="80" required /></label>
+            <label>起始网址<input v-model="editUrl" aria-label="固定标签网址" maxlength="2048" required /></label>
+            <button class="primary-button" type="submit">保存修改</button>
+          </form>
+          <template v-else>
           <button role="menuitem" @click="act('pin')">
             <Icon name="pin" />{{
               menu.tab.pinned ? "取消固定" : "固定标签页"
             }}</button
           ><button
             role="menuitem"
-            :disabled="!/^https?:\/\//i.test(menu.tab.url) || b.state.favorites.length >= MAX_FAVORITES || b.state.favorites.some((f) => sameFavoriteUrl(f.url, menu!.tab.url))"
-            @click="act('favoriteSave', { title: Array.from(menu.tab.title).slice(0, 80).join(''), url: menu.tab.url })"
+            :disabled="!/^https?:\/\//i.test(menu.tab.url) || b.state.favorites.length >= MAX_FAVORITES"
+            @click="act('favoriteTab')"
           >
             <Icon name="plus" />添加到顶部常用网站
           </button><button
@@ -126,6 +124,12 @@ function act(type: string, extra = {}) {
           >
             <Icon name="split" />在当前网页旁分屏
           </button>
+          <template v-if="bookmark()">
+            <button role="menuitem" @click="beginEdit">编辑固定标签</button>
+            <button v-if="!menu.tab.unloaded && !samePinnedUrl(menu.tab.url, bookmark()!.url)" role="menuitem" @click="b.send({ type: 'bookmarkReset', id: bookmark()!.id }); closeMenu()">返回固定网址</button>
+            <button v-if="!menu.tab.unloaded" role="menuitem" @click="b.send({ type: 'bookmarkSeparate', id: bookmark()!.id }); closeMenu()">分离为普通标签</button>
+            <button v-if="!menu.tab.unloaded && !samePinnedUrl(menu.tab.url, bookmark()!.url)" role="menuitem" @click="b.send({ type: 'bookmarkUpdate', id: bookmark()!.id, title: bookmark()!.title, url: menu.tab.url }); closeMenu()">将当前网址设为固定网址</button>
+          </template>
           <button
             role="menuitem"
             :disabled="!menu.tab.url.startsWith('http')"
@@ -148,9 +152,10 @@ function act(type: string, extra = {}) {
             {{ s.name }}
           </button>
           <hr />
-          <button role="menuitem" @click="act('close')">
-            <Icon name="close" />关闭标签页
+          <button role="menuitem" @click="menu.tab.bookmarkId ? (b.send({ type: 'bookmarkUnload', id: menu.tab.bookmarkId }), closeMenu()) : act('close')">
+            <Icon name="close" />{{ menu.tab.pinned ? '卸载网页' : '关闭标签页' }}
           </button>
+          </template>
         </div>
       </div></Teleport
     >

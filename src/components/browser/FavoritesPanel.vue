@@ -60,6 +60,8 @@ watch(() => b.favoritesOpen, async (open) => {
     returnFocus = document.activeElement as HTMLElement | null;
     window.addEventListener("keydown", key);
     reset();
+    const selected = b.state.favorites.find((f) => f.id === b.favoriteEditId);
+    if (selected) edit(selected);
     await nextTick();
     panel.value?.querySelector<HTMLButtonElement>("button")?.focus();
   } else {
@@ -81,7 +83,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", key));
       </header>
       <p class="favorites-description">在侧栏顶部一键打开，所有工作区共用。修改会自动保存。</p>
       <ol class="favorite-editor-list" aria-label="常用网站列表">
-        <li v-for="(f, i) in b.state.favorites" :key="f.url" :class="{ editing: previousUrl === f.url }">
+        <li v-for="(f, i) in b.state.favorites" :key="f.id" :class="{ editing: previousUrl === f.url }">
           <Favicon :url="f.url" />
           <button class="favorite-edit" :aria-label="`编辑 ${f.title}`" @click="edit(f)">
             <span>{{ f.title }}</span><small>{{ f.url }}</small>

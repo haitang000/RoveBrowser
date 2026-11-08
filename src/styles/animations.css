@@ -14,20 +14,6 @@
 .panel-leave-to .command-panel {
   transform: translateY(-6px) scale(0.985);
 }
-.space-enter-active,
-.space-leave-active {
-  transition:
-    transform var(--motion-space) var(--ease-out),
-    opacity var(--motion-selection) var(--ease-out);
-}
-.space-enter-from {
-  transform: translateX(12px);
-  opacity: 0;
-}
-.space-leave-to {
-  transform: translateX(-12px);
-  opacity: 0;
-}
 .desk-enter-active,
 .desk-leave-active {
   transition: opacity var(--motion-large) var(--ease-out);
@@ -85,8 +71,6 @@
   }
   .panel-enter-from .command-panel,
   .panel-leave-to .command-panel,
-  .space-enter-from,
-  .space-leave-to,
   .tab-enter-from,
   .tab-leave-to {
     transform: none;

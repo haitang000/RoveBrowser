@@ -1,3 +1,4 @@
+import { checkCommand as verifyCommand, checkCommandHandoff as verifyCommandHandoff } from './native-command-checks.mjs';
 // Deterministic browser-core integration tests. Debug CDP is enabled only by a debug-build env flag.
 import { chromium } from '@playwright/test'
 import { spawn, execFile } from 'node:child_process'
@@ -16,8 +17,8 @@ const hits=new Map();
 const server=createServer((req,res)=>{
   hits.set(req.url,(hits.get(req.url)||0)+1);
   res.setHeader('Content-Type','text/html')
-  const name=req.url==='/peek'?'Peek':req.url==='/ephemeral'?'Ephemeral':req.url==='/second'?'Second':'First';
-  res.end(`<!doctype html><title>${name} fixture</title><style>html{background:${name==='Peek'?'#7c2d12':'#164e63'};color:white}a{color:#bae6fd}</style><h1>${name} real native page</h1><a href="/second">Next</a><a href="/second" target="_blank">New window</a> <a href="/peek">Peek link</a> <a href="/peek" target="_blank">Peek target link</a><div style="height:1600px"></div>`)
+  const name=req.url==='/outside'?'Outside':req.url==='/peek'?'Peek':req.url==='/ephemeral'?'Ephemeral':req.url==='/second'?'Second':'First';
+  res.end(`<!doctype html><title>${name} fixture</title><style>html{background:${name==='Peek'?'#7c2d12':'#164e63'};color:white}a{color:#bae6fd}</style><h1>${name} real native page</h1><a href="/second">Next</a><a href="/second" target="_blank">New window</a> <a href="/peek">Peek link</a> <a href="/peek" target="_blank">Peek target link</a> <a href="http://localhost:${server.address().port}/outside">Other site</a> <a href="http://localhost:${server.address().port}/login">Sign in</a><div style="height:1600px"></div>`)
 })
 await new Promise(r=>server.listen(0,'127.0.0.1',r))
 const base=`http://127.0.0.1:${server.address().port}`
@@ -68,6 +69,8 @@ async function checkSidebar(ui,pages){
   }
 }
 async function send(ui,c){await ui.evaluate(c=>window.ipc.postMessage(JSON.stringify(c)),c)}
+const checkCommand=(ui,pages,name)=>verifyCommand(ui,pages,name,{output,waitFor});
+const checkCommandHandoff=(ui,web)=>verifyCommandHandoff(ui,web,{waitFor});
 async function site(){
   pageBrowser ||= await waitFor(()=>chromium.connectOverCDP(`http://127.0.0.1:${port+1}`),'site debugger')
   return waitFor(async()=>pageBrowser.contexts().flatMap(c=>c.pages()).find(p=>p.url().startsWith(base)),'site page')
@@ -116,8 +119,45 @@ try{
   await ui.keyboard.press('Escape');
   await web.evaluate(()=>window.__favoriteMarker='reuse existing page');
   await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click();
+  const favoriteWeb=await waitFor(async()=>pageBrowser.contexts().flatMap(c=>c.pages()).find(p=>p!==web&&p.url()===base+'/first'),'favorite independent live page');
+  await favoriteWeb.waitForSelector('h1');
+  await favoriteWeb.evaluate(()=>window.__favoriteMarker='one shared favorite page');
+  await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();
+  await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click();
+  assert.equal(await favoriteWeb.evaluate(()=>window.__favoriteMarker),'one shared favorite page');
+  await waitFor(async()=>await ui.locator('.space-name').last().textContent()==='Work','favorite remains in current workspace');
+  await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click({button:'middle'});
+  await waitFor(()=>Promise.resolve(favoriteWeb.isClosed()),'favorite controller unloaded');
+  await ui.getByRole('button',{name:'工作区 Personal',exact:true}).click();
+  await ui.getByRole('tab',{name:'First fixture',exact:false}).click();
   assert.equal(await web.evaluate(()=>window.__favoriteMarker),'reuse existing page');
-  checks.push('顶部常用网站经真实 UI 和受限 IPC 添加、编辑、排序、移除；点击复用已有网页');
+  checks.push('顶部常用网站经真实 UI 添加、编辑、排序和移除；全工作区复用一个独立控制器，卸载后固定项保留');
+  await send(ui,{type:'pin'});
+  const retainedPin=ui.locator('.pinned-tabs .tab-row.selected');await retainedPin.waitFor();
+  const retainedID=await retainedPin.getAttribute('data-bookmark-id');
+  await web.getByRole('link',{name:'Next',exact:true}).click();await web.waitForURL(base+'/second');
+  assert.equal(await retainedPin.locator('.tab-title').textContent(),'First fixture');
+  await send(ui,{type:'bookmarkReset',id:retainedID});await web.waitForURL(base+'/first');
+  await web.evaluate(()=>window.__pinMarker='controller retained');
+  await web.getByRole('link',{name:'Other site',exact:true}).click();
+  await ui.getByRole('tab',{name:'Outside fixture'}).waitFor();
+  assert.equal(web.url(),base+'/first');assert.equal(await web.evaluate(()=>window.__pinMarker),'controller retained');
+  await send(ui,{type:'close'});await send(ui,{type:'bookmarkOpen',id:retainedID});
+  const countBeforeSignIn=await ui.getByRole('tab').count();
+  await web.getByRole('link',{name:'Sign in',exact:true}).click();await web.waitForURL(`http://localhost:${server.address().port}/login`);
+  assert.equal(await ui.getByRole('tab').count(),countBeforeSignIn);
+  await send(ui,{type:'bookmarkReset',id:retainedID});await web.waitForURL(base+'/first');
+  checks.push('固定项保持保存的标题和网址；同站导航与返回起始网址复用控制器，跨站链接新开标签，登录链接在原页继续');
+  await web.evaluate(()=>window.__promotionMarker='same controller through all representations');
+  await send(ui,{type:'favoriteTab',id:retainedID});
+  const promoted=ui.locator('.favorites').getByRole('button',{name:'First fixture',exact:true});await promoted.waitFor();
+  await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();await promoted.click();
+  assert.equal(await web.evaluate(()=>window.__promotionMarker),'same controller through all representations');
+  await send(ui,{type:'bookmarkPin',id:retainedID,spaceId:'personal'});
+  await send(ui,{type:'bookmarkUnpin',id:retainedID,spaceId:'personal'});
+  await ui.getByRole('tab',{name:'First fixture'}).waitFor();
+  assert.equal(await web.evaluate(()=>window.__promotionMarker),'same controller through all representations');
+  checks.push('普通标签、固定标签、常用网站及跨空间转换保留同一WebView2控制器和DOM状态');
   await web.evaluate(()=>window.__middleClickMarker='keep active page');
   await send(ui,{type:'new',url:base+'/second'});
   const middleTab=ui.getByRole('tab',{name:'Second fixture'});
@@ -132,7 +172,12 @@ try{
   await send(ui,{type:'pin'});
   const middlePin=ui.locator('.pinned-tabs .tab-row.selected');
   await middlePin.waitFor();
+  const middleBookmark=await middlePin.getAttribute('data-bookmark-id');
   await middlePin.click({button:'middle'});
+  await ui.locator('.pinned-tabs .tab-row.unloaded').filter({hasText:'Second fixture'}).waitFor();
+  await send(ui,{type:'bookmarkUnpin',id:middleBookmark});
+  await ui.getByRole('tab',{name:'Second fixture'}).waitFor();
+  await send(ui,{type:'close'});
   await ui.getByRole('tab',{name:'Second fixture'}).waitFor({state:'detached'});
   await ui.getByRole('tab',{name:'First fixture'}).click();
   checks.push('原生中键关闭后台及固定标签；后台关闭不切换或重载当前网页，关闭后可恢复');
@@ -149,6 +194,8 @@ try{
   await web.getByRole('link',{name:'Next',exact:true}).click();await web.waitForURL(base+'/second');await send(ui,{type:'back'});await web.waitForURL(base+'/first');await send(ui,{type:'forward'});await web.waitForURL(base+'/second');checks.push('网页导航/后退/前进')
   // CDP keyboard injection cannot generate Win32 AcceleratorKeyPressed; that path is tested with Computer Use.
   await ui.keyboard.press('Control+l');await ui.getByRole('combobox').waitFor();assert.equal(await ui.getByRole('combobox').inputValue(),base+'/second');await ui.keyboard.press('Escape');checks.push('UI Ctrl+L 与浮层恢复；网页原生快捷键另经实机检查')
+  await checkCommand(ui,[web],'page');checks.push('命令栏浮在当前真实网页上，背景已解码；打开和关闭均无 visibilitychange，DOM/滚动与焦点恢复');
+  await checkCommandHandoff(ui,web);checks.push('命令栏等待背景解码；快速关闭重开拒绝旧回调；坏图片恢复原网页；Ctrl+T及点击外侧关闭不新建空白标签');
   const tabCount=await ui.getByRole('tab').count();
   await web.evaluate(()=>window.__openerMarker='opener unchanged');
   const sourceBox=await web.getByRole('link',{name:'Peek link',exact:true}).boundingBox();
@@ -184,6 +231,7 @@ try{
   assert(Math.abs(origin.y-(sourceSlot.y+(sourceBox.y+sourceBox.height/2)/sourceViewport.height*sourceSlot.height))<1);
   checks.push('真实链接点击坐标穿过原生事件，入场完成后才显示可交互网页');
   let preview=await waitFor(async()=>pageBrowser.contexts().flatMap(c=>c.pages()).find(p=>p.url()===base+'/peek'),'Peek independent page');
+  await checkCommand(ui,[web,preview],'peek');checks.push('Peek 上打开命令栏保留来源页和预览的真实画面，关闭后焦点回到预览');
   assert.equal(await ui.getByRole('tab').count(),tabCount);assert.equal(web.url(),base+'/second');
   assert.equal(await preview.evaluate(()=>typeof window.ipc),'undefined');
   await preview.evaluate(()=>{window.__peekMarker='same controller';window.chrome.webview.postMessage(JSON.stringify({type:'peekPromote'}))});
@@ -247,6 +295,8 @@ try{
   await ui.getByRole('tab',{name:'Second fixture'}).click({button:'right'});await ui.getByRole('menuitem',{name:'在当前网页旁分屏'}).click();await ui.waitForSelector('.split-divider');assert.equal(await ui.locator('.page-pane').count(),2);checks.push('独立实例左右分屏')
   const first=await waitFor(async()=>pageBrowser.contexts().flatMap(c=>c.pages()).find(p=>p.url()===base+'/first'),'split primary page');
   await checkSidebar(ui,[first,web]);checks.push('分屏两侧的原生网页宽度跟随侧栏过渡同步更新');
+  // Closing a command returns focus to the active primary pane.
+  await checkCommand(ui,[web,first],'split');checks.push('分屏命令栏保留两侧网页画面与DOM，关闭后恢复当前主页面焦点');
   await ui.getByRole('button',{name:'固定分屏组合'}).click();
   await send(ui,{type:'peekOpen',url:base+'/ephemeral'});await ui.getByRole('dialog',{name:'Peek · Ephemeral fixture',exact:true}).waitFor();
   await waitFor(async()=>await ui.locator('.peek-background').count()===2,'both split backgrounds captured');
@@ -260,7 +310,7 @@ try{
   ui=await launch();await ui.waitForSelector('.split-divider');
   assert.deepEqual(await ui.evaluate(()=>({theme:window.__ERA_INITIAL_STATE__.theme,collapsed:window.__ERA_INITIAL_STATE__.sidebarCollapsed})),{theme:'dark',collapsed:true});
   assert.equal(await ui.locator('html').getAttribute('data-theme'),'dark');
-  assert.deepEqual(await ui.evaluate(()=>window.__ERA_INITIAL_STATE__.favorites[1]),{title:'我的常用网页',url:base+'/first'});
+  assert.deepEqual(await ui.evaluate(()=>{const f=window.__ERA_INITIAL_STATE__.favorites[1];return {title:f.title,url:f.url}}),{title:'我的常用网页',url:base+'/first'});
   assert.equal(await ui.evaluate(()=>window.__ERA_INITIAL_STATE__.favorites.some(f=>f.title==='临时常用网页')),false);
   checks.push('顶部常用网站的名称、网址、顺序和移除结果经 SQLite 保存并在进程重启后恢复');
   assert.equal(await ui.locator('.sidebar-track').evaluate(e=>e.getBoundingClientRect().width),0);

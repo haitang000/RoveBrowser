@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { address, host } from "../../lib/address";
 import Favicon from "../common/Favicon.vue";
@@ -43,6 +43,11 @@ const results = computed(() => {
       })),
   );
   list.push(
+    ...[...b.state.favorites, ...(b.state.pins || [])]
+      .filter((f) => (!q || `${f.title} ${f.url}`.toLowerCase().includes(q)) && !list.some((r) => r.id === f.id || b.state.tabs.some((t) => t.id === r.id && t.bookmarkId === f.id)))
+      .map((f) => ({ title: f.title, detail: `${f.spaceId ? '打开固定标签' : '打开常用网站'} · ${host(f.url)}`, url: f.url, id: f.id, kind: 'bookmark' })),
+  );
+  list.push(
     ...b.history
       .filter(
         (h) =>
@@ -55,17 +60,6 @@ const results = computed(() => {
         kind: "history",
       })),
   );
-  if (!q)
-    list.push(
-      ...b.state.favorites
-        .filter(
-          (f) =>
-            !list.some(
-              (x) => x.url.replace(/\/$/, "") === f.url.replace(/\/$/, ""),
-            ),
-        )
-        .map((f) => ({ ...f, detail: host(f.url), kind: "favorite" })),
-    );
   return list.slice(0, 8);
 });
 watch(query, () => {
@@ -101,6 +95,35 @@ watch(selected, async () => {
     ?.querySelector('[aria-selected="true"]')
     ?.scrollIntoView({ block: "nearest" });
 });
+watch([() => b.commandBackdrop, () => b.commandOpen], async ([backdrop, open]) => {
+  if (!open || !backdrop?.ready) return;
+  const current = () => b.commandOpen && b.commandBackdrop?.ticket === backdrop.ticket;
+  await nextTick();
+  try {
+    // Native pages keep rendering behind the UI until every pane has painted.
+    await Promise.all(Array.from(document.querySelectorAll<HTMLImageElement>(".command-background"))
+      .map((image) => image.decode()));
+  } catch {
+    if (current()) b.send({ type: "commandBackdropFailed", ticket: backdrop.ticket });
+    return;
+  }
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  if (current()) {
+    b.send({ type: "commandBackdropReady", ticket: backdrop.ticket });
+  }
+});
+watch(() => b.commandBackdrop?.shown, async (shown) => {
+  if (shown && b.commandOpen) {
+    await nextTick();
+    field.value?.focus();
+  }
+});
+function dismissOutside(event: PointerEvent) {
+  if (b.commandOpen && panel.value && event.target instanceof Node && !panel.value.contains(event.target)) {
+    if (event.target instanceof Element && event.target.closest(".command-scrim")) event.preventDefault();
+    b.commandOpen = false;
+  }
+}
 function run(index = selected.value) {
   const r = results.value[index];
   if (!r) return;
@@ -138,13 +161,18 @@ function key(e: KeyboardEvent) {
     field.value?.focus();
   }
 }
-onBeforeUnmount(() => clearTimeout(timer));
+onMounted(() => document.addEventListener("pointerdown", dismissOutside, true));
+onBeforeUnmount(() => {
+  clearTimeout(timer);
+  document.removeEventListener("pointerdown", dismissOutside, true);
+});
 </script>
 <template>
   <Transition name="panel"
     ><div
       v-if="b.commandOpen"
       class="command-scrim"
+      :data-presented="!b.native || Boolean(b.commandBackdrop?.shown)"
       @pointerdown.self="b.commandOpen = false"
       @keydown="key"
     >

@@ -11,13 +11,18 @@ export interface Tab {
   title: string;
   url: string;
   pinned: boolean;
+  bookmarkId?: string;
+  unloaded?: boolean;
   loading?: boolean;
   favicon?: string;
   splitWith?: string;
 }
 export interface Favorite {
+  id: string;
   title: string;
   url: string;
+  splitWith?: string;
+  spaceId?: string;
 }
 export interface BrowserState {
   spaces: Space[];
@@ -25,6 +30,8 @@ export interface BrowserState {
   activeSpace: string;
   activeTab: string;
   favorites: Favorite[];
+  pins?: Favorite[];
+  libraryVersion?: number;
   closed: Tab[];
   theme: "light" | "dark";
   sidebarCollapsed: boolean;

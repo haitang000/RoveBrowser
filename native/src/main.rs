@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod bookmarks;
 mod caption;
 mod capture;
 mod clip;
 mod host;
 mod model;
+mod shadow;
 mod storage;
 mod thumbnails;
 fn main() {

@@ -14,13 +14,13 @@ describe("top favorites", () => {
     let s = initialState();
     const previousUrl = s.favorites[0].url;
     s = reduce(s, { type: "favoriteSave", title: "文档", url: "example.com", previousUrl });
-    expect(s.favorites[0]).toEqual({ title: "文档", url: "https://example.com/" });
+    expect(s.favorites[0]).toMatchObject({ id: "favorite-github", title: "文档", url: "https://example.com/" });
     s = reduce(s, { type: "favoriteMove", url: "https://example.com/", offset: 1 });
     expect(s.favorites[1].title).toBe("文档");
     for (const { url } of [...s.favorites]) s = reduce(s, { type: "favoriteRemove", url });
     expect(s.favorites).toEqual([]);
     s = reduce(s, { type: "favoriteSave", title: "", url: "https://example.com/" });
-    expect(s.favorites).toEqual([{ title: "example.com", url: "https://example.com/" }]);
+    expect(s.favorites).toMatchObject([{ title: "example.com", url: "https://example.com/" }]);
   });
 
   it("rejects canonical duplicates and stale edits without changing the list", () => {

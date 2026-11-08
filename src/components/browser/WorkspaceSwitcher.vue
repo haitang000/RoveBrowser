@@ -2,6 +2,7 @@
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
 const b = useBrowser();
+defineProps<{ swipeShares?: Record<string, number> | null }>();
 </script>
 <template>
   <footer class="workspace-switcher">
@@ -13,12 +14,13 @@ const b = useBrowser();
     >
       <Icon name="grid" :size="14" />
     </button>
-    <div class="space-keys" aria-label="工作区">
+    <div class="space-keys" :class="{ 'space-keys-tracking': swipeShares }" aria-label="工作区" title="在侧栏左右轻扫切换工作区">
       <button
         v-for="(s, i) in b.state.spaces"
         :key="s.id"
         class="space-key"
         :class="{ current: s.id === b.state.activeSpace }"
+        :style="swipeShares ? { '--space-share': swipeShares[s.id] || 0 } : undefined"
         :title="s.name"
         :aria-label="`工作区 ${s.name}`"
         :aria-pressed="s.id === b.state.activeSpace"

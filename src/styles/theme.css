@@ -159,9 +159,9 @@ kbd {
   border-radius: var(--radius-window);
   clip-path: inset(0 round var(--radius-window));
   background: var(--frame);
-  transition: background var(--motion-standard) var(--ease-out);
 }
 .titlebar {
+  app-region: drag;
   height: var(--titlebar-height);
   display: flex;
   align-items: center;
@@ -181,6 +181,7 @@ kbd {
   pointer-events: none;
 }
 .window-controls {
+  app-region: no-drag;
   display: flex;
   height: 32px;
   margin-left: auto;
@@ -295,12 +296,47 @@ kbd {
   border-color: var(--edge);
   box-shadow: 0 1px 2px var(--shadow);
 }
+.favorite-tile { position: relative; min-width: 0; }
+.favorites .favorite-open { width: 100%; display: flex; justify-content: center; align-items: center; gap: 4px; }
+.favorite-loaded::after { content: ""; position: absolute; bottom: 3px; width: 3px; height: 3px; border-radius: 50%; background: var(--quiet); }
+.favorites .favorite-close { position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; opacity: 0; background: var(--selected); }
+.favorite-tile:hover .favorite-close, .favorite-tile:focus-within .favorite-close { opacity: 1; }
+.tab-row.unloaded .tab-picture { opacity: 0.55; }
+.context-menu { max-height: calc(100dvh - 48px); overflow-y: auto; }
+.bookmark-menu-form { display: grid; gap: 10px; padding: 6px; }
+.bookmark-menu-form label { display: grid; gap: 5px; font-size: 12px; }
+.bookmark-menu-form input { width: 100%; height: 30px; padding: 0 6px; border: 1px solid var(--edge); border-radius: 6px; background: var(--surface); }
 .space-list {
   flex: 1;
   overflow: auto;
   scrollbar-width: thin;
   min-height: 0;
   padding-top: 12px;
+}
+.space-viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  overscroll-behavior-x: none;
+}
+.space-track {
+  position: relative;
+  height: 100%;
+}
+.space-track > .space-list {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+.space-tracking .space-track,
+.space-settling .space-track {
+  will-change: transform;
+}
+.space-reduced .space-list[aria-hidden="true"] {
+  pointer-events: none;
+  opacity: 0;
 }
 .space-name {
   font-size: 26px;
@@ -439,6 +475,21 @@ kbd {
 }
 .space-key:hover {
   background: var(--selected);
+}
+.space-keys-tracking .space-key {
+  background: color-mix(in srgb, var(--selected) calc(var(--space-share) * 100%), var(--field));
+  border-color: color-mix(in srgb, var(--edge) calc(var(--space-share) * 100%), transparent);
+}
+.space-keys-tracking .space-key:after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  width: 8px;
+  height: 1px;
+  background: var(--ink);
+  left: 4px;
+  opacity: var(--space-share);
+  transform: scaleX(var(--space-share));
 }
 .page-area {
   flex: 1;
@@ -587,21 +638,35 @@ kbd {
   color: var(--ink);
   pointer-events: none;
 }
+.command-background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  z-index: 1;
+}
 .command-scrim {
-  position: fixed;
-  inset: 32px 0 0;
+  position: absolute;
+  inset: 0;
   z-index: 100;
   display: flex;
   justify-content: center;
   align-items: flex-start;
   --command-top: max(
-    48px,
+    24px,
     calc((100dvh - var(--titlebar-height) - 8px) * 0.18)
   );
   padding-top: var(--command-top);
+  background: rgb(0 0 0 / 0.12);
 }
 .command-panel {
-  width: min(640px, calc(100vw - 40px));
+  width: min(var(--command-width), calc(100% - 32px));
+  max-height: calc(100% - var(--command-top) - 16px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--panel-edge);
   border-radius: 14px;
@@ -610,6 +675,7 @@ kbd {
 }
 .command-input {
   height: 56px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -634,13 +700,8 @@ kbd {
 }
 .command-results {
   padding: 6px;
-  max-height: min(
-    340px,
-    calc(
-      100dvh - var(--titlebar-height) - var(--command-top) -
-        var(--command-field) - 16px
-    )
-  );
+  min-height: 0;
+  max-height: 340px;
   overflow: auto;
 }
 .command-result {

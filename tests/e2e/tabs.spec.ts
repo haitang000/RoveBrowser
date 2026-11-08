@@ -3,7 +3,7 @@ import { initialState } from "../../src/lib/preview";
 
 async function setup(page: Page, onlyTab = false) {
   const state = initialState();
-  if (onlyTab) state.tabs = state.tabs.filter((tab) => tab.id === "start");
+  if (onlyTab) { state.tabs = state.tabs.filter((tab) => tab.id === "start"); state.pins = []; }
   else {
     for (const id of ["alpha", "beta", "gamma"])
       state.tabs.push({
@@ -40,9 +40,10 @@ test("middle click closes regular and pinned background tabs without activating 
     await expect(page.locator(`[data-tab-id="${id}"]`)).toHaveCount(0);
     await expect(page.locator(".tab-row.selected")).toHaveAttribute("data-tab-id", "start");
   }
+  await expect(page.locator('.pinned-tabs .tab-row.unloaded')).toHaveCount(1);
+  // Unloading a pin doesn't put it in the recently closed ordinary-tab stack.
   await page.keyboard.press("Control+Shift+t");
   await expect(page.getByRole("tab", { name: "Wikipedia" })).toBeVisible();
-  await page.keyboard.press("Control+Shift+t");
   await expect(page.getByRole("tab", { name: "beta" })).toBeVisible();
   await expect(page.locator(".tab-row.selected")).toHaveAttribute("data-tab-id", "beta");
 });

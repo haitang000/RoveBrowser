@@ -5,14 +5,21 @@ use crate::{
 };
 use include_dir::{include_dir, Dir};
 use serde_json::json;
-use std::{borrow::Cow, cell::Cell, collections::HashMap, path::PathBuf, rc::Rc};
+use std::{
+    borrow::Cow,
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    path::PathBuf,
+    rc::Rc,
+};
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, FaviconChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15,
-        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+        ICoreWebView2NavigationStartingEventArgs3, ICoreWebView2NewWindowRequestedEventArgs2,
+        ICoreWebView2_15, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT,
     },
-    NewWindowRequestedEventHandler, SourceChangedEventHandler,
+    NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
 };
 use windows::{
     core::{Interface, BOOL, PWSTR},
@@ -34,7 +41,7 @@ use winit::{
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
-    window::{ResizeDirection, Window, WindowId},
+    window::{Window, WindowId},
 };
 use wry::{
     PageLoadEvent, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows,
@@ -42,7 +49,7 @@ use wry::{
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../dist");
 // Keep the standalone UI preview's --radius-window default in sync.
-const WINDOW_RADIUS: f64 = 12.;
+pub(crate) const WINDOW_RADIUS: f64 = 12.;
 // Match theme.css --surface, including the empty frame before a document paints.
 fn surface_color(dark: bool) -> wry::RGBA {
     if dark {
@@ -82,6 +89,7 @@ enum Event {
     PeekRequest(String, String, Option<Point>),
     PeekBackground(String, usize, Option<String>),
     PeekSurface(String, u64, Option<String>),
+    CommandBackground(u64, usize, Option<String>),
     CaptureTabs,
     Thumbnail(String, String, u64, Option<String>),
 }
@@ -94,6 +102,12 @@ struct Page {
     thumbnail_pending: bool,
     visible: Cell<bool>,
     dark: Cell<bool>,
+    navigation: Rc<NavigationPolicy>,
+}
+struct NavigationPolicy {
+    bookmarked: Cell<bool>,
+    current: RefCell<String>,
+    host_navigation: Cell<bool>,
 }
 impl Page {
     fn set_visible(&self, visible: bool) -> wry::Result<()> {
@@ -149,9 +163,17 @@ struct App {
     primary: Rect,
     secondary: Option<Rect>,
     overlay: bool,
+    command_backdrop: Option<CommandBackdrop>,
+    command_ticket: u64,
     ready: bool,
     last_error: Option<String>,
     ui_data: PathBuf,
+}
+struct CommandBackdrop {
+    ticket: u64,
+    images: [Option<String>; 3],
+    pending: [bool; 3],
+    covering: bool,
 }
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Keep the existing profile location so the rename preserves sessions and logins.
@@ -183,6 +205,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         primary: Rect::default(),
         secondary: None,
         overlay: false,
+        command_backdrop: None,
+        command_ticket: 0,
         ready: false,
         last_error: None,
         ui_data: data.join("UI"),
@@ -244,6 +268,11 @@ impl App {
             .or_else(|| self.pages.get(&self.state.active_tab).map(|p| &p.view))
     }
     fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {
+        let navigation = Rc::new(NavigationPolicy {
+            bookmarked: Cell::new(tab.bookmark_id.is_some()),
+            current: RefCell::new(tab.url.clone()),
+            host_navigation: Cell::new(false),
+        });
         let p = self.proxy.clone();
         let id = tab.id.clone();
         let p2 = p.clone();
@@ -278,6 +307,7 @@ impl App {
             tab.id.clone(),
             self.proxy.clone(),
             self.peek_visible.clone(),
+            navigation.clone(),
         )?;
         Ok(Page {
             view,
@@ -288,6 +318,7 @@ impl App {
             thumbnail_pending: false,
             visible: Cell::new(false),
             dark: Cell::new(self.state.theme == "dark"),
+            navigation,
         })
     }
     fn invalidate_thumbnail(&mut self, id: &str) {
@@ -374,6 +405,7 @@ impl App {
             title: url::Url::parse(&url)?.host_str().unwrap_or("Peek").into(),
             url,
             pinned: false,
+            bookmark_id: None,
             loading: true,
             favicon: None,
             split_with: None,
@@ -573,6 +605,77 @@ impl App {
             let _ = p.focus();
         }
     }
+    fn publish_command_backdrop(&self) {
+        if let Some(backdrop) = &self.command_backdrop {
+            self.emit(json!({"type":"commandBackdrop","ticket":backdrop.ticket,
+                "backgrounds":backdrop.images,"backgroundReady":!backdrop.pending.contains(&true)}));
+        } else {
+            self.emit(json!({"type":"commandBackdrop","backgrounds":null}));
+        }
+    }
+    fn prepare_command_backdrop(&mut self) {
+        if self.command_backdrop.is_some() {
+            return;
+        }
+        self.command_ticket += 1;
+        let ticket = self.command_ticket;
+        let views = [
+            self.pages.get(&self.state.active_tab).map(|p| &p.view),
+            self.state
+                .active()
+                .and_then(|t| t.split_with.as_ref())
+                .and_then(|id| self.pages.get(id))
+                .map(|p| &p.view),
+            self.peek
+                .as_ref()
+                .filter(|p| p.shown.get())
+                .map(|p| &p.page.view),
+        ];
+        let pending = views.each_ref().map(|view| view.is_some());
+        self.command_backdrop = Some(CommandBackdrop {
+            ticket,
+            images: [None, None, None],
+            pending,
+            covering: false,
+        });
+        for (pane, view) in views.into_iter().enumerate() {
+            if let Some(view) = view {
+                let proxy = self.proxy.clone();
+                if crate::capture::background(view, move |image| {
+                    let _ = proxy.send_event(Event::CommandBackground(ticket, pane, image));
+                })
+                .is_err()
+                {
+                    let _ = self
+                        .proxy
+                        .send_event(Event::CommandBackground(ticket, pane, None));
+                }
+            }
+        }
+        self.publish_command_backdrop();
+        if pending.contains(&true) {
+            let proxy = self.proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                for pane in 0..3 {
+                    let _ = proxy.send_event(Event::CommandBackground(ticket, pane, None));
+                }
+            });
+        }
+    }
+    fn fail_command_backdrop(&mut self) {
+        self.command_backdrop = None;
+        self.overlay = false;
+        if let Err(e) = self.sync_layout() {
+            self.error(e);
+        }
+        self.publish_command_backdrop();
+        self.emit(json!({"type":"commandDismissed"}));
+        self.error("无法准备命令栏的网页背景，请重试");
+        if let Some(page) = self.page() {
+            let _ = page.focus();
+        }
+    }
     fn bounds(&self, r: Rect) -> wry::Rect {
         let size = self
             .window
@@ -636,7 +739,9 @@ impl App {
         }
         for (id, page) in &mut self.pages {
             if let Some(tab) = self.state.tabs.iter().find(|t| &t.id == id) {
+                page.navigation.bookmarked.set(tab.bookmark_id.is_some());
                 if page.url != tab.url {
+                    page.navigation.host_navigation.set(true);
                     page.view.load_url(&tab.url)?;
                     page.url = tab.url.clone();
                 }
@@ -668,14 +773,14 @@ impl App {
                     .apply(page.view.hwnd(), r.corners, window.scale_factor())?;
                 // Cover rather than hide: toggling IsVisible discards/resumes native surfaces
                 // and exposes a white frame when returning from the screenshot animation.
-                page.set_visible(!self.overlay)?;
+                page.set_visible(!self.overlay || self.command_backdrop.is_some())?;
             } else {
                 page.set_visible(false)?;
             }
         }
         if let Some(peek) = &self.peek {
             if let Some(r) = peek.rect.filter(|r| r.width > 0. && r.height > 0.) {
-                let visible = !self.overlay
+                let visible = (!self.overlay || self.command_backdrop.is_some())
                     && (peek.phase == PeekPhase::Open
                         || (peek.phase == PeekPhase::Closing && !peek.moving && peek.shown.get()));
                 let was_visible = peek.shown.replace(visible);
@@ -693,7 +798,8 @@ impl App {
             }
         }
         if let Some(ui) = &self.ui {
-            let covering = self.peek.as_ref().is_some_and(|p| p.covering);
+            let command_covering = self.command_backdrop.as_ref().is_some_and(|b| b.covering);
+            let covering = command_covering || self.peek.as_ref().is_some_and(|p| p.covering);
             unsafe {
                 SetWindowPos(
                     ui.hwnd(),
@@ -704,7 +810,11 @@ impl App {
                     0,
                     SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
                 )?;
-                if let Some(p) = self.peek.as_ref().filter(|p| p.shown.get()) {
+                if let Some(p) = self
+                    .peek
+                    .as_ref()
+                    .filter(|p| p.shown.get() && !command_covering)
+                {
                     SetWindowPos(
                         p.page.view.hwnd(),
                         Some(HWND_TOP),
@@ -722,21 +832,19 @@ impl App {
     fn shortcut(&mut self, key: String, shift: bool) {
         match key.as_str() {
             "address" | "new" | "desk" => {
-                self.overlay = true;
-                let _ = self.sync();
+                // Address/new commands capture the still-visible page after Vue opens
+                // the floating panel. Hiding it here would capture an empty surface.
+                if key == "desk" {
+                    self.overlay = true;
+                    let _ = self.sync();
+                }
                 if let Some(ui) = &self.ui {
                     let _ = ui.focus();
                 }
                 self.emit(json!({"type":"shortcut","action":key}));
             }
             "cycle" => {
-                let ids: Vec<_> = self
-                    .state
-                    .tabs
-                    .iter()
-                    .filter(|t| t.space_id == self.state.active_space)
-                    .map(|t| t.id.clone())
-                    .collect();
+                let ids = self.state.navigable_ids();
                 if !ids.is_empty() {
                     let i = ids
                         .iter()
@@ -771,6 +879,7 @@ impl App {
                 c,
                 Command::New { .. }
                     | Command::Activate { .. }
+                    | Command::OpenBookmark { .. }
                     | Command::Close { .. }
                     | Command::SwitchSpace { .. }
                     | Command::CreateSpace { .. }
@@ -939,11 +1048,59 @@ impl App {
                 }
                 return;
             }
-            Command::Overlay { visible } => {
-                if visible && !self.overlay {
+            Command::Overlay { visible, command } => {
+                let clearing = self.command_backdrop.is_some() && !(visible && command);
+                if visible && command {
+                    self.prepare_command_backdrop();
+                } else {
+                    self.command_backdrop = None;
+                }
+                if visible && !self.overlay && !command {
                     self.refresh_visible_thumbnails();
                 }
                 self.overlay = visible;
+                if let Err(e) = self.sync_layout() {
+                    self.error(e);
+                }
+                // Restore live sibling HWNDs before Vue removes the covering pixels.
+                if clearing {
+                    self.publish_command_backdrop();
+                }
+                if visible {
+                    if let Some(ui) = &self.ui {
+                        let _ = ui.focus();
+                    }
+                } else if let Some(page) = self.page() {
+                    let _ = page.focus();
+                }
+                return;
+            }
+            Command::FloatingBackdropReady { ticket } => {
+                if let Some(backdrop) = self
+                    .command_backdrop
+                    .as_mut()
+                    .filter(|b| b.ticket == ticket && !b.pending.contains(&true))
+                {
+                    backdrop.covering = true;
+                    if let Err(e) = self.sync_layout() {
+                        self.error(e);
+                    }
+                    if let Some(ui) = &self.ui {
+                        let _ = ui.focus();
+                    }
+                    self.emit(json!({"type":"commandPresented","ticket":ticket}));
+                }
+                return;
+            }
+            Command::FloatingBackdropFailed { ticket } => {
+                if self
+                    .command_backdrop
+                    .as_ref()
+                    .is_some_and(|b| b.ticket == ticket)
+                {
+                    self.fail_command_backdrop();
+                }
+                return;
             }
             Command::Window { action } => {
                 if let Some(w) = &self.window {
@@ -956,22 +1113,6 @@ impl App {
                         }
                         "minimize" => w.set_minimized(true),
                         "maximize" => w.set_maximized(!w.is_maximized()),
-                        "drag" => {
-                            let _ = w.drag_window();
-                        }
-                        s if s.starts_with("resize-") => {
-                            let d = match &s[7..] {
-                                "n" => ResizeDirection::North,
-                                "s" => ResizeDirection::South,
-                                "e" => ResizeDirection::East,
-                                "w" => ResizeDirection::West,
-                                "ne" => ResizeDirection::NorthEast,
-                                "nw" => ResizeDirection::NorthWest,
-                                "se" => ResizeDirection::SouthEast,
-                                _ => ResizeDirection::SouthWest,
-                            };
-                            let _ = w.drag_resize_window(d);
-                        }
                         _ => {}
                     }
                 }
@@ -1003,7 +1144,10 @@ impl App {
             _ => {
                 if matches!(
                     c,
-                    Command::Activate { .. } | Command::SwitchSpace { .. } | Command::New { .. }
+                    Command::Activate { .. }
+                        | Command::OpenBookmark { .. }
+                        | Command::SwitchSpace { .. }
+                        | Command::New { .. }
                 ) {
                     self.refresh_visible_thumbnails();
                 }
@@ -1011,6 +1155,7 @@ impl App {
                     c,
                     Command::New { .. }
                         | Command::Activate { .. }
+                        | Command::OpenBookmark { .. }
                         | Command::Close { .. }
                         | Command::SwitchSpace { .. }
                         | Command::CreateSpace { .. }
@@ -1088,10 +1233,12 @@ impl ApplicationHandler<Event> for App {
             let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
                 return Err("无法获取窗口句柄".into());
             };
-            self.caption = Some(crate::caption::Caption::new(
+            let caption = crate::caption::Caption::new(
                 HWND(handle.hwnd.get() as *mut _),
                 ui.hwnd(),
-            )?);
+            )?;
+            caption.refresh(window.scale_factor())?;
+            self.caption = Some(caption);
             self.ui = Some(ui);
             self.window = Some(window);
             self.update_window_frame()?;
@@ -1104,6 +1251,23 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::CommandBackground(ticket, pane, image) => {
+                if let Some(backdrop) = self
+                    .command_backdrop
+                    .as_mut()
+                    .filter(|b| b.ticket == ticket && b.pending[pane])
+                {
+                    backdrop.pending[pane] = false;
+                    if let Some(image) = image {
+                        backdrop.images[pane] = Some(image);
+                        if !backdrop.pending.contains(&true) {
+                            self.publish_command_backdrop();
+                        }
+                    } else {
+                        self.fail_command_backdrop();
+                    }
+                }
+            }
             Event::CaptureTabs => self.pump_thumbnails(),
             Event::Thumbnail(id, url, version, image) => {
                 let valid = self
@@ -1307,6 +1471,7 @@ fn register_page_events(
     id: String,
     proxy: EventLoopProxy<Event>,
     peek_visible: Rc<Cell<bool>>,
+    navigation: Rc<NavigationPolicy>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let p = proxy.clone();
     let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
@@ -1398,18 +1563,58 @@ fn register_page_events(
     }
     let id2 = id.clone();
     let p = proxy.clone();
+    let nav = navigation.clone();
     let source = SourceChangedEventHandler::create(Box::new(move |sender, _| {
         if let Some(sender) = sender {
             let mut value = PWSTR::null();
             unsafe {
                 sender.Source(&mut value)?;
             }
-            let _ = p.send_event(Event::Source(id2.clone(), take_pwstr(value)));
+            let url = take_pwstr(value);
+            *nav.current.borrow_mut() = url.clone();
+            let _ = p.send_event(Event::Source(id2.clone(), url));
         }
         Ok(())
     }));
     unsafe {
         view.webview().add_SourceChanged(&source, &mut token)?;
+    }
+    let p = proxy.clone();
+    let starting = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+        if let Some(args) = args {
+            unsafe {
+                if navigation.host_navigation.replace(false) || !navigation.bookmarked.get() {
+                    return Ok(());
+                }
+                let mut kind = COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT;
+                if args
+                    .cast::<ICoreWebView2NavigationStartingEventArgs3>()
+                    .is_ok_and(|a| a.NavigationKind(&mut kind).is_ok())
+                    && kind != COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT
+                {
+                    return Ok(());
+                }
+                let mut user = BOOL::default();
+                let mut redirected = BOOL::default();
+                args.IsUserInitiated(&mut user)?;
+                args.IsRedirected(&mut redirected)?;
+                let mut value = PWSTR::null();
+                args.Uri(&mut value)?;
+                let url = take_pwstr(value);
+                if user.as_bool()
+                    && !redirected.as_bool()
+                    && crate::bookmarks::leaves_site(&navigation.current.borrow(), &url)
+                {
+                    args.SetCancel(true)?;
+                    let _ = p.send_event(Event::Open(url));
+                }
+            }
+        }
+        Ok(())
+    }));
+    unsafe {
+        view.webview()
+            .add_NavigationStarting(&starting, &mut token)?;
     }
     if let Ok(core) = view.webview().cast::<ICoreWebView2_15>() {
         let icon = FaviconChangedEventHandler::create(Box::new(move |sender, _| {

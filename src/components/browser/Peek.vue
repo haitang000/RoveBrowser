@@ -324,6 +324,7 @@ onBeforeUnmount(() => {
         </button>
       </header>
       <div ref="content" class="peek-content">
+        <img v-if="b.commandBackdrop?.images[2]" class="command-background" :src="b.commandBackdrop.images[2]" alt="" draggable="false" />
         <img
           v-if="b.native && b.peekSurface?.image"
           ref="surfaceImage"

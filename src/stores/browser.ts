@@ -9,12 +9,14 @@ import type {
   PeekPhase,
 } from "../lib/types";
 import { address, host } from "../lib/address";
+import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
-  const state = ref((native && window.__ERA_INITIAL_STATE__) || initialState()),
+  const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || initialState())),
     history = ref<HistoryEntry[]>([]),
     error = ref("");
   const commandOpen = ref(false),
+    commandBackdrop = ref<{ ticket: number; images: (string | null)[]; ready: boolean; shown: boolean } | null>(null),
     thumbnails = ref<Record<string, string>>({}),
     peek = ref<Tab | null>(null),
     peekBackground = ref<Record<number, string>>({}),
@@ -28,6 +30,7 @@ export const useBrowser = defineStore("browser", () => {
     deskOpen = ref(false),
     settingsOpen = ref(false),
     favoritesOpen = ref(false),
+    favoriteEditId = ref<string>(),
     dragging = ref(false);
   const active = computed(() =>
     state.value.tabs.find((t) => t.id === state.value.activeTab),
@@ -38,8 +41,12 @@ export const useBrowser = defineStore("browser", () => {
       state.value.spaces[0],
   );
   const tabs = computed(() =>
-    state.value.tabs.filter((t) => t.spaceId === state.value.activeSpace),
+    state.value.tabs.filter((t) => t.spaceId === state.value.activeSpace && !state.value.favorites.some((f) => f.id === t.bookmarkId)),
   );
+  const pinnedTabs = computed<Tab[]>(() => (state.value.pins || [])
+    .filter((f) => f.spaceId === state.value.activeSpace)
+    .map((f) => ({ ...(liveTab(state.value, f.id) || { id: f.id, spaceId: f.spaceId!, url: f.url, unloaded: true }), title: f.title, pinned: true, bookmarkId: f.id })));
+  const activeBookmark = computed(() => active.value?.bookmarkId ? savedPage(state.value, active.value.bookmarkId) : undefined);
   const overlay = computed(
     () =>
       commandOpen.value ||
@@ -59,6 +66,8 @@ export const useBrowser = defineStore("browser", () => {
         "overlay",
         "thumbnails",
         "windowChrome",
+        "commandBackdropReady",
+        "commandBackdropFailed",
       ].includes(c.type)
     )
       error.value = "";
@@ -132,6 +141,7 @@ export const useBrowser = defineStore("browser", () => {
           [
             "new",
             "activate",
+            "bookmarkOpen",
             "space",
             "spaceCreate",
             "restore",
@@ -148,16 +158,29 @@ export const useBrowser = defineStore("browser", () => {
     }
   }
   function openCommand(mode: "new" | "edit" = "new") {
+    error.value = "";
     commandMode.value = mode;
     commandOpen.value = true;
   }
   function cycle(reverse = false) {
-    const list = tabs.value;
+    const list = [
+      ...state.value.favorites.flatMap((f) => liveTab(state.value, f.id) || []),
+      ...pinnedTabs.value.filter((t) => !t.unloaded),
+      ...tabs.value.filter((t) => !t.pinned),
+    ];
     const i = list.findIndex((t) => t.id === state.value.activeTab);
     const t = list[(i + (reverse ? -1 : 1) + list.length) % list.length];
     if (t) send({ type: "activate", id: t.id });
   }
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "commandBackdrop") {
+      commandBackdrop.value = e.backgrounds && e.ticket !== undefined
+        ? { ticket: e.ticket, images: e.backgrounds, ready: Boolean(e.backgroundReady), shown: false }
+        : null;
+    }
+    if (e.type === "commandPresented" && commandBackdrop.value?.ticket === e.ticket)
+      commandBackdrop.value!.shown = true;
+    if (e.type === "commandDismissed") commandOpen.value = false;
     if (e.type === "thumbnails" && e.images) thumbnails.value = e.images;
     if (e.type === "thumbnail" && e.id) {
       const allowed = new Set(e.kept || Object.keys(thumbnails.value));
@@ -208,7 +231,7 @@ export const useBrowser = defineStore("browser", () => {
       if (e.backgroundReady) peekBackgroundReady.value = true;
     }
     if (e.type === "state" && e.state) {
-      state.value = e.state;
+      state.value = upgradeLibrary(e.state);
       const ids = new Set(e.state.tabs.map((t) => t.id));
       thumbnails.value = Object.fromEntries(
         Object.entries(thumbnails.value).filter(([id]) => ids.has(id)),
@@ -240,11 +263,15 @@ export const useBrowser = defineStore("browser", () => {
     active,
     space,
     tabs,
+    pinnedTabs,
+    activeBookmark,
     commandOpen,
+    commandBackdrop,
     commandMode,
     deskOpen,
     settingsOpen,
     favoritesOpen,
+    favoriteEditId,
     dragging,
     overlay,
     send,

@@ -13,6 +13,7 @@ watch(
   <img
     v-if="!failed && url.startsWith('http')"
     class="favicon"
+    draggable="false"
     :src="favicon || `https://${host(url)}/favicon.ico`"
     alt=""
     referrerpolicy="no-referrer"

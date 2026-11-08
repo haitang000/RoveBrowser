@@ -28,7 +28,7 @@ function beforeLeave(element: Element) {
   >
     <TabItem
       v-for="tab in tabs"
-      :key="tab.id"
+      :key="tab.bookmarkId || tab.id"
       :tab="tab"
       @menu="(event, tab) => emit('menu', event, tab)"
     />

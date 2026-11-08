@@ -17,7 +17,7 @@ export function favoriteUrl(input: string): string {
   }
 }
 
-export function favorite(title: string, input: string): Favorite {
+export function favorite(title: string, input: string): Pick<Favorite, "title" | "url"> {
   const url = favoriteUrl(input);
   const name = title.trim() || new URL(url).hostname;
   if (Array.from(name).length > 80) throw Error("网站名称最多 80 个字符");

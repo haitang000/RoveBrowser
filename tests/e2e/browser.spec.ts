@@ -35,8 +35,7 @@ test("source-derived sidebar metrics and responsive layouts", async ({
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    const bounds = await page.locator(".page-area").boundingBox();
-    expect(bounds!.width).toBeGreaterThan(size.width === 480 ? 240 : 300);
+    await expect.poll(async () => (await page.locator(".page-area").boundingBox())!.width).toBeGreaterThan(size.width === 480 ? 240 : 300);
     await page.keyboard.press("Control+t");
     const panel = await page.locator(".command-panel").boundingBox();
     expect(panel!.y + panel!.height).toBeLessThanOrEqual(size.height);
@@ -63,7 +62,7 @@ test("command keyboard navigation, close and restore", async ({ page }) => {
 });
 test("spaces, dark mode, pinning and split container", async ({ page }) => {
   await page.getByRole("button", { name: "工作区 Work", exact: true }).click();
-  await expect(page.locator(".space-name")).toHaveText("Work");
+  await expect(page.getByRole('heading', { name: 'Work', exact: true })).toBeVisible();
   await page
     .getByRole("button", { name: "工作区 Personal", exact: true })
     .click();

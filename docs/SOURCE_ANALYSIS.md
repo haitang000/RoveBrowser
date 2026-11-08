@@ -9,16 +9,28 @@
 | `Zigzag/Design/SpaceColor.swift` | OKLCH 浅色 L=.915/C=.045，深色 L=.27/C=.04；sky 色度乘 .78 | extract-colors.mjs → palette.css，复用实际 OKLab/gamut 公式 |
 | `Zigzag/Sidebar/SidebarRows.swift` | icon/text 双列、selected/hover/pressed 与 close 附件 | TabItem.vue |
 | `Zigzag/Sidebar/SidebarListView.swift` | pinned/list 分段、拖动排序与跨空间移动、分屏意图 | Sidebar.vue、PinnedTabs.vue |
-| `Zigzag/Sidebar/SidebarView.swift` | 顶部导航、地址、favorites、独立空间列表、底部数字键；SpaceSwipe 规则 | Sidebar.vue、WorkspaceSwitcher.vue；触控板惯性尚未移植 |
+| `Zigzag/Sidebar/SidebarView.swift` | 顶部导航、地址、favorites、独立空间列表、底部数字键；SpaceSwipe 规则、相邻真实列表、方向切换与位置交接 | Sidebar.vue、WorkspaceSwitcher.vue、SpaceDeck.vue、SpaceList.vue、space-swipe.ts |
+| `Zigzag/Design/Controls.swift` | `ColorView.setColor` 与 `CALayer.set(backgroundColor:)`：从当前 presentation 颜色开始、200ms 普通 ease 插值 | App.vue 的独立背景色 WAAPI，连续切换不中断列表/网页 |
 | `Zigzag/Sidebar/FavoritesView.swift` | 四列 36 高 tiles，18 图标、6 间距 | Favorites.vue |
-| `Zigzag/CommandBar/CommandBarController.swift` | 640 宽、56 高输入、40 高结果、同行标题/细节、上下键与焦点；scrim 不调暗背景 | CommandBar.vue |
+| `Zigzag/CommandBar/CommandBarController.swift` | 640 宽、56 高输入、40 高结果、同行标题/细节、上下键与焦点；原版 scrim 不调暗背景 | CommandBar.vue；当前适配为网页区域内浮窗，12% 遮罩及内存背景快照 |
 | `Zigzag/CommandBar/CommandBarModel.swift` | open/search/switchTo/history 类型及上下文命令 | 命令结果选择；未迁移站内搜索、远程建议与完整命令集合 |
 | `Zigzag/Tabs/Tab.swift` | 独立 WKWebView 生命周期、title/url/loading、页面与 host 分离 | native/src/host.rs、model.rs；改用 WebView2 |
-| `Zigzag/Window/BrowserWindow.swift` | 自定义无标题窗口、拖动、最小尺寸 | winit + WindowControls、WindowResizeEdges |
+| `Zigzag/Window/BrowserWindow.swift` | 自定义无标题窗口、拖动、最小尺寸 | winit + WindowControls 的 WebView2 原生拖动区域、caption.rs 原生缩放边框 |
 | `Zigzag/Window/BrowserRootView.swift` | sidebar 默认240，网页 inset8，分屏间距8，页面/侧栏互不覆盖 | PageArea.vue + DOM bounds → Rust |
 | `Zigzag/Window/PageCardView.swift` | 白色/深色页面表面、微弱接触阴影、页面圆角 | page-area CSS + native/src/clip.rs 原生 HWND 圆角区域 |
 | `Zigzag/Desk/DeskController.swift` | 按空间分组、过滤、卡片与caption、拖动移动 | Desk.vue + capture.rs/thumbnails.rs；使用实际 WebView2 快照，分屏卡片并排显示两张 |
 | `Zigzag/Peek/PeekController.swift` | 独立临时 tab，40 header，8% inset、Open as Tab | Peek.vue、peek-layout.ts、host.rs、capture.rs；同控制器晋升、临时生命周期、真实网页快照背景 |
+
+## Space 触控板与背景动画移植
+
+本次沿用上面的固定提交，实际移植 `SidebarView.swift` 的 `SpaceSwipe`、`handleSwipe`、`handleWheel`、`transitionList`、`startTracking` 和 `settleHome`，以及 `Tokens.Motion.slide` 与 `Controls.swift` 的背景色设置路径。
+
+- `space-swipe.ts` 保留4px方向锁定、35%落点、300px/s轻扫、80ms速度采样、250ms滚动轮次间隔、边缘0.5倍宽度上限与0.55阻尼公式。正值表示列表向右移动；DOM 的 `deltaX` 取反后进入同一公式。保留阻尼逆变换，供动画途中接手时恢复手势行程。
+- `SpaceDeck.vue` 使用相邻真实列表跟随位移，松手最多进入一个邻居，首尾不循环。返回或进入目标时采样临界阻尼弹簧，并把当前速度交给弹簧；`.15s` 为响应参数，实际动画400ms收敛。Web 平台没有 `CASpringAnimation(perceptualDuration:bounce:)`，采用解析临界阻尼解，内向速度按源码限制在自然频率内，具体弹簧系数是平台适配，不宣称等同 Core Animation 内部系数。
+- 点击或快捷键使用源码220ms方向滑动、旧列表180ms淡出；触控板收尾保留两列表不透明。中途开始新手势或再次切换时，读取 WAAPI 当前 presentation transform 后取消旧动画，延续屏幕位置；每个 Space 独立记忆列表滚动位置。后台列表使用 `inert` 与 `aria-hidden`。
+- 原生模式先将列表动画交给合成器，再通过已有 `space` 命令切换 Rust 权威状态。`App.vue` 收到新颜色后，按 `ColorView.setColor`/`CALayer.set` 从当前屏幕背景颜色开始，以200ms普通 ease 插值。只处理颜色，不截取整个窗口或冻结网页。
+- DOM `WheelEvent` 缺少 `NSEvent.phase`、`momentumPhase` 和 `hasPreciseScrollingDeltas`。像素事件用120ms无输入判定松手，速度取最后一个输入时刻的80ms窗口；250ms内的后续同向尾流归于同次手势，反向输入可接手尚未完成的收尾。行/页单位视为离散滚轮，一轮最多切换一次。这是 Windows 适配启发式，真实触控板驱动仍可能需要调参。
+- 减少动态效果时不跟手平移，切换采用原地200ms淡入/120ms淡出，取消的小幅手势保持原列表不动；背景色立即更新。Ctrl/Meta/Alt 修饰滚轮、纵向滚动和已溢出的底部工作区数字栏保留原事件路径，浮层或窗口失焦会取消未完成手势。
 
 ## 确认的设计参数
 
@@ -44,7 +56,11 @@
 - Windows HWND 网页独立于 CSS，当前打开浮层时隐藏网页 controller，关闭后恢复；Peek 通过 WebView2 CapturePreview 获取内存 PNG 背景，分屏时分别捕获并按各槽位定位。现用 SetWindowRgn 对 wry 公开的子窗口 HWND 做真正裁切：前端从 CSS 的圆角与 border 测量内圆角（当前8减1得到7px），Rust 结合实际子窗口尺寸/DPI 创建区域。分屏标题条遮住顶部圆角，内容只保留底部外角，内部接缝保持直角。
 - 默认新标签页 Rove 文字与搜索入口为本项目自有页面；其64号字并非来自原项目，避免被误认为已忠实复刻的设计值。
 
-## 许可证处理
+## 固定标签与 Favorites 状态逻辑移植
+
+除外观参数外，现已迁移 `Tabs/TabManager.swift`、`App/Library.swift`、`Sidebar/SidebarMenus.swift` 与 `Tabs/Tab.swift` 中固定项的核心生命周期。完整映射、兼容迁移和平台适配边界见 [固定标签移植记录](PINNED_TABS_PORT.md)。本地 `TabManager.swift` 的 Git blob 为 `57bdcd12148156ea2daaf2cd77bd5fe0fc99d316`，与本次从 GitHub main 读取的该文件一致。
+
+## 许可证处理与派生逻辑
 
 Tokens 的数值与设计规则转写进入 CSS，已在相关文件标记修改、保留版权及 Apache 来源。`licenses/zigzag-APACHE-2.0.txt`、`zigzag-NOTICE.txt`、`zigzag-TRADEMARKS.md` 原文保留；实际复用范围见 `THIRD_PARTY_NOTICES.md`。未移植 Zigzag 的扩展、密码、Reader 第三方代码。
 
