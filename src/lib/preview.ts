@@ -15,6 +15,7 @@ export function initialState(): BrowserState {
     activeTab: "start",
     theme: "light",
     sidebarCollapsed: false,
+    borderless: true,
     closed: [],
     favorites: [
       { id: "favorite-github", title: "GitHub", url: "https://github.com" },
@@ -171,9 +172,15 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       if (space) {
         space.name = String(c.name).slice(0, 40) || space.name;
         space.color = c.color as any;
+        const amount = Number(c.translucency);
+        space.translucency = amount > 0.005 ? Math.min(1, amount) : undefined;
+        space.clearGlass = c.clearGlass === false ? false : undefined;
       }
       break;
     }
+    case "borderless":
+      s.borderless = s.borderless === false;
+      break;
     case "theme":
       s.theme = s.theme === "light" ? "dark" : "light";
       break;

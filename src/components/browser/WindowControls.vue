@@ -12,7 +12,9 @@ function report() {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
   const context = canvas.getContext("2d")!;
-  const frame = style.getPropertyValue("--frame").trim();
+  const frame = (b.state.borderless !== false
+    ? style.getPropertyValue("--surface")
+    : style.getPropertyValue("--frame")).trim();
   const color = (...fills: string[]) => {
     context.clearRect(0, 0, 1, 1);
     for (const fill of fills) {
@@ -31,7 +33,7 @@ function report() {
   });
 }
 watch(
-  () => [b.state.theme, b.space.color],
+  () => [b.state.theme, b.space.color, b.state.borderless, b.space.translucency, b.space.clearGlass],
   async () => {
     await nextTick();
     report();
