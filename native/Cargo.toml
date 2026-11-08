@@ -19,6 +19,11 @@ directories = "6"
 webview2-com = "0.39"
 windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Com_StructuredStorage", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_Networking_WinHttp"] }
 
+[build-dependencies]
+# Compiles the icon resource. The image crate resizes the source PNG into the .ico.
+embed-resource = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 [profile.release]
 lto = "thin"
 strip = true

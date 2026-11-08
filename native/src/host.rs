@@ -41,7 +41,7 @@ use winit::{
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
-    window::{Window, WindowId},
+    window::{Icon, Window, WindowId},
 };
 use wry::{
     PageLoadEvent, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows,
@@ -51,6 +51,11 @@ static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../dist");
 // Keep the standalone UI preview's --radius-window default in sync.
 pub(crate) const WINDOW_RADIUS: f64 = 12.;
 // Match theme.css --surface, including the empty frame before a document paints.
+fn app_icon() -> Result<Icon, Box<dyn std::error::Error>> {
+    let image = image::load_from_memory(include_bytes!("../assets/icon.png"))?.into_rgba8();
+    let (width, height) = image.dimensions();
+    Ok(Icon::from_rgba(image.into_raw(), width, height)?)
+}
 fn surface_color(dark: bool) -> wry::RGBA {
     if dark {
         (30, 30, 32, 255)
@@ -1239,6 +1244,7 @@ impl ApplicationHandler<Event> for App {
             let window = event_loop.create_window(
                 Window::default_attributes()
                     .with_title("Rove")
+                    .with_window_icon(Some(app_icon()?))
                     .with_decorations(false)
                     .with_visible(false)
                     .with_resizable(true)
