@@ -178,10 +178,31 @@ kbd {
 .titlebar {
   app-region: drag;
   height: var(--titlebar-height);
-  display: flex;
+  display: grid;
+  grid-template-columns: clamp(64px, calc(100vw - 400px), var(--sidebar-width)) minmax(0, 1fr) auto;
   align-items: center;
-  padding-left: 12px;
   user-select: none;
+}
+.titlebar-identity {
+  min-width: 0;
+  padding-left: 12px;
+}
+.collapsed .titlebar {
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+}
+.browser-toolbar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(82px, 1fr) minmax(0, 480px) minmax(20px, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 0 6px;
+}
+.browser-navigation {
+  app-region: no-drag;
+  display: flex;
+  justify-self: start;
+  gap: 2px;
 }
 .app-name {
   font-size: 12px;
@@ -189,17 +210,10 @@ kbd {
   letter-spacing: -0.3px;
   color: var(--quiet);
 }
-.preview-label {
-  font-size: 11px;
-  color: var(--quiet);
-  margin-left: 20px;
-  pointer-events: none;
-}
 .window-controls {
   app-region: no-drag;
   display: flex;
   height: 32px;
-  margin-left: auto;
 }
 .window-controls button {
   width: 46px;
@@ -239,32 +253,29 @@ kbd {
   padding: 0 var(--sidebar-edge);
   user-select: none;
 }
-.sidebar-toolbar {
+.sidebar-header {
   height: 40px;
   display: flex;
   align-items: center;
-  padding: 0 3px;
   flex-shrink: 0;
-  gap: 2px;
-}
-.toolbar-spacer {
-  flex: 1;
+  padding: 0 5px;
 }
 .address-field {
-  height: 30px;
-  min-height: 30px;
+  app-region: no-drag;
+  height: var(--toolbar-button);
+  min-width: 0;
   width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
   background: var(--field);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   text-align: left;
-  margin-bottom: 8px;
 }
 .address-field span {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -357,11 +368,11 @@ kbd {
   font-size: 26px;
   font-weight: 300;
   letter-spacing: -0.6px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  padding-left: 5px;
-  margin: 0 0 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
   line-height: 1.2;
 }
 .tab-row,

@@ -42,12 +42,12 @@ async function launch() {
 }
 async function send(ui, command) { await ui.evaluate((c) => window.ipc.postMessage(JSON.stringify(c)), command); }
 async function home(ui, name) {
-  await waitFor(async () => await ui.locator('.space-list[aria-hidden="false"] .space-name').textContent() === name, `${name} state broadcast`);
+  await waitFor(async () => await ui.locator('.sidebar-header .space-name').textContent() === name, `${name} state broadcast`);
   await waitFor(async () => await ui.locator('.space-settling, .space-tracking').count() === 0, 'settle');
   assert.equal(await ui.locator('.space-list').count(), 1);
 }
 async function swipe(ui, dx) {
-  const bounds = await ui.locator('.sidebar-toolbar').boundingBox();
+  const bounds = await ui.locator('.sidebar-header').boundingBox();
   await ui.mouse.move(bounds.x + 50, bounds.y + 16);
   await ui.mouse.wheel(dx, 0);
 }

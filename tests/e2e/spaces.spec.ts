@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
 
-const currentName = (page: Page) => page.locator('.space-list[aria-hidden="false"] .space-name');
+const currentName = (page: Page) => page.locator('.sidebar-header .space-name');
 async function wheel(page: Page, dx: number, dy = 0, mode = 0, selector = ".sidebar") {
   return page.locator(selector).evaluate((target, { dx, dy, mode }) => {
     const event = new WheelEvent("wheel", { deltaX: dx, deltaY: dy, deltaMode: mode, bubbles: true, cancelable: true });
@@ -28,8 +28,7 @@ async function packets(page: Page, deltas: number[]) {
 test.beforeEach(async ({ page }) => { await page.goto("/"); });
 
 test("a real horizontal wheel gesture tracks the neighboring list and lands once", async ({ page }) => {
-  const toolbar = page.locator(".sidebar-toolbar");
-  const bounds = await toolbar.boundingBox();
+  const bounds = await page.locator(".sidebar-header").boundingBox();
   await page.mouse.move(bounds!.x + 50, bounds!.y + 15);
   await page.mouse.wheel(100, 0);
   await expect(page.locator(".space-tracking")).toHaveCount(1);
@@ -184,7 +183,7 @@ test("a cancelled reduced-motion gesture leaves the current list fully visible",
     target.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, bubbles: true, cancelable: true }));
     await new Promise((resolve) => setTimeout(resolve, 170));
     const panes = Array.from(document.querySelectorAll(".space-list"));
-    return panes.map((e) => ({ name: e.querySelector("h1")?.textContent, opacity: getComputedStyle(e).opacity, animations: e.getAnimations().length }));
+    return panes.map((e) => ({ name: e.getAttribute("aria-label"), opacity: getComputedStyle(e).opacity, animations: e.getAnimations().length }));
   });
   expect(result).toEqual([{ name: "Personal", opacity: "1", animations: 0 }]);
 });

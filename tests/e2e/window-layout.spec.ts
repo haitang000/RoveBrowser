@@ -48,6 +48,8 @@ test("first render restores the native theme and collapsed sidebar before showin
   });
   expect(await page.evaluate(() => window.__windowTest.layout?.primary.x))
     .toBe((await page.locator(".page-pane > .webview-slot").first().boundingBox())!.x);
+  await expect(page.getByRole("navigation", { name: "网页导航" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "搜索或输入地址", exact: true })).toBeVisible();
 });
 
 test("native caption geometry keeps three equal buttons flush with the window edge", async ({ page }) => {
@@ -65,6 +67,15 @@ test("native caption geometry keeps three equal buttons flush with the window ed
       x: width - 138 + index * 46, y: 0, width: 46, height: 32,
     })));
     expect(await page.evaluate(() => window.__windowTest.chrome?.maximize)).toEqual(buttons[1]);
+    const navigation = (await page.locator('.browser-navigation').boundingBox())!;
+    const address = (await page.locator('.address-field').boundingBox())!;
+    expect(navigation.y).toBeGreaterThanOrEqual(0);
+    expect(navigation.y + navigation.height).toBeLessThanOrEqual(32);
+    expect(address.y).toBeGreaterThanOrEqual(0);
+    expect(address.y + address.height).toBeLessThanOrEqual(32);
+    expect(address.width).toBeGreaterThan(100);
+    expect(navigation.x + navigation.width).toBeLessThan(address.x);
+    expect(address.x + address.width).toBeLessThan(buttons[0]!.x);
   }
 });
 
@@ -80,6 +91,12 @@ test("restores the full-width titlebar and framed page even for a saved borderle
   expect(titlebar).toMatchObject({ x: 0, y: 0, width: 1280, height: 32 });
   expect(name.x).toBe(12);
   expect(sidebar).toMatchObject({ x: 0, y: 32, width: 240, height: 788 });
+  const heading = (await page.locator('.sidebar-header .space-name').boundingBox())!;
+  const favorites = (await page.locator('.favorites-heading').boundingBox())!;
+  expect(heading.y).toBeGreaterThanOrEqual(sidebar.y);
+  expect(heading.y + heading.height).toBeLessThanOrEqual(favorites.y);
+  await expect(page.locator('.sidebar .address-field, .sidebar .browser-navigation, .space-list .space-name')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '折叠侧栏', exact: true })).toHaveCount(0);
   expect(area).toMatchObject({ x: 240, y: 32, width: 1032, height: 780 });
   expect(await page.locator('.page-area').evaluate(e => getComputedStyle(e).borderRadius)).toBe('8px');
   expect(await page.locator('.browser-shell').getAttribute('class')).not.toContain('borderless');

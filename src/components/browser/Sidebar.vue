@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { host } from "../../lib/address";
 import type { Tab } from "../../lib/types";
 import { MAX_FAVORITES } from "../../lib/favorites";
 import { savedPage, samePinnedUrl } from "../../lib/bookmarks";
@@ -37,46 +36,10 @@ function act(type: string, extra = {}) {
 </script>
 <template>
   <aside class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)">
-    <div class="sidebar-toolbar">
-      <button
-        class="icon-button"
-        title="折叠侧栏 (Ctrl+B)"
-        aria-label="折叠侧栏"
-        @click="b.send({ type: 'sidebar' })"
-      >
-        <Icon name="sidebar" :size="14" /></button
-      ><span class="toolbar-spacer" /><button
-        class="icon-button"
-        title="后退 (Alt+←)"
-        aria-label="后退"
-        @click="b.send({ type: 'back' })"
-      >
-        <Icon name="back" :size="14" /></button
-      ><button
-        class="icon-button"
-        title="前进 (Alt+→)"
-        aria-label="前进"
-        @click="b.send({ type: 'forward' })"
-      >
-        <Icon name="forward" :size="14" /></button
-      ><button
-        class="icon-button"
-        title="刷新 (Ctrl+R)"
-        aria-label="刷新"
-        @click="b.send({ type: 'reload' })"
-      >
-        <Icon name="reload" :size="14" />
-      </button>
+    <div class="sidebar-header">
+      <h1 class="space-name" :title="b.space.name">{{ b.space.name }}</h1>
     </div>
-    <button
-      class="address-field"
-      aria-label="搜索或输入地址"
-      title="搜索或输入地址 (Ctrl+L)"
-      @click="b.openCommand('edit')"
-    >
-      <span>{{ host(b.active?.url || "") || "Search or enter address" }}</span
-      ><Icon name="settings" :size="13" /></button
-    ><Favorites />
+    <Favorites />
     <SpaceDeck ref="spaceDeck" :blocked="b.overlay || Boolean(b.peek) || Boolean(menu)" @menu="showMenu" @progress="swipeShares = $event" />
     <WorkspaceSwitcher :swipe-shares="swipeShares" /><Teleport to="body"
       ><div

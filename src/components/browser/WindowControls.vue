@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useBrowser } from "../../stores/browser";
+import { host } from "../../lib/address";
 import Icon from "../common/Icon.vue";
 import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 const b = useBrowser();
@@ -50,10 +51,38 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <header class="titlebar">
-    <span class="app-name">Rove</span
-    ><span v-if="!b.native" class="preview-label"
-      >界面预览 · 网页由 Windows 应用加载</span
-    >
+    <div class="titlebar-identity"><span class="app-name">Rove</span></div>
+    <div class="browser-toolbar">
+      <nav class="browser-navigation" aria-label="网页导航">
+        <button
+          class="icon-button"
+          title="后退 (Alt+←)"
+          aria-label="后退"
+          @click="b.send({ type: 'back' })"
+        ><Icon name="back" :size="14" /></button>
+        <button
+          class="icon-button"
+          title="前进 (Alt+→)"
+          aria-label="前进"
+          @click="b.send({ type: 'forward' })"
+        ><Icon name="forward" :size="14" /></button>
+        <button
+          class="icon-button"
+          title="刷新 (Ctrl+R)"
+          aria-label="刷新"
+          @click="b.send({ type: 'reload' })"
+        ><Icon name="reload" :size="14" /></button>
+      </nav>
+      <button
+        class="address-field"
+        aria-label="搜索或输入地址"
+        title="搜索或输入地址 (Ctrl+L)"
+        @click="b.openCommand('edit')"
+      >
+        <span>{{ host(b.active?.url || "") || "Search or enter address" }}</span>
+        <Icon name="settings" :size="13" />
+      </button>
+    </div>
     <div class="window-controls">
       <button
         aria-label="最小化"
