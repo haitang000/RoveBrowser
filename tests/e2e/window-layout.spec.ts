@@ -48,6 +48,25 @@ test("first render restores the native theme and collapsed sidebar before showin
     .toBe((await page.locator(".page-pane > .webview-slot").first().boundingBox())!.x);
 });
 
+test("restores the full-width titlebar and framed page even for a saved borderless session", async ({ page }) => {
+  await page.route("**/favicon.ico", route => route.abort());
+  const state = initialState();
+  state.borderless = true;
+  await nativeShell(page, state);
+  const titlebar = (await page.locator('.titlebar').boundingBox())!;
+  const name = (await page.locator('.app-name').boundingBox())!;
+  const sidebar = (await page.locator('.sidebar-track').boundingBox())!;
+  const area = (await page.locator('.page-area').boundingBox())!;
+  expect(titlebar).toMatchObject({ x: 0, y: 0, width: 1280, height: 32 });
+  expect(name.x).toBe(12);
+  expect(sidebar).toMatchObject({ x: 0, y: 32, width: 240, height: 788 });
+  expect(area).toMatchObject({ x: 240, y: 32, width: 1032, height: 780 });
+  expect(await page.locator('.page-area').evaluate(e => getComputedStyle(e).borderRadius)).toBe('8px');
+  expect(await page.locator('.browser-shell').getAttribute('class')).not.toContain('borderless');
+  const content = (await page.locator('.new-tab-content').boundingBox())!;
+  expect(Math.abs(content.x + content.width / 2 - area.x - area.width / 2)).toBeLessThan(1);
+});
+
 test("sidebar motion reports both pane bounds in the same paint frame, including reversal", async ({ page }) => {
   const state = initialState();
   state.activeTab = "github";

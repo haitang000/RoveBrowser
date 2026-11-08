@@ -42,7 +42,6 @@ watch(
     () => b.active?.id,
     () => b.active?.splitWith,
     () => b.state.sidebarCollapsed,
-    () => b.state.borderless,
     ratio,
   ],
   layout,

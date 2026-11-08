@@ -8,9 +8,10 @@ import CommandBar from "./components/browser/CommandBar.vue";
 import Desk from "./components/browser/Desk.vue";
 import SettingsPanel from "./components/browser/SettingsPanel.vue";
 import FavoritesPanel from "./components/browser/FavoritesPanel.vue";
+import TabPreview from "./components/browser/TabPreview.vue";
 import Icon from "./components/common/Icon.vue";
 import { SPACE_SWIPE } from "./lib/space-swipe";
-import { coverage, isSeeThrough, splitGap, usesClearGlass } from "./lib/page-frame";
+import { coverage, isSeeThrough, usesClearGlass } from "./lib/page-frame";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
 const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
@@ -18,7 +19,6 @@ const transparencyReduced = ref(reducedTransparency.matches);
 const glassAllowed = computed(() => !transparencyReduced.value && !b.glassBlocked);
 const glassActive = computed(() => isSeeThrough(b.space?.translucency) && glassAllowed.value);
 const shellStyle = computed(() => ({
-  "--split-gap": `${splitGap({ sidebarVisible: !b.state.sidebarCollapsed, borderless: b.state.borderless !== false })}px`,
   ...(glassActive.value
     ? { "--frame-coverage": String(coverage(b.space?.translucency, usesClearGlass(b.space?.clearGlass, true))) }
     : {}),
@@ -123,7 +123,6 @@ onBeforeUnmount(() => {
     class="browser-shell"
     :class="{
       collapsed: b.state.sidebarCollapsed,
-      borderless: b.state.borderless !== false,
       glass: glassActive,
       'glass-neutral': glassActive && b.space?.color === 'graphite',
     }"
@@ -148,7 +147,7 @@ onBeforeUnmount(() => {
         <Icon name="sidebar" /></button
       ><PageArea><CommandBar /></PageArea>
     </div>
-    <Desk /><SettingsPanel /><FavoritesPanel />
+    <Desk /><SettingsPanel /><FavoritesPanel /><TabPreview />
     <div v-if="b.error && !b.commandOpen" class="error-toast" role="alert">
       {{ b.error
       }}<button aria-label="关闭提示" @click="b.error = ''">×</button>

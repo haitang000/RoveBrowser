@@ -39,7 +39,7 @@ export interface BrowserState {
   closed: Tab[];
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
-  /** The page meets the window edges. Older sessions arrive without it and stay on. */
+  /** Legacy session preference; the restored framed layout ignores this flag. */
   borderless?: boolean;
 }
 export interface HistoryEntry {

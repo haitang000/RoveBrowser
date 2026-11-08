@@ -6,8 +6,8 @@ use windows::{
     Win32::{
         Foundation::{HWND, RECT},
         Graphics::Gdi::{
-            CombineRgn, CreateEllipticRgn, CreateRectRgn, DeleteObject, SetWindowRgn, HRGN,
-            RGN_DIFF,
+            CombineRgn, CreateEllipticRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject,
+            SetWindowRgn, HRGN, RGN_DIFF,
         },
         UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
     },
@@ -43,6 +43,8 @@ struct Shape {
     width: i32,
     height: i32,
     radii: [i32; 4],
+    // Rounded UI card exposed through this child, in physical local coordinates.
+    cutout: Option<[i32; 5]>,
 }
 impl Shape {
     fn new(width: i32, height: i32, corners: [f64; 4], scale: f64) -> Self {
@@ -51,6 +53,7 @@ impl Shape {
             width,
             height,
             radii: corners.map(|r| ((r * scale).round() as i32).clamp(0, limit)),
+            cutout: None,
         }
     }
     fn region(self) -> Result<Region> {
@@ -82,6 +85,26 @@ impl Shape {
                         RGN_DIFF,
                     )
                     .0 == 0
+                {
+                    return Err(Error::from_thread());
+                }
+            }
+            if let Some([left, top, right, bottom, radius]) = self.cutout {
+                let cut = Region::new(CreateRoundRectRgn(
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    radius * 2,
+                    radius * 2,
+                ))?;
+                if CombineRgn(
+                    Some(result.handle()),
+                    Some(result.handle()),
+                    Some(cut.handle()),
+                    RGN_DIFF,
+                )
+                .0 == 0
                 {
                     return Err(Error::from_thread());
                 }
@@ -127,13 +150,32 @@ impl WindowClip {
     }
 
     pub fn apply(&self, hwnd: HWND, corners: [f64; 4], scale: f64) -> Result<()> {
+        self.apply_with_cutout(hwnd, corners, scale, None)
+    }
+
+    pub fn apply_with_cutout(
+        &self,
+        hwnd: HWND,
+        corners: [f64; 4],
+        scale: f64,
+        cutout: Option<crate::model::Rect>,
+    ) -> Result<()> {
         let mut bounds = RECT::default();
         // SAFETY: hwnd is the live borderless child returned by wry, not the root
         // window or a guessed WebView2 implementation detail.
         unsafe {
             GetClientRect(hwnd, &mut bounds)?;
         }
-        let shape = Shape::new(bounds.right, bounds.bottom, corners, scale);
+        let mut shape = Shape::new(bounds.right, bounds.bottom, corners, scale);
+        shape.cutout = cutout.map(|r| {
+            [
+                (r.x * scale).floor() as i32,
+                (r.y * scale).floor() as i32,
+                ((r.x + r.width) * scale).ceil() as i32,
+                ((r.y + r.height) * scale).ceil() as i32,
+                (r.corners[0] * scale).round() as i32,
+            ]
+        });
         self.apply_shape(hwnd, shape)
     }
 
@@ -183,6 +225,21 @@ mod tests {
     fn scales_for_dpi_and_clamps_small_windows() {
         assert_eq!(Shape::new(100, 60, [7.; 4], 1.5).radii, [11; 4]);
         assert_eq!(Shape::new(8, 6, [7.; 4], 2.).radii, [3; 4]);
+    }
+    #[test]
+    fn preview_cutout_keeps_the_rest_of_each_live_pane_at_every_dpi() {
+        for scale in [1., 1.5, 2.] {
+            let mut shape =
+                Shape::new((400. * scale) as i32, (300. * scale) as i32, [7.; 4], scale);
+            shape.cutout =
+                Some([-20, 30, 120, 200, 14].map(|v| (f64::from(v) * scale).round() as i32));
+            let region = shape.region().unwrap();
+            let point = |x: f64, y: f64| contains(&region, (x * scale) as i32, (y * scale) as i32);
+            assert!(!point(20., 60.) && !point(100., 190.));
+            assert!(point(200., 60.) && point(20., 240.));
+            assert!(!point(0., 0.));
+            assert!(point(399., 150.));
+        }
     }
     #[test]
     fn installs_and_updates_the_region_on_a_real_hwnd() {
@@ -245,6 +302,22 @@ mod tests {
             assert_ne!(unsafe { GetWindowRgn(window.0, actual.handle()) }.0, 0);
             let expected = Shape::new(width, height, corners, scale).region().unwrap();
             assert!(unsafe { EqualRgn(actual.handle(), expected.handle()) }.as_bool());
+        }
+        // Showing and hiding a preview on unchanged bounds must invalidate the cache.
+        let cutout = crate::model::Rect {
+            x: 10.,
+            y: 5.,
+            width: 30.,
+            height: 25.,
+            corners: [6.; 4],
+        };
+        for cutout in [Some(cutout), None, Some(cutout), None] {
+            clip.apply_with_cutout(window.0, [0.; 4], 1., cutout)
+                .unwrap();
+            let actual = Region::new(unsafe { CreateRectRgn(0, 0, 0, 0) }).unwrap();
+            assert_ne!(unsafe { GetWindowRgn(window.0, actual.handle()) }.0, 0);
+            assert_eq!(contains(&actual, 20, 20), cutout.is_none());
+            assert!(contains(&actual, 60, 20));
         }
         // The root frame must release its region on maximize and reinstall it
         // on restore, even when the restored dimensions match the cached shape.

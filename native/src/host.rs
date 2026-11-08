@@ -98,6 +98,10 @@ enum Event {
     Suggestions(u64, Vec<String>),
     CaptureTabs,
     Thumbnail(String, String, u64, Option<String>),
+    PreviewBackground(u64, usize, Option<String>),
+    PreviewLoad(String, u64, String, bool),
+    PreviewThumbnail(String, u64, u64, Option<String>),
+    PreviewCapture,
 }
 struct Page {
     view: WebView,
@@ -159,6 +163,10 @@ struct App {
     peek_visible: Rc<Cell<bool>>,
     caption: Option<crate::caption::Caption>,
     thumbnails: crate::thumbnails::Cache,
+    tab_preview: Option<(String, Rect)>,
+    preview_backdrop: Option<PreviewBackdrop>,
+    preview_renders: HashMap<String, PreviewRender>,
+    preview_epoch: u64,
     ui: Option<WebView>,
     window: Option<Window>,
     window_clip: WindowClip,
@@ -182,6 +190,22 @@ struct CommandBackdrop {
     pending: [bool; 3],
     covering: bool,
 }
+struct PreviewBackdrop {
+    id: String,
+    rect: Rect,
+    ticket: u64,
+    images: [Option<String>; 2],
+    pending: [bool; 2],
+    closing: bool,
+}
+struct PreviewRender {
+    view: WebView,
+    source: String,
+    epoch: u64,
+    loading: bool,
+    pending: bool,
+    version: u64,
+}
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Keep the existing profile location so the rename preserves sessions and logins.
     let data = std::env::var_os("ERA_DATA_DIR")
@@ -202,6 +226,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         peek_visible: Rc::new(Cell::new(false)),
         caption: None,
         thumbnails: crate::thumbnails::Cache::default(),
+        tab_preview: None,
+        preview_backdrop: None,
+        preview_renders: HashMap::new(),
+        preview_epoch: 0,
         ui: None,
         window: None,
         window_clip: WindowClip::default(),
@@ -378,6 +406,154 @@ impl App {
         }
         self.pump_thumbnails();
     }
+
+    /// Saved groups may be partially unloaded. Looking at one must never create a page.
+    fn preview_tabs(&self, id: &str) -> Option<Vec<String>> {
+        if self.overlay || self.peek.is_some() || self.state.sidebar_collapsed {
+            return None;
+        }
+        let mut tabs = if let Some(mark) = self.state.bookmark(id) {
+            if mark
+                .space_id
+                .as_ref()
+                .is_some_and(|space| space != &self.state.active_space)
+            {
+                return None;
+            }
+            self.state
+                .tabs
+                .iter()
+                .filter(|t| {
+                    t.bookmark_id
+                        .as_ref()
+                        .is_some_and(|key| key == id || Some(key) == mark.split_with.as_ref())
+                })
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>()
+        } else {
+            let tab = self
+                .state
+                .tabs
+                .iter()
+                .find(|t| t.id == id && t.space_id == self.state.active_space)?;
+            self.state
+                .tabs
+                .iter()
+                .filter(|t| {
+                    t.id == tab.id
+                        || Some(&t.id) == tab.split_with.as_ref()
+                        || t.split_with.as_ref() == Some(&tab.id)
+                })
+                .map(|t| t.id.clone())
+                .collect()
+        };
+        if tabs.len() == 1 {
+            let first = self.state.tabs.iter().find(|t| t.id == tabs[0]).unwrap();
+            if let Some(partner) = self.state.tabs.iter().find(|t| {
+                Some(&t.id) == first.split_with.as_ref() || t.split_with.as_ref() == Some(&first.id)
+            }) {
+                tabs.push(partner.id.clone());
+            }
+        }
+        if tabs.iter().any(|id| {
+            id == &self.state.active_tab
+                || self.state.active().and_then(|t| t.split_with.as_ref()) == Some(id)
+        }) {
+            return None;
+        }
+        Some(tabs)
+    }
+
+    fn publish_preview_backdrop(&self) {
+        if let Some(b) = self.preview_backdrop.as_ref().filter(|b| !b.pending.contains(&true)) {
+            self.emit(json!({"type":"tabPreviewBackdrop","ticket":b.ticket,"backgrounds":b.images,"phase":if b.closing {"closing"} else {"opening"}}));
+        }
+    }
+    fn prepare_preview_backdrop(&mut self, id: String, rect: Rect, ticket: u64, closing: bool) {
+        let ids = [Some(self.state.active_tab.clone()), self.state.active().and_then(|t| t.split_with.clone())];
+        let pending = ids.each_ref().map(|id| id.as_ref().is_some_and(|id| self.pages.contains_key(id)));
+        self.preview_backdrop = Some(PreviewBackdrop { id, rect, ticket, images: [None, None], pending, closing });
+        for (pane, id) in ids.into_iter().enumerate() {
+            let Some(page) = id.and_then(|id| self.pages.get(&id)) else { continue };
+            let proxy = self.proxy.clone();
+            if crate::capture::background(&page.view, move |image| {
+                let _ = proxy.send_event(Event::PreviewBackground(ticket, pane, image));
+            }).is_err() {
+                let _ = self.proxy.send_event(Event::PreviewBackground(ticket, pane, None));
+            }
+        }
+        self.publish_preview_backdrop();
+        if pending.contains(&true) {
+            let proxy = self.proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                for pane in 0..2 { let _ = proxy.send_event(Event::PreviewBackground(ticket, pane, None)); }
+            });
+        }
+    }
+    fn ensure_preview_renders(&mut self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let targets = crate::preview::targets(&self.state, id).unwrap_or_default();
+        self.preview_renders.retain(|key, p| targets.iter().any(|t| &t.id == key && t.url == p.source));
+        for tab in targets {
+            if !model::is_web(&tab.url) || self.pages.contains_key(&tab.id) || self.preview_renders.contains_key(&tab.id) || self.thumbnails.has(&tab.id, &tab.url) { continue; }
+            self.preview_epoch += 1;
+            let epoch = self.preview_epoch;
+            let key = tab.id.clone();
+            let proxy = self.proxy.clone();
+            let view = WebViewBuilder::new_with_web_context(&mut self.context)
+                .with_url(&tab.url).with_visible(false).with_focused(false)
+                .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
+                .with_background_color(surface_color(self.state.theme == "dark"))
+                .with_additional_browser_args(browser_args(false))
+                .with_navigation_handler(|url| model::is_web(&url) || url == "about:blank")
+                .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+                .with_download_started_handler(|_, _| false)
+                .with_on_page_load_handler(move |event, url| {
+                    let _ = proxy.send_event(Event::PreviewLoad(key.clone(), epoch, url, matches!(event, PageLoadEvent::Started)));
+                }).build_as_child(self.window.as_ref().unwrap())?;
+            view.set_bounds(self.bounds(self.primary))?;
+            let timed_key = tab.id.clone();
+            let proxy = self.proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(12));
+                let _ = proxy.send_event(Event::PreviewLoad(timed_key, epoch, String::new(), false));
+            });
+            self.preview_renders.insert(tab.id, PreviewRender { view, source: tab.url, epoch, loading: true, pending: false, version: 0 });
+        }
+        self.sync_layout()?;
+        Ok(())
+    }
+    fn refresh_preview_renders(&mut self) {
+        for (key, page) in &mut self.preview_renders {
+            if page.loading || page.pending { continue; }
+            page.pending = true;
+            page.version += 1;
+            let version = page.version;
+            let epoch = page.epoch;
+            let id = key.clone();
+            let proxy = self.proxy.clone();
+            if crate::capture::thumbnail(&page.view, move |image| {
+                let _ = proxy.send_event(Event::PreviewThumbnail(id, epoch, version, image));
+            }).is_err() {
+                let _ = self.proxy.send_event(Event::PreviewThumbnail(key.clone(), epoch, version, None));
+            }
+            let id = key.clone();
+            let proxy = self.proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let _ = proxy.send_event(Event::PreviewThumbnail(id, epoch, version, None));
+            });
+        }
+    }
+    fn dismiss_tab_preview(&mut self) {
+        let existed = self.tab_preview.take().is_some() || self.preview_backdrop.is_some();
+        self.preview_backdrop = None;
+        self.preview_renders.clear();
+        if existed {
+            let _ = self.sync_layout();
+            self.emit(json!({"type":"tabPreviewDismissed"}));
+        }
+    }
     fn pump_thumbnails(&mut self) {
         // Peek's full-size capture/animation has priority over background cards.
         if self.peek.is_some() {
@@ -428,6 +604,7 @@ impl App {
         url: &str,
         origin: Option<Point>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.dismiss_tab_preview();
         let url = model::normalize(url)?;
         if !model::is_web(&url) {
             return Err("Peek 仅支持 HTTP 和 HTTPS 网页".into());
@@ -731,13 +908,22 @@ impl App {
         if self.window.is_none() {
             return Ok(());
         }
+        if self
+            .tab_preview
+            .as_ref()
+            .is_some_and(|(id, _)| self.preview_tabs(id).is_none())
+        {
+            self.dismiss_tab_preview();
+        }
         self.pages.retain(|id, _| {
             self.state
                 .tabs
                 .iter()
                 .any(|t| &t.id == id && model::is_web(&t.url))
         });
-        self.thumbnails.retain(|id| self.pages.contains_key(id));
+        let sources: HashMap<_, _> = self.state.tabs.iter().map(|t| (t.id.as_str(), t.url.as_str()))
+            .chain(self.state.pins.iter().chain(&self.state.favorites).map(|f| (f.id.as_str(), f.url.as_str()))).collect();
+        self.thumbnails.retain_sources(|id, url| sources.get(id).copied() == Some(url));
         let active = self.state.active().cloned();
         let second = active
             .as_ref()
@@ -792,6 +978,11 @@ impl App {
             return Ok(());
         };
         let second = self.state.active().and_then(|t| t.split_with.as_ref());
+        let watched = self
+            .preview_backdrop
+            .as_ref()
+            .and_then(|b| self.preview_tabs(&b.id))
+            .unwrap_or_default();
         for (id, page) in &self.pages {
             let r = if id == &self.state.active_tab {
                 Some(self.primary)
@@ -802,13 +993,24 @@ impl App {
             };
             if let Some(r) = r.filter(|r| r.width > 0. && r.height > 0.) {
                 page.view.set_bounds(self.bounds(r))?;
-                page.clip
-                    .apply(page.view.hwnd(), r.corners, window.scale_factor())?;
+                let cutout = self.tab_preview.as_ref().map(|(_, rect)| Rect {
+                    x: rect.x - r.x,
+                    y: rect.y - r.y,
+                    ..*rect
+                });
+                page.clip.apply_with_cutout(
+                    page.view.hwnd(),
+                    r.corners,
+                    window.scale_factor(),
+                    cutout,
+                )?;
                 // Cover rather than hide: toggling IsVisible discards/resumes native surfaces
                 // and exposes a white frame when returning from the screenshot animation.
                 page.set_visible(!self.overlay || self.command_backdrop.is_some())?;
             } else {
-                page.set_visible(false)?;
+                // WebView2 stops painting IsVisible=false controllers. Let only the
+                // watched pages render behind the trusted UI while their card is up.
+                page.set_visible(watched.contains(id))?;
             }
         }
         if let Some(peek) = &self.peek {
@@ -859,6 +1061,26 @@ impl App {
                     )?;
                 }
             }
+        }
+        for id in watched {
+            if let Some(page) = self.pages.get(&id) {
+                // Below the UI, including its new-tab surface; never over an active page.
+                unsafe {
+                    SetWindowPos(
+                        page.view.hwnd(),
+                        Some(HWND_BOTTOM),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                    )?;
+                }
+            }
+        }
+        for render in self.preview_renders.values() {
+            render.view.set_visible(true)?;
+            unsafe { SetWindowPos(render.view.hwnd(), Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
         }
         Ok(())
     }
@@ -922,6 +1144,70 @@ impl App {
                     | Command::Move { .. }
             );
         match c {
+            Command::TabPreview { id, rect, ticket } => {
+                let valid = id.as_ref().zip(rect).filter(|(id, r)| {
+                    r.valid()
+                        && r.width >= 1.
+                        && r.width <= 320.
+                        && r.height >= 1.
+                        && r.height <= 400.
+                        && self.preview_tabs(id).is_some()
+                });
+                if let Some((id, rect)) = valid {
+                    let id = id.clone();
+                    self.prepare_preview_backdrop(id.clone(), rect, ticket, false);
+                    if let Err(e) = self.ensure_preview_renders(&id) { self.error(e); self.dismiss_tab_preview(); }
+                } else {
+                    self.tab_preview = None;
+                    self.preview_backdrop = None;
+                    self.preview_renders.clear();
+                    if let Err(e) = self.sync_layout() { self.error(e); }
+                    self.emit(json!({"type":"tabPreviewHidden","ticket":ticket}));
+                }
+                return;
+            }
+            Command::TabPreviewReady { ticket } => {
+                if let Some(b) = self.preview_backdrop.as_ref().filter(|b| b.ticket == ticket && !b.pending.contains(&true)) {
+                    self.tab_preview = Some((b.id.clone(), b.rect));
+                    if let Err(e) = self.sync_layout() { self.error(e); }
+                    self.emit(json!({"type":"tabPreviewPresented","ticket":ticket}));
+                }
+                return;
+            }
+            Command::TabPreviewClose { ticket } => {
+                if let Some((id, rect)) = self.tab_preview.clone() {
+                    self.prepare_preview_backdrop(id, rect, ticket, true);
+                } else {
+                    self.dismiss_tab_preview();
+                    self.emit(json!({"type":"tabPreviewHidden","ticket":ticket}));
+                }
+                return;
+            }
+            Command::TabPreviewFailed { ticket } => {
+                if self.preview_backdrop.as_ref().is_some_and(|b| b.ticket == ticket) { self.dismiss_tab_preview(); }
+                return;
+            }
+            Command::TabPreviewRefresh { id } => {
+                if self
+                    .tab_preview
+                    .as_ref()
+                    .is_some_and(|(current, _)| current == &id)
+                {
+                    if let Some(ids) = self.preview_tabs(&id) {
+                        for id in ids {
+                            if let Some(page) =
+                                self.pages.get_mut(&id).filter(|p| !p.thumbnail_pending)
+                            {
+                                page.thumbnail_version += 1;
+                                page.thumbnail_attempt = None;
+                            }
+                        }
+                        self.pump_thumbnails();
+                        self.refresh_preview_renders();
+                    }
+                }
+                return;
+            }
             Command::Thumbnails => {
                 self.emit(json!({"type":"thumbnails","images":self.thumbnails.images()}));
                 self.refresh_visible_thumbnails();
@@ -956,6 +1242,7 @@ impl App {
                 return;
             }
             Command::PeekOpen { url, origin } => {
+                self.dismiss_tab_preview();
                 if let Err(e) = self.open_peek(&url, origin) {
                     self.error(e)
                 }
@@ -1091,6 +1378,9 @@ impl App {
                 return;
             }
             Command::Overlay { visible, command } => {
+                if visible {
+                    self.dismiss_tab_preview();
+                }
                 let clearing = self.command_backdrop.is_some() && !(visible && command);
                 if visible && command {
                     self.prepare_command_backdrop();
@@ -1191,6 +1481,7 @@ impl App {
                 return;
             }
             _ => {
+                self.dismiss_tab_preview();
                 if matches!(
                     c,
                     Command::Activate { .. }
@@ -1254,7 +1545,9 @@ impl ApplicationHandler<Event> for App {
             let proxy = self.proxy.clone();
             let dark = self.state.theme == "dark";
             let initialization = format!(
-                "document.documentElement.dataset.native='true';window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};",
+                // Document-created scripts may run before documentElement exists.
+                // App.onMounted sets the DOM attribute before the hidden window is shown.
+                "window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};",
                 serde_json::to_string(&self.state)?
             );
             let mut ui_context = WebContext::new(Some(self.ui_data.clone()));
@@ -1304,6 +1597,41 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::PreviewBackground(ticket, pane, image) => {
+                if let Some(b) = self.preview_backdrop.as_mut().filter(|b| b.ticket == ticket && b.pending[pane]) {
+                    b.pending[pane] = false;
+                    if let Some(image) = image {
+                        b.images[pane] = Some(image);
+                        self.publish_preview_backdrop();
+                    } else { self.dismiss_tab_preview(); }
+                }
+            }
+            Event::PreviewLoad(key, epoch, url, loading) => {
+                if let Some(render) = self.preview_renders.get_mut(&key).filter(|p| p.epoch == epoch) {
+                    if url.is_empty() {
+                        if render.loading { self.emit(json!({"type":"tabPreviewUnavailable","id":key})); }
+                    } else if model::is_web(&url) {
+                        render.loading = loading;
+                        if !loading {
+                            let proxy = self.proxy.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(140));
+                                let _ = proxy.send_event(Event::PreviewCapture);
+                            });
+                        }
+                    }
+                }
+            }
+            Event::PreviewCapture => self.refresh_preview_renders(),
+            Event::PreviewThumbnail(key, epoch, version, image) => {
+                if let Some(render) = self.preview_renders.get_mut(&key).filter(|p| p.epoch == epoch && p.version == version && p.pending) {
+                    render.pending = false;
+                    if let Some(image) = image {
+                        self.thumbnails.insert(key.clone(), render.source.clone(), image.clone());
+                        self.emit(json!({"type":"thumbnail","id":key,"image":image,"kept":self.thumbnails.images().keys().collect::<Vec<_>>()}));
+                    } else { self.emit(json!({"type":"tabPreviewUnavailable","id":key})); }
+                }
+            }
             Event::CommandBackground(ticket, pane, image) => {
                 if let Some(backdrop) = self
                     .command_backdrop
@@ -1492,11 +1820,13 @@ impl ApplicationHandler<Event> for App {
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
+            WindowEvent::Focused(false) => self.dismiss_tab_preview(),
             WindowEvent::CloseRequested => {
                 self.save();
                 event_loop.exit()
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.dismiss_tab_preview();
                 if let Err(e) = self.update_window_frame() {
                     self.error(e);
                 }

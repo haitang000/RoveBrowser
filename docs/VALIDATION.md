@@ -156,3 +156,37 @@ UI 共覆盖37项，最终全量执行中36项首轮通过。书签拖放用例�
 新增像素回归检查覆盖四边衰减、圆角、内部透明、外缘归零和1×/1.5×/2× DPI。23项 Rust 测试、Clippy（`-D warnings`）、Debug/Release 构建通过。computer-use 在独立 profile 和本地对比背景下观察了真实窗口外侧的四边投影，并实测缩放、移动、最大化/还原、最小化/恢复。35项原生集成检查最终通过，结果位于 `.local/shadow-review/native-retry/native-smoke.json`；首轮既有 Peek 离场动画的 `.peek-surface` 检查超时，重跑通过，原失败证据保留在 `.local/shadow-review/native-results`。
 
 接口依据：[UpdateLayeredWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatelayeredwindow)、[Layered Windows](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows)。尚未覆盖多屏混合 DPI 和其他 Windows 版本。
+
+## 标签悬停预览（2026-11-08）
+
+新增 `tests/tab-preview.test.ts` 验证当前分屏排除、部分卸载的保存组合、运行网址与保存标题、工作区范围，以及窄窗口/上下边缘定位。前端合计43项单元测试、TypeScript/Vite构建通过。新增5项 `tests/e2e/tab-preview.spec.ts`，覆盖短暂停留取消、600ms展开、相邻项立即更新、点击/滚动/Esc/浮层取消、未加载常用网站占位、分屏图片更新、480×400窗口、深色/减少动态效果，以及原生关闭回执与过期票据处理；5项全部通过。新增用例屏蔽外部 favicon 请求，使用显式图片 fixture 与图标回退，不依赖外网时序。
+
+全量46项 Edge UI 回归首次执行43项通过，3项在 `beforeEach` 的 `page.goto(..., waitUntil: load)` 超时，尚未进入功能断言。为排除外部图标请求，在 `.local/tab-preview-review/offline.playwright.config.ts` 使用独立5182端口，并令非本地代理请求快速失败，原3项（工作区/深色/分屏、纵向手势锁定、动画中途接手）均通过；该配置下新增5项也通过。保留原始失败记录于 `test-results`，没有修改这3项既有测试或应用的联网行为。
+
+Rust合计27项测试、Clippy（`-D warnings`）及Debug构建通过。GDI区域测试新增预览差集、1×/1.5×/2× DPI、负局部坐标，以及真实 HWND 在同尺寸下反复露出/恢复预览区域，确认其他像素与原网页圆角保留，区域缓存不会遗漏恢复。
+
+`npm run test:native:preview` 使用独立临时profile、本地固定网页与19746/19747端口，8项检查通过：真实单页快照/标题/URL、按秒更新、当前页持续可见与DOM保持、关闭后按钮仍可操作、未打开项没有网页请求或新增标签、从分屏任意一半查看两张快照、两侧原生网页保持可见、主题/Esc/命令栏协作。另执行既有命令栏4项及工作区4项原生检查，均通过。结果副本保留在 `.local/tab-preview-review/{native-tab-preview-smoke,native-command-smoke,native-spaces-smoke}.json`。
+
+computer-use 在独立测试窗口中核对了深色预览覆盖真实分屏的画面，周围两页正常显示，卡片圆角及边线正确。测试进程均已退出。原生版通过 HWND 区域差集展示卡片，不冻结整个网页；没有复制原版卡片外阴影和位置动画。快照复用原有64张/8MiB内存缓存，不写入会话或磁盘，不为占位项创建控制器。
+
+本次原生启动还复现并修复了 document-created 初始化时访问尚未存在的 `documentElement` 而提前异常的问题。宿主标识和初始状态现在先于Vue挂载设置，DOM属性在挂载后更新；原生检查明确断言宿主模式、初始状态和DOM标识均正确。
+
+## 基本布局回退（2026-11-08）
+
+按用户要求恢复 `db0e5f9` 时期的基本结构：完整32px顶栏，Rove标题位于窗口左上方12px，下方是240px侧栏与内缩圆角网页卡片。移除将标题栏推至侧栏右侧、网页贴边和侧栏占满窗口高度的CSS及无边框页面设置入口；已有会话的 `borderless` 字段保留兼容，但不再驱动实际布局。玻璃外观、分屏、命令栏和悬停预览继续工作。
+
+前端构建通过。相关14项界面回归通过，覆盖480px窄窗口、分屏、命令栏、全部悬停预览和侧栏开合；新增回归明确使用 `borderless: true` 的旧会话，断言标题栏 `(0,0,1280,32)`、Rove标题 `x=12`、侧栏 `(0,32,240,788)`、页面 `(240,32,1032,780)`，新标签内容在网页卡片内居中。修复版原生8项悬停检查通过，并通过computer-use核对真实窗口的完整标题栏、左上角Rove和下方侧栏/网页结构。
+
+用户正在运行的 `native/target/debug/rove.exe` 被Windows锁定，生成独立的 `native/target/debug/rove-layout-restored.exe` 供打开验证，没有中断原有窗口；构建时临时指定的二进制目标已从Cargo配置中恢复。原生结果位于 `.local/layout-rollback-review/native-tab-preview-smoke.json`。
+
+## 悬停预览动效与现场渲染（2026-11-08）
+
+按用户要求加入160ms淡入、120ms淡出和80ms减少动态效果模式。WAAPI只改变透明度，反转从当前屏幕透明度开始，相邻项即时更新；Esc、点击和浮层等即时动作直接取消。原生入场和离场分别准备当前网页背景，解码/绘制完成后确认原生圆角开孔；离场完成再恢复原生区域并接收关闭回执。过期背景、动画和关闭票据均忽略，当前网页保持可见。
+
+没有预览缓存时，已有页面现场捕获；未加载项用独立临时WebView2在受信UI后方渲染并生成JPEG。临时控制器不加入正式标签、会话或历史，收起时释放。保存项缓存可跨状态广播保留，网址改变时清除旧来源；现场加载或截图失败保留明确占位提示。新标签页使用内置Rove缩小布局。原生页面与临时渲染共用原有站点profile。
+
+前端43项单测、29项Rust测试、Clippy（`-D warnings`）、TypeScript/Vite及Debug构建通过。相关14项界面测试通过，覆盖入场/离场中间帧、离场反转无跳变、减少动态效果80ms、原生关闭回执、保存项缓存来源失效、命令栏和恢复后的旧版布局。
+
+更新后的原生脚本9项检查通过：真实后台页面捕获和按秒刷新、临时站点现场加载、正式标签数及选中项不变、历史查询为空、控制器关闭与缓存再次命中、分屏组合、深色主题，以及160/120ms动画的可控中间帧和背景解码/回收。computer-use观察了透明度约0.398的真实离场中间帧，卡片与下方网页正确混合，没有白底或周围页面隐藏，Rove仍位于左上角。最终结果在 `.local/preview-motion-review/final/native-tab-preview-smoke.json`，测试进程已退出。
+
+最终可执行文件为 `native/target/debug/rove.exe`，包含旧版基本布局、悬停动效与现场渲染。`rove-layout-restored.exe` 为上一轮构建，`rove-preview-motion.exe` 为本轮中间核对构建；两个临时二进制目标均未保留在Cargo配置中。

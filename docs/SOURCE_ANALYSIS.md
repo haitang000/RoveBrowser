@@ -19,6 +19,7 @@
 | `Zigzag/Window/BrowserRootView.swift` | sidebar 默认240，网页 inset8，分屏间距8，页面/侧栏互不覆盖 | PageArea.vue + DOM bounds → Rust |
 | `Zigzag/Window/PageCardView.swift` | 白色/深色页面表面、微弱接触阴影、页面圆角 | page-area CSS + native/src/clip.rs 原生 HWND 圆角区域 |
 | `Zigzag/Desk/DeskController.swift` | 按空间分组、过滤、卡片与caption、拖动移动 | Desk.vue + capture.rs/thumbnails.rs；使用实际 WebView2 快照，分屏卡片并排显示两张 |
+| `Zigzag/Sidebar/TabPreview.swift` | 600ms延迟、相邻项立即更新、当前分屏排除、双页快照及标题、按秒刷新、离开后120ms收起 | TabPreview.vue + tab-preview.ts；复用内存缓存，通过原生网页 HWND 的圆角区域差集露出卡片 |
 | `Zigzag/Peek/PeekController.swift` | 独立临时 tab，40 header，8% inset、Open as Tab | Peek.vue、peek-layout.ts、host.rs、capture.rs；同控制器晋升、临时生命周期、真实网页快照背景 |
 
 ## Space 触控板与背景动画移植
@@ -63,6 +64,18 @@
 ## 许可证处理与派生逻辑
 
 Tokens 的数值与设计规则转写进入 CSS，已在相关文件标记修改、保留版权及 Apache 来源。`licenses/zigzag-APACHE-2.0.txt`、`zigzag-NOTICE.txt`、`zigzag-TRADEMARKS.md` 原文保留；实际复用范围见 `THIRD_PARTY_NOTICES.md`。未移植 Zigzag 的扩展、密码、Reader 第三方代码。
+
+## 标签悬停预览移植
+
+2026-11-08按用户要求回退基本布局：恢复整行标题栏、其下侧栏与圆角网页卡片，取消无边框页面对标题栏和侧栏的重排；工作区玻璃和悬停预览保留。历史会话中的无边框偏好不再控制布局。
+
+沿用研究基线的 `Sidebar/TabPreview.swift` 与 `Design/Tokens.swift`：等待600ms、卡片宽320、说明区48、侧栏右侧间隔8、按当前页面宽高比生成画面（高度比最多0.9），在窗口上下边缘内收16。已显示时，移到其他可预览项立即更新；离开后120ms开始关闭，按下、拖动、滚动、Esc、失焦、切换工作区或打开浮层则立即取消。当前页及其分屏伙伴排除在外；固定项标题来自保存的名称，网址来自运行中的页面。
+
+`tab-preview.ts` 解析保存项与运行中分屏，`TabPreview.vue` 管理悬停、定位与展示，复用 `thumbnails.rs` 的64张/8MiB内存缓存。已有控制器每秒刷新；无缓存且没有已有控制器时，`native/src/preview.rs` 解析待预览项，宿主在受信UI后方创建最多两页临时WebView2。它们共用站点profile，但不进入正式标签、会话或历史，不处理网页IPC，拒绝新窗口和下载；关闭或切换目标时释放。加载完成后捕获JPEG，用保存项或运行标签的稳定ID缓存，编辑网址时淘汰旧来源。加载/截图失败时保留明确的占位信息。WebView2 的 `IsVisible=false` 会停止绘制，因此已有后台控制器在观看期间也会放到受信UI后方渲染，关闭时重新隐藏。画面和标题分别处理，两页并排且等宽；当前模型没有保存后台分屏比例。
+
+Windows 的网页是独立 HWND，CSS z-index 不能覆盖它。宿主从可见网页原有圆角区域中减去预览卡片的圆角区域，在该处露出下方的受信UI，其余网页继续实时渲染并接收输入。按用户后续要求增加160ms入场/120ms离场的WAAPI透明度过渡，从屏幕当前透明度中断和反转；相邻项即时更新。减少动态效果为80ms，快捷键等即时操作不等待动画。为保证透明过渡正确，入场和离场前分别捕获当前网页背景（每页PNG上限8MiB），前端解码并绘制后才确认露出区域；背景仅在卡片的原生开孔处可见，其他区域仍由实时网页覆盖。动画期间无需逐帧更新HWND；离场结束后先恢复原生区域，再回执前端移除卡片和背景，并以递增票据拒绝旧解码/动画回调。原生版保留圆角和细边线，不复制原版外阴影和位置动画。
+
+原生联调同时修复初始化脚本的时序：document-created 阶段先设置宿主标识和初始状态，DOM 属性由挂载后的 App 设置。根节点尚未创建时不再提前异常，窗口仍在首帧准备完成后才显示。
 
 ## Peek 后续移植
 

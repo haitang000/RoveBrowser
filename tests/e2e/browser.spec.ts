@@ -35,7 +35,7 @@ test("source-derived sidebar metrics and responsive layouts", async ({
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await expect.poll(async () => (await page.locator(".page-area").boundingBox())!.width).toBeGreaterThan(size.width === 480 ? 240 : 300);
+    await expect.poll(async () => (await page.locator(".page-area").boundingBox())!.width).toBeGreaterThan(size.width === 480 ? 220 : 300);
     await page.keyboard.press("Control+t");
     const panel = await page.locator(".command-panel").boundingBox();
     expect(panel!.y + panel!.height).toBeLessThanOrEqual(size.height);

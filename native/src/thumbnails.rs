@@ -34,14 +34,19 @@ impl Cache {
             self.bytes -= image.len()
         }
     }
-    pub fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
-        self.entries.retain(|id, (_, image, _)| {
-            let yes = keep(id);
+    pub fn retain_sources(&mut self, mut keep: impl FnMut(&str, &str) -> bool) {
+        self.entries.retain(|id, (url, image, _)| {
+            let yes = keep(id, url);
             if !yes {
                 self.bytes -= image.len()
             }
             yes
         });
+    }
+    pub fn has(&self, id: &str, url: &str) -> bool {
+        self.entries
+            .get(id)
+            .is_some_and(|(source, _, _)| source == url)
     }
     pub fn images(&self) -> HashMap<&str, &str> {
         self.entries
@@ -65,9 +70,22 @@ mod tests {
         }
         assert!(c.bytes <= MAX_BYTES && c.entries.len() <= MAX_ENTRIES);
         assert!(!c.entries.contains_key("0"));
-        c.retain(|id| id == "79");
+        c.retain_sources(|id, _| id == "79");
         assert_eq!(c.entries.len(), 1);
         c.remove("79");
         assert_eq!(c.bytes, 0);
+    }
+    #[test]
+    fn a_saved_preview_is_invalidated_when_its_source_url_changes() {
+        let mut c = Cache::default();
+        c.insert(
+            "saved".into(),
+            "https://example.com/one".into(),
+            "image".into(),
+        );
+        assert!(c.has("saved", "https://example.com/one"));
+        assert!(!c.has("saved", "https://example.com/two"));
+        c.retain_sources(|_, url| url == "https://example.com/two");
+        assert!(c.images().is_empty());
     }
 }

@@ -47,7 +47,8 @@ function drop(e: DragEvent, before?: string) {
   <div class="favorites" aria-label="常用网站" @dragover.prevent @drop.prevent.self="drop($event)">
     <div v-for="f in tiles" :key="f.id" class="favorite-tile" :data-bookmark-id="f.id" draggable="true" @dragstart="drag($event, f)" @dragend="b.dragging = false" @dragover.prevent @drop.prevent.stop="drop($event, f.id)" @contextmenu.prevent="showMenu($event, f)" @mousedown.middle.prevent @auxclick.middle.prevent.stop="b.send({ type: 'bookmarkUnload', id: f.id })">
     <button class="favorite-open" draggable="true" @dragstart.stop="drag($event, f)"
-      :title="f.title"
+      :title="b.previewTarget === f.id ? undefined : f.title"
+      :aria-describedby="b.previewTarget === f.id ? 'tab-hover-preview' : undefined"
       :aria-label="f.title"
       :class="{
         chosen: !!b.active?.bookmarkId && (b.active.bookmarkId === f.id || b.active.bookmarkId === f.splitWith),
