@@ -3,6 +3,7 @@ import type { BrowserState, Command, Tab } from "./types";
 import { address, host } from "./address";
 import { favorite, MAX_FAVORITES, sameFavoriteUrl } from "./favorites";
 import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, upgradeLibrary } from "./bookmarks";
+import { tabsToDismiss } from "./command";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -189,6 +190,18 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     case "unsplit": {
       const t = tab();
       if (t) delete t.splitWith;
+      break;
+    }
+    case "closeOthers":
+    case "closeBelow": {
+      for (const id of tabsToDismiss(s, c.type === "closeOthers" ? "others" : "below")) {
+        const closing = s.tabs.find((item) => item.id === id);
+        if (!closing || closing.bookmarkId) continue;
+        s.closed.push({ ...closing, splitWith: undefined });
+        s.tabs = s.tabs.filter((item) => item.id !== id);
+        s.tabs.forEach((item) => { if (item.splitWith === id) delete item.splitWith; });
+      }
+      s.closed = s.closed.slice(-30);
       break;
     }
   }

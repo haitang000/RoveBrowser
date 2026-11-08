@@ -45,3 +45,20 @@ test("new command stays over the current page and dismisses outside the panel", 
   await expect(page.getByRole("combobox")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Work", exact: true })).toBeVisible();
 });
+
+test("tab searches one site and a named command runs", async ({ page }) => {
+  await page.goto("/");
+  await page.keyboard.press("Control+t");
+  const field = page.getByRole("combobox");
+  await field.fill("you");
+  await expect(page.getByText("Search YouTube")).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(field).toHaveAttribute("placeholder", "Search YouTube");
+  await field.fill("cats");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("tab", { selected: true })).toHaveAttribute("title", /search_query=cats/);
+  await page.keyboard.press("Control+t");
+  await field.fill("settings");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "工作区与外观" })).toBeVisible();
+});
