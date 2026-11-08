@@ -432,13 +432,14 @@ unsafe extern "system" fn procedure(
                 dwHoverTime: 0,
             };
             let _ = TrackMouseEvent(&mut track);
-            // Preserve USER32's Snap tracking. Its paint messages are suppressed
-            // below, so the system never draws over the custom controls.
-            return DefSubclassProc(hwnd, msg, wparam, lparam);
+            // Do not pass caption-button tracking to USER32: it can paint the
+            // legacy themed buttons over our custom caption surface. Snap
+            // Layouts still see HTMAXBUTTON from WM_NCHITTEST.
+            return LRESULT(0);
         }
         WM_NCMOUSELEAVE if hwnd != s.surface.get() => {
             set_hot(s, None);
-            return DefSubclassProc(hwnd, msg, wparam, lparam);
+            return LRESULT(0);
         }
         WM_NCPAINT | WM_NCUAHDRAWCAPTION | WM_NCUAHDRAWFRAME if hwnd != s.surface.get() => {
             return LRESULT(0);
@@ -537,7 +538,7 @@ unsafe extern "system" fn procedure(
         }
         _ => {}
     }
-    // DefWindowProc sees real non-client mouse messages and supplies Windows' flyout.
+    // Other non-client messages retain the window's normal handling.
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 unsafe fn set_hot(s: &State, hot: Option<Button>) {
