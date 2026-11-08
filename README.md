@@ -21,6 +21,7 @@ npm run native:build
 .\scripts\package.ps1 # 打包便携 zip，包含许可证
 .\scripts\package.ps1 -Variant peek # 单独输出 Peek 版本，适用于旧便携版正在运行时
 .\scripts\package.ps1 -Variant snap-thumbnails # 缩略图与原生 Snap 菜单版本
+npm run installer # 构建 Windows 安装程序（需要 Inno Setup 6.7.3，或更新的 6.x）
 npm run dev       # 浏览器中预览 UI，明确标记为预览，不加载外部网页
 npm test
 npm run test:e2e  # 使用本机 Microsoft Edge headless
@@ -31,6 +32,18 @@ npm run test:native:preview # 先 cargo build；本地网页验证真实 WebView
 npm run test:native:settings # 先 cargo build；设置持久化、真实下载和浏览数据清理
 cargo test --manifest-path native/Cargo.toml
 ```
+
+## Windows 安装版
+
+运行 `release\Rove-0.1.0-beta4-windows-x64-setup.exe`，支持 Windows 10/11 x64 及可运行 x64 应用的 Windows ARM64。默认安装到 `%LOCALAPPDATA%\Programs\Rove`，无需管理员权限；创建开始菜单快捷方式，可选桌面快捷方式，并可通过 Windows 设置中的应用列表卸载。同一用户重新运行安装程序即可覆盖升级，安装及卸载均保留原有 EraBrowser 用户数据、会话和登录状态。安装程序尚未代码签名。
+
+已安装 Microsoft Edge WebView2 Evergreen Runtime 时可离线安装；缺少时安装程序会使用内置的微软引导程序联网安装运行时，失败会提示重试。安装版应用静态链接 VC++ 运行库，无需额外安装 VC++ Redistributable，也不需要 Node.js 或 Rust。
+
+安装向导沿用 Rove 官网的白底、深灰标题、Outfit 字体和深色渐变按钮；中文使用 Microsoft YaHei UI。安装步骤、目录选择、快捷方式和完成页均使用同一布局，主按钮保留原生键盘及辅助功能支持。高对比度模式保留系统安装向导外观，字体仅为安装进程临时加载。
+
+开发者先安装 [Inno Setup 6.7.3（或更新的 6.x）](https://jrsoftware.org/isinfo.php)，然后运行 `npm run installer`。编译器不在默认位置时，设置 `$env:INNO_SETUP_COMPILER='C:\path\to\ISCC.exe'`，或运行 `.\scripts\installer.ps1 -CompilerPath 'C:\path\to\ISCC.exe'`。脚本重新构建前端及 x64 原生程序，校验微软 WebView2 引导程序的数字签名，输出 `release\Rove-<版本>-windows-x64-setup.exe`。已有同一源码的安装版构建产物时，可以用 `npm run installer -- -SkipBuild` 只重新打包。
+
+GitHub Release 工作流同时生成安装 EXE 和便携 ZIP。静默安装支持 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`，可追加 `/DIR="C:\path\to\Rove"`；静默模式不会自动启动应用。
 
 ## 已实现
 
@@ -80,6 +93,6 @@ cargo test --manifest-path native/Cargo.toml
 - 标题栏使用 WebView2 原生拖动区域，四边与四角由 Win32 命中测试直接处理缩放；Snap Layout 菜单由 Windows 提供，是否显示遵循系统版本和设置。多屏幕混合 DPI、各类 Snap 区域及最大化边界仍需更多实机覆盖。
 - 侧栏折叠采用源码180ms时长，尚未复制原生浮动侧栏的边缘呼出。分屏比例暂不跨重启保存（组合关系保存）。
 - 图标为自绘线图标，SF Pro 换为 Inter 和 Windows 中文字体；frame 已按原始 OKLab 公式生成，accent/ink 尚未移植完整 Brand.Theme 求解；没有宣称像素级一致。
-- 尚无安装器/自动更新/扩展支持/站点权限管理界面。不是生产发行版。
+- 尚无自动更新/扩展支持/站点权限管理界面。不是生产发行版。
 
 验证结果详见 [验证记录](docs/VALIDATION.md)。第三方来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

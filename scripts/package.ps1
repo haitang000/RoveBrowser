@@ -1,7 +1,8 @@
-param(
+﻿param(
     [ValidatePattern('^[a-zA-Z0-9-]*$')]
     [string]$Variant = '',
-    [string]$ExecutablePath = ''
+    [string]$ExecutablePath = '',
+    [switch]$SkipArchive
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -21,6 +22,10 @@ Set-Content -LiteralPath (Join-Path $bundleRoot '运行说明.txt') -Encoding ut
 默认数据沿用当前用户 LocalAppData 下的 EraBrowser 目录，保留已有标签和登录状态。
 这是基础开发版，功能范围与已知限制见 README.md 和 docs/VALIDATION.md。
 '@
+if ($SkipArchive) {
+    Get-Item -LiteralPath $bundleRoot
+    return
+}
 $archive = "$bundleRoot.zip"
 Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $archive -Force
 Get-Item -LiteralPath $archive | Select-Object FullName, Length

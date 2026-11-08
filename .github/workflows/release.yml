@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   windows:
-    name: Build Windows executable
+    name: Build Windows installer and portable zip
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -42,16 +42,25 @@ jobs:
       - name: Run unit tests
         run: npm test
 
-      - name: Build frontend and release executable
-        run: npm run native:build
+      - name: Ensure Inno Setup compiler
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          choco upgrade innosetup --version=6.7.3 --allow-downgrade --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+          if (-not (Test-Path -LiteralPath $compiler)) { throw 'ISCC.exe not found.' }
+          "INNO_SETUP_COMPILER=$compiler" >> $env:GITHUB_ENV
+
+      - name: Build Windows installer
+        run: npm run installer
         env:
           CARGO_TERM_COLOR: always
 
       - name: Package portable zip
         shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -ExecutablePath native/target/x86_64-pc-windows-msvc/release/rove.exe
 
-      - name: Upload zip to the GitHub Release
+      - name: Upload installer and zip to the GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,10 +68,12 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           $archives = @(Get-ChildItem -LiteralPath release -Filter *.zip)
-          if ($archives.Count -ne 1) {
-            throw "Expected one release zip, found $($archives.Count)."
+          $installers = @(Get-ChildItem -LiteralPath release -Filter *-setup.exe)
+          if ($archives.Count -ne 1 -or $installers.Count -ne 1) {
+            throw "Expected one zip and one installer, found $($archives.Count) and $($installers.Count)."
           }
-          if ($archives[0].Length -le 0) {
-            throw "Release zip is empty: $($archives[0].FullName)"
+          foreach ($artifact in @($archives[0], $installers[0])) {
+            if ($artifact.Length -le 0) { throw "Release artifact is empty: $($artifact.FullName)" }
           }
-          gh release upload $env:RELEASE_TAG $archives[0].FullName --clobber
+          gh release upload $env:RELEASE_TAG $archives[0].FullName $installers[0].FullName --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }

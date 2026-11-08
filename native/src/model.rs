@@ -618,7 +618,14 @@ impl State {
                     self.spaces.retain(|s| &s.id != id);
                     self.pins.retain(|p| p.space_id.as_ref() != Some(id));
                     if &self.active_space == id { self.active_space = self.spaces[0].id.clone(); }
-                    for t in &mut self.tabs { if &t.space_id == id { t.space_id = self.active_space.clone(); } if t.split_with.as_ref().is_some_and(|id| removed.contains(id)) { t.split_with = None; } }
+                    for t in &mut self.tabs {
+                        if &t.space_id == id {
+                            t.space_id = self.active_space.clone();
+                        }
+                        if t.split_with.as_ref().is_some_and(|id| removed.contains(id)) {
+                            t.split_with = None;
+                        }
+                    }
                     self.tabs.retain(|t| !removed.contains(&t.id));
                     self.closed.retain(|t| &t.space_id != id);
                     if !self.tabs.iter().any(|t| t.id == self.active_tab) { self.active_tab = self.tabs.iter().find(|t| t.space_id == self.active_space).map(|t| t.id.clone()).unwrap_or_default(); if self.active_tab.is_empty() { self.new_tab("")?; } }

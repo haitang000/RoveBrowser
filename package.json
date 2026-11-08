@@ -1,6 +1,6 @@
 {
   "name": "rove",
-  "version": "0.1.0-beta3",
+  "version": "0.1.0-beta4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "test": "vitest run",
     "native:dev": "npm run build && cargo run --manifest-path native/Cargo.toml",
     "native:build": "npm run build && cargo build --release --manifest-path native/Cargo.toml",
+    "installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer.ps1",
     "test:e2e": "playwright test",
     "test:native": "node scripts/native-smoke.mjs",
     "test:native:favorites": "node scripts/native-favorites-smoke.mjs",

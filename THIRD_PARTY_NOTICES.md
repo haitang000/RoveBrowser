@@ -32,8 +32,16 @@ Versions are fixed in package-lock.json and native/Cargo.lock. This list disting
 | directories | MIT OR Apache-2.0 |
 | SQLite (bundled via libsqlite3-sys) | Public domain |
 | Inter Variable via @fontsource-variable/inter | SIL Open Font License 1.1 |
-| Microsoft Edge WebView2 Runtime | Microsoft proprietary runtime; installed separately, not bundled |
+| Microsoft Edge WebView2 Runtime | Microsoft proprietary runtime; installed separately; the installer includes Microsoft's signed Evergreen bootstrapper |
 
 Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter). Unmodified Latin and Latin Extended variable WOFF2 files are bundled locally. The font copyright and full OFL are preserved in `licenses/dependencies/npm/@fontsource-variable_inter-*/LICENSE`.
 
 Transitive dependencies retain their own licenses. Locked Windows Rust dependencies and npm production dependencies are recorded in `licenses/DEPENDENCIES.json`; available license/notice texts are preserved under `licenses/dependencies`. Regenerate with `node scripts/collect-licenses.mjs`. No upstream Zigzag Reader/Readability, Sparkle, ad-block rules, font files, logo assets or extensions have been imported.
+
+## Windows installer
+
+The Windows installer is generated with [Inno Setup](https://jrsoftware.org/isinfo.php). The Simplified Chinese messages in `installer/ChineseSimplified.isl` use the user-contributed translation from [Inno Setup 6.7.3](https://github.com/jrsoftware/issrc/blob/is-6_7_3/Files/Languages/Unofficial/ChineseSimplified.isl), maintained by Zhenghan Yang; only trailing whitespace is normalized, and the upstream attribution is preserved. The compiler is a build tool and is not included in the application payload.
+
+The installer temporarily loads the unmodified [Outfit variable font](https://github.com/google/fonts/tree/main/ofl/outfit) to match the Rove website. Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts), licensed under the SIL Open Font License 1.1. Its full license is preserved in `installer/assets/Outfit-LICENSE.txt` and installed under `licenses/Outfit-LICENSE.txt`. It is not installed as a system font.
+
+Microsoft's signed WebView2 Evergreen bootstrapper is included in the installer and runs only when the runtime is missing. The runtime is downloaded from Microsoft and remains subject to [Microsoft's WebView2 Runtime terms](https://developer.microsoft.com/microsoft-edge/webview2/).

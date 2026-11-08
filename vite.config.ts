@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 export default defineConfig({
-  define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version || "0.1.0-beta3") },
+  define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version || "0.1.0-beta4") },
   plugins: [vue()],
   base: "./",
   server: {
