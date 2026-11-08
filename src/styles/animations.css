@@ -60,6 +60,16 @@
     opacity: 0.3;
   }
 }
+:root[data-reduce-motion=true] *,
+:root[data-reduce-motion=true] *::before,
+:root[data-reduce-motion=true] *::after {
+  transition-duration: .01ms !important;
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+}
+:root[data-reduce-motion=true] :is(.panel-enter-from .command-panel,.panel-leave-to .command-panel,.tab-enter-from,.tab-leave-to) { transform: none; }
+:root[data-reduce-motion=true] .tab-move { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   *,
   *:before,

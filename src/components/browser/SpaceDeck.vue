@@ -15,7 +15,8 @@ const panes = ref([{ id: center.value, slot: 0 }]);
 const tracking = ref(false), settling = ref(false);
 const scroll = new Map<string, number>();
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
-const reduced = ref(motion.matches);
+const systemReduced = ref(motion.matches);
+const reduced = computed(() => systemReduced.value || b.settings.reduceMotion);
 let phase: "idle" | "deciding" | "scrolling" | "tracking" | "finished" = "idle";
 let lastEvent = -Infinity, lastDeltaX = 0, accumX = 0, accumY = 0, travel = 0;
 let samples: SwipeSample[] = [], release: ReturnType<typeof setTimeout> | undefined;
@@ -199,7 +200,8 @@ function reset() {
   clearRelease(); interrupt(); phase = "idle"; tracking.value = false;
   offset.value = 0; panes.value = [{ id: center.value, slot: 0 }]; emit("progress", null);
 }
-function motionChanged() { reduced.value = motion.matches; reset(); }
+function motionChanged() { systemReduced.value = motion.matches; reset(); }
+watch(() => b.settings.reduceMotion, reset);
 function visibilityChanged() { if (document.hidden) cancel(); }
 watch(() => b.state.activeSpace, (id) => { if (id !== center.value) void switchTo(id); });
 watch(() => props.blocked || b.state.sidebarCollapsed, (blocked) => { if (blocked) cancel(); });

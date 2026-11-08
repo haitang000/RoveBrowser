@@ -64,6 +64,8 @@ pub struct State {
     pub closed: Vec<Tab>,
     pub theme: String,
     pub sidebar_collapsed: bool,
+    #[serde(default)]
+    pub settings: crate::settings::Settings,
     /// The page meets the window edges. Absent in an older session means on.
     #[serde(default = "default_borderless")]
     pub borderless: bool,
@@ -115,6 +117,20 @@ impl Rect {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Command {
+    #[serde(rename = "settingsOpen")]
+    OpenSettings { pane: Option<String> },
+    #[serde(rename = "settingsUpdate")]
+    UpdateSettings { settings: crate::settings::Settings },
+    #[serde(rename = "settingsPane")]
+    SettingsPane { id: String, pane: String },
+    #[serde(rename = "spaceDelete")]
+    DeleteSpace { id: String },
+    #[serde(rename = "spaceReorder")]
+    ReorderSpace { id: String, before: String },
+    #[serde(rename = "clearBrowsingData")]
+    ClearBrowsingData { kind: String },
+    #[serde(rename = "systemSettings")]
+    SystemSettings,
     #[serde(rename = "ready")]
     Ready,
     #[serde(rename = "presented")]
@@ -203,7 +219,7 @@ pub enum Command {
     #[serde(rename = "space")]
     SwitchSpace { id: String },
     #[serde(rename = "spaceCreate")]
-    CreateSpace { name: String, color: String },
+    CreateSpace { name: String, color: String, #[serde(default)] background: bool, #[serde(default)] translucency: f64, #[serde(default, rename = "clearGlass")] clear_glass: Option<bool> },
     #[serde(rename = "spaceUpdate")]
     UpdateSpace {
         id: String,
@@ -276,10 +292,14 @@ pub enum Command {
     PeekBackdropFailed { id: String, ticket: u64 },
 }
 pub fn normalize(input: &str) -> Result<String, String> {
+    normalize_with(input, &crate::settings::Settings::default())
+}
+pub fn normalize_with(input: &str, settings: &crate::settings::Settings) -> Result<String, String> {
     let text = input.trim();
     if text.is_empty() || text == "era://newtab" {
         return Ok("era://newtab".into());
     }
+    if let Some(url) = crate::settings::normalize_settings_url(text) { return Ok(url); }
     let candidate = if text.starts_with("http://") || text.starts_with("https://") {
         text.to_string()
     } else if !text.contains(char::is_whitespace)
@@ -291,9 +311,7 @@ pub fn normalize(input: &str) -> Result<String, String> {
     } else if text.contains(':') {
         return Err("仅支持 HTTP 和 HTTPS 网页".into());
     } else {
-        let mut u = url::Url::parse("https://www.google.com/search").unwrap();
-        u.query_pairs_mut().append_pair("q", text);
-        return Ok(u.to_string());
+        return Ok(settings.search_url(text));
     };
     let u = url::Url::parse(&candidate).map_err(|_| "地址格式不正确")?;
     if !matches!(u.scheme(), "http" | "https")
@@ -382,6 +400,7 @@ impl Default for State {
             closed: vec![],
             theme: "light".into(),
             sidebar_collapsed: false,
+            settings: crate::settings::Settings::default(),
             borderless: true,
         };
         for (title, url) in [
@@ -423,12 +442,12 @@ impl State {
         if self.tabs.len() >= 256 {
             return Err("已达到 256 个标签页上限".into());
         }
-        let url = normalize(input)?;
-        let title = url::Url::parse(&url)
+        let url = normalize_with(input, &self.settings)?;
+        let title = if crate::settings::is_settings(&url) { "设置".into() } else { url::Url::parse(&url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_string))
             .filter(|_| url != "era://newtab")
-            .unwrap_or("New Tab".into());
+            .unwrap_or("New Tab".into()) };
         let id = Uuid::new_v4().to_string();
         self.tabs.push(Tab {
             id: id.clone(),
@@ -522,6 +541,13 @@ impl State {
         }
     }
     pub fn repair(&mut self) {
+        // A missing removable download folder must not reset unrelated preferences.
+        self.settings.repair();
+        for tab in self.tabs.iter_mut().chain(self.closed.iter_mut()) {
+            if let Some(url) = crate::settings::normalize_settings_url(&tab.url) {
+                tab.url = url;
+            }
+        }
         if self.spaces.is_empty() {
             *self = Self::default();
             return;
@@ -536,7 +562,7 @@ impl State {
             if !self.spaces.iter().any(|s| s.id == t.space_id) {
                 t.space_id = self.active_space.clone()
             }
-            if !is_web(&t.url) {
+            if !is_web(&t.url) && !crate::settings::is_settings(&t.url) {
                 t.url = "era://newtab".into()
             }
             if t.split_with
@@ -557,11 +583,53 @@ impl State {
             return Ok(());
         }
         match c {
+            Command::OpenSettings { pane } => {
+                let existing = self.tabs.iter().find(|t| t.space_id == self.active_space && crate::settings::is_settings(&t.url))
+                    .or_else(|| self.tabs.iter().find(|t| crate::settings::is_settings(&t.url))).map(|t| t.id.clone());
+                if let Some(id) = existing {
+                    if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
+                        tab.url = if let Some(pane) = pane { crate::settings::settings_url(Some(pane)) }
+                            else { crate::settings::normalize_settings_url(&tab.url).unwrap() };
+                    }
+                    self.activate(&id);
+                } else { self.new_tab(&crate::settings::settings_url(pane.as_deref()))?; }
+            }
+            Command::SettingsPane { id, pane } => {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| &t.id == id && crate::settings::is_settings(&t.url)) {
+                    tab.url = crate::settings::settings_url(Some(pane));
+                }
+            }
+            Command::UpdateSettings { settings } => {
+                let mut next = settings.clone(); next.validate()?; self.settings = next;
+            }
+            Command::ReorderSpace { id, before } => {
+                if id != before && self.spaces.iter().any(|s| &s.id == before) {
+                    if let Some(index) = self.spaces.iter().position(|s| &s.id == id) {
+                        let space = self.spaces.remove(index);
+                        let target = self.spaces.iter().position(|s| &s.id == before).unwrap();
+                        self.spaces.insert(target, space);
+                    }
+                }
+            }
+            Command::DeleteSpace { id } => {
+                if self.spaces.len() <= 1 { return Err("至少保留一个工作区".into()); }
+                if self.spaces.iter().any(|s| &s.id == id) {
+                    let removed: Vec<_> = self.tabs.iter().filter(|t| &t.space_id == id && !self.favorites.iter().any(|f| Some(&f.id) == t.bookmark_id.as_ref())).map(|t| t.id.clone()).collect();
+                    self.spaces.retain(|s| &s.id != id);
+                    self.pins.retain(|p| p.space_id.as_ref() != Some(id));
+                    if &self.active_space == id { self.active_space = self.spaces[0].id.clone(); }
+                    for t in &mut self.tabs { if &t.space_id == id { t.space_id = self.active_space.clone(); } if t.split_with.as_ref().is_some_and(|id| removed.contains(id)) { t.split_with = None; } }
+                    self.tabs.retain(|t| !removed.contains(&t.id));
+                    self.closed.retain(|t| &t.space_id != id);
+                    if !self.tabs.iter().any(|t| t.id == self.active_tab) { self.active_tab = self.tabs.iter().find(|t| t.space_id == self.active_space).map(|t| t.id.clone()).unwrap_or_default(); if self.active_tab.is_empty() { self.new_tab("")?; } }
+                }
+            }
             Command::New { url } => self.new_tab(url)?,
             Command::Navigate { url } => {
-                let u = normalize(url)?;
+                let u = normalize_with(url, &self.settings)?;
                 if let Some(t) = self.tabs.iter_mut().find(|t| t.id == self.active_tab) {
                     t.url = u;
+                    if crate::settings::is_settings(&t.url) { t.title = "设置".into(); }
                     t.favicon = None
                 }
             }
@@ -690,7 +758,8 @@ impl State {
                     }
                 }
             }
-            Command::CreateSpace { name, color } => {
+            Command::CreateSpace { name, color, background, translucency, clear_glass } => {
+                if name.trim().is_empty() { return Err("请输入工作区名称".into()); }
                 if !valid_color(color) {
                     return Err("未知工作区颜色".into());
                 }
@@ -700,13 +769,12 @@ impl State {
                 let id = Uuid::new_v4().to_string();
                 self.spaces.push(Space {
                     id: id.clone(),
-                    name: name.chars().take(40).collect(),
+                    name: name.trim().chars().take(40).collect(),
                     color: color.clone(),
-                    translucency: None,
-                    clear_glass: None,
+                    translucency: (0.005..=1.0).contains(translucency).then_some(*translucency),
+                    clear_glass: (*clear_glass == Some(false)).then_some(false),
                 });
-                self.active_space = id;
-                self.new_tab("")?
+                if !background { self.active_space = id; self.new_tab("")?; }
             }
             Command::UpdateSpace {
                 id,

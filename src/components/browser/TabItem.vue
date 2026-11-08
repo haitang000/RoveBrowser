@@ -4,6 +4,7 @@ import type { Tab } from "../../lib/types";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
 import { savedPage, samePinnedUrl } from "../../lib/bookmarks";
+import { isSettingsUrl } from "../../lib/settings";
 const props = defineProps<{ tab: Tab }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser();
@@ -35,6 +36,7 @@ function drop(e: DragEvent) {
     :data-bookmark-id="tab.bookmarkId"
     :class="{ selected: b.state.activeTab === tab.id, loading: tab.loading, unloaded: tab.unloaded }"
     role="tab"
+    :aria-label="tab.title"
     :aria-selected="b.state.activeTab === tab.id"
     :tabindex="b.state.activeTab === tab.id ? 0 : -1"
     :title="b.previewTarget === (tab.bookmarkId || tab.id) ? undefined : tab.url"
@@ -51,7 +53,7 @@ function drop(e: DragEvent) {
     @contextmenu.prevent="emit('menu', $event, tab)"
   >
     <span class="tab-picture"
-      ><Icon v-if="tab.splitWith" name="split" /><Favicon
+      ><Icon v-if="tab.splitWith" name="split" /><Icon v-else-if="isSettingsUrl(tab.url)" name="settings" /><Favicon
         v-else
         :url="tab.url"
         :favicon="tab.favicon" /></span

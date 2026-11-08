@@ -9,9 +9,11 @@ mod host;
 mod model;
 mod preview;
 mod shadow;
+mod settings;
 mod storage;
 mod suggestions;
 mod thumbnails;
+mod web_settings;
 fn main() {
     if let Err(e) = host::run() {
         eprintln!("Rove: {e}");

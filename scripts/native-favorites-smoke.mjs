@@ -41,6 +41,7 @@ async function launch() {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   ui = await waitFor(() => Promise.resolve(browser.contexts().flatMap(c => c.pages()).find(p => p.url() === 'https://era.ui/index.html')), 'UI page');
   await ui.waitForSelector('.sidebar');
+  await ui.evaluate(() => window.ipc.postMessage(JSON.stringify({ type: 'settingsUpdate', settings: { ...window.__ERA_INITIAL_STATE__.settings, askBeforeQuit: false } })));
   await ui.evaluate(() => {
     window.__favoriteErrors = [];
     const receive = window.__ERA_RECEIVE__;

@@ -60,5 +60,5 @@ test("tab searches one site and a named command runs", async ({ page }) => {
   await page.keyboard.press("Control+t");
   await field.fill("settings");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("dialog", { name: "工作区与外观" })).toBeVisible();
+  await expect(page.locator(".settings-page")).toBeVisible();
 });

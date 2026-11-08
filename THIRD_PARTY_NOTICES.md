@@ -16,6 +16,8 @@ The saved-page lifecycle and selected algorithms in `native/src/bookmarks.rs` an
 
 The hover-preview delay, dismissal rules, grouped captions and snapshot-refresh behavior in `src/components/browser/TabPreview.vue` and `src/lib/tab-preview.ts` are adapted from Zigzag's `Sidebar/TabPreview.swift` and `Design/Tokens.swift`. Copyright 2026 Zigao Wang; Apache-2.0. The native cutout, rendering order, bounded in-memory thumbnail refresh and close acknowledgment are new Windows/WebView2 adaptations; no Swift implementation is compiled.
 
+The settings page, searchable form grouping, responsive navigation, internal settings addresses, search engine definitions and shortcut customization are translated from `Settings/SettingsView.swift`, `Settings/SettingsPage.swift`, `Settings/Shortcuts.swift`, `App/Library.swift` and `Design/Tokens.swift` at upstream commit `12183cbaf5acf68ac4a23a1d5003b1b10d587e03`. Copyright 2026 Zigao Wang; Apache-2.0. The implementation uses Vue controls, Rust validation and SQLite session storage, with new Windows/WebView2 adapters for preferences, download destinations, data clearing and exit confirmation. See `docs/SETTINGS_PORT.md` for the supported behavior and platform differences.
+
 ## Direct implementation dependencies
 
 Versions are fixed in package-lock.json and native/Cargo.lock. This list distinguishes direct dependencies from upstream features that Rove does not use.

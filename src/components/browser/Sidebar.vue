@@ -21,7 +21,7 @@ function showMenu(e: MouseEvent, tab: Tab) {
 <template>
   <aside class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)">
     <div class="sidebar-header">
-      <h1 class="space-name" :title="b.space.name">{{ b.space.name }}</h1>
+      <h1 class="space-name" :class="{compact: !b.settings.largeSpaceNames}" :title="b.space.name">{{ b.space.name }}</h1>
     </div>
     <Favorites />
     <SpaceDeck ref="spaceDeck" :blocked="b.overlay || Boolean(b.peek) || Boolean(b.contextMenu)" @menu="showMenu" @progress="swipeShares = $event" />

@@ -13,16 +13,16 @@ use std::{
     rc::Rc,
 };
 use webview2_com::{
-    take_pwstr, AcceleratorKeyPressedEventHandler, FaviconChangedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, DownloadStartingEventHandler, FaviconChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2NavigationStartingEventArgs3, ICoreWebView2NewWindowRequestedEventArgs2,
-        ICoreWebView2_15, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+        ICoreWebView2_15, ICoreWebView2_4, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
         COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT,
     },
     NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
 };
 use windows::{
-    core::{Interface, BOOL, PWSTR},
+    core::{Interface, BOOL, PWSTR, HSTRING},
     Win32::{
         Foundation::{HWND, POINT},
         Graphics::Gdi::ScreenToClient,
@@ -84,6 +84,7 @@ fn browser_args(ui: bool) -> String {
 }
 #[derive(Debug)]
 enum Event {
+    DataCleared(String, bool),
     Command(Command),
     Title(String, String),
     Load(String, String, bool),
@@ -153,6 +154,8 @@ struct Peek {
 struct App {
     // Drop child controllers before their parent HWND and shared context.
     pages: HashMap<String, Page>,
+    data_clear_view: Option<WebView>,
+    live_settings: Rc<RefCell<crate::settings::Settings>>,
     peek: Option<Peek>,
     peek_visible: Rc<Cell<bool>>,
     caption: Option<crate::caption::Caption>,
@@ -200,6 +203,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let mut app = App {
+        live_settings: Rc::new(RefCell::new(state.settings.clone())),
+        data_clear_view: None,
         pages: HashMap::new(),
         peek: None,
         peek_visible: Rc::new(Cell::new(false)),
@@ -229,6 +234,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 impl App {
+    fn confirm_quit(&self) -> bool {
+        if !self.state.settings.ask_before_quit { return true; }
+        unsafe {
+            use windows::{core::w, Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONQUESTION, MB_DEFBUTTON2, IDYES}};
+            let parent = self.window.as_ref().and_then(|w| w.window_handle().ok()).and_then(|handle| match handle.as_raw() { RawWindowHandle::Win32(h) => Some(HWND(h.hwnd.get() as *mut _)), _ => None });
+            MessageBoxW(parent, w!("关闭窗口并退出 Rove？标签页与工作区会在下次启动时恢复。"), w!("退出 Rove"), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES
+        }
+    }
     fn update_window_frame(&self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(window) = &self.window else {
             return Ok(());
@@ -346,12 +359,14 @@ impl App {
             })
             // The script only adapts standard link opening. There is still no IPC/host API on websites.
             .build_as_child(self.window.as_ref().unwrap())?;
+        crate::web_settings::apply(&view, &self.state.settings)?;
         register_page_events(
             &view,
             tab.id.clone(),
             self.proxy.clone(),
             self.peek_visible.clone(),
             navigation.clone(),
+            self.live_settings.clone(),
         )?;
         Ok(Page {
             view,
@@ -467,6 +482,7 @@ impl App {
                 .with_on_page_load_handler(move |event, url| {
                     let _ = proxy.send_event(Event::PreviewLoad(key.clone(), epoch, url, matches!(event, PageLoadEvent::Started)));
                 }).build_as_child(self.window.as_ref().unwrap())?;
+            crate::web_settings::apply(&view, &self.state.settings)?;
             view.set_bounds(self.bounds(self.primary))?;
             let timed_key = tab.id.clone();
             let proxy = self.proxy.clone();
@@ -705,7 +721,7 @@ impl App {
         let Some(peek) = self.peek.take() else { return };
         self.peek_visible.set(false);
         let id = peek.tab.id.clone();
-        let _ = self.storage.visit(&peek.tab.title, &peek.tab.url);
+        if self.state.settings.remember_history { let _ = self.storage.visit(&peek.tab.title, &peek.tab.url); }
         self.state.tabs.push(peek.tab);
         self.state.activate(&id);
         // Transfer the same controller: DOM, scroll, JS state and navigation stack remain intact.
@@ -907,21 +923,25 @@ impl App {
         Ok(())
     }
     fn shortcut(&mut self, key: String, shift: bool) {
+        if let Some(index) = key.strip_prefix("space:").and_then(|i| i.parse::<usize>().ok()) {
+            if let Some(space) = self.state.spaces.get(index) { self.command(Command::SwitchSpace { id: space.id.clone() }, None); }
+            return;
+        }
         match key.as_str() {
-            "address" | "new" | "desk" => {
+            "address" | "new" | "desk" | "settings" => {
                 if let Some(ui) = &self.ui {
                     let _ = ui.focus();
                 }
                 self.emit(json!({"type":"shortcut","action":key}));
             }
-            "cycle" => {
+            "cycle" | "cyclePrevious" => {
                 let ids = self.state.navigable_ids();
                 if !ids.is_empty() {
                     let i = ids
                         .iter()
                         .position(|id| id == &self.state.active_tab)
                         .unwrap_or(0);
-                    let next = if shift {
+                    let next = if key == "cyclePrevious" || shift {
                         (i + ids.len() - 1) % ids.len()
                     } else {
                         (i + 1) % ids.len()
@@ -945,6 +965,7 @@ impl App {
         }
     }
     fn command(&mut self, c: Command, event_loop: Option<&ActiveEventLoop>) {
+        if matches!(c, Command::OpenSettings { .. }) { self.close_peek(); }
         let focus_after_transition = self.peek.is_some()
             && matches!(
                 c,
@@ -960,6 +981,33 @@ impl App {
                     | Command::Move { .. }
             );
         match c {
+            Command::SystemSettings => {
+                unsafe {
+                    use windows::{core::w, Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL}};
+                    let result = ShellExecuteW(None, w!("open"), w!("ms-settings:defaultapps"), None, None, SW_SHOWNORMAL);
+                    if result.0 as isize <= 32 { self.error("无法打开 Windows 默认应用设置"); }
+                }
+                return;
+            }
+            Command::ClearBrowsingData { kind } => {
+                if kind == "history" {
+                    match self.storage.clear_history() {
+                        Ok(_) => { self.state.closed.clear(); self.save(); self.publish(); self.emit(json!({"type":"dataCleared","action":"history","message":"已清除浏览历史"})); }
+                        Err(e) => self.error(e),
+                    }
+                } else if kind == "cache" || kind == "siteData" {
+                    if self.data_clear_view.is_some() { self.error("正在清除浏览数据，请稍候"); return; }
+                    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+                        let view = WebViewBuilder::new_with_web_context(&mut self.context).with_url("about:blank").with_visible(false).with_focused(false).with_additional_browser_args(browser_args(false)).build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+                        let proxy = self.proxy.clone(); let action = kind.clone();
+                        crate::web_settings::clear(&view, &kind, move |ok| { let _ = proxy.send_event(Event::DataCleared(action.clone(), ok)); })?;
+                        self.data_clear_view = Some(view);
+                        Ok(())
+                    })();
+                    if let Err(e) = result { self.error(e); self.emit(json!({"type":"dataCleared","message":"清除失败，请重试"})); }
+                } else { self.error("未知浏览数据类型"); }
+                return;
+            }
             Command::TabPreview { id, rect, ticket } => {
                 let valid = id.as_ref().zip(rect).filter(|(id, r)| {
                     r.valid()
@@ -1107,7 +1155,7 @@ impl App {
                 self.capture_opening_surface();
             }
             Command::Navigate { url } if self.peek.is_some() => {
-                match model::normalize(&url).and_then(|url| {
+                match model::normalize_with(&url, &self.state.settings).and_then(|url| {
                     if model::is_web(&url) {
                         Ok(url)
                     } else {
@@ -1216,6 +1264,7 @@ impl App {
                 if let Some(w) = &self.window {
                     match action.as_str() {
                         "close" => {
+                            if !self.confirm_quit() { return; }
                             self.save();
                             if let Some(e) = event_loop {
                                 e.exit()
@@ -1229,6 +1278,7 @@ impl App {
                 return;
             }
             Command::Suggest { query, ticket } => {
+                if !self.state.settings.search_suggestions || self.state.settings.search_engine != "google" { self.emit(json!({"type":"suggestions","ticket":ticket,"suggestions":[]})); return; }
                 let proxy = self.proxy.clone();
                 std::thread::spawn(move || {
                     let _ = proxy.send_event(Event::Suggestions(ticket, crate::suggestions::fetch(&query)));
@@ -1287,6 +1337,14 @@ impl App {
                 if let Err(e) = self.state.apply(&c) {
                     self.error(e);
                     return;
+                }
+                *self.live_settings.borrow_mut() = self.state.settings.clone();
+                if matches!(c, Command::UpdateSettings { .. }) {
+                    let mut errors = vec![];
+                    for view in self.pages.values().map(|p| &p.view).chain(self.peek.iter().map(|p| &p.page.view)).chain(self.preview_renders.values().map(|p| &p.view)) {
+                        if let Err(e) = crate::web_settings::apply(view, &self.state.settings) { errors.push(e); }
+                    }
+                    for error in errors { self.error(error); }
                 }
                 self.save();
                 self.publish();
@@ -1400,6 +1458,10 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::DataCleared(kind, ok) => {
+                self.data_clear_view = None;
+                self.emit(json!({"type":"dataCleared","action":kind,"message":if ok { "已清除浏览数据" } else { "清除失败，请重试" }}));
+            }
             Event::PreviewLoad(key, epoch, url, loading) => {
                 if let Some(render) = self.preview_renders.get_mut(&key).filter(|p| p.epoch == epoch) {
                     if url.is_empty() {
@@ -1495,7 +1557,7 @@ impl ApplicationHandler<Event> for App {
                 }
                 if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
                     t.title = title.chars().take(512).collect();
-                    if model::is_web(&t.url) {
+                    if self.state.settings.remember_history && model::is_web(&t.url) {
                         let _ = self.storage.visit(&t.title, &t.url);
                     }
                 }
@@ -1524,7 +1586,7 @@ impl ApplicationHandler<Event> for App {
                             p.url = url;
                         }
                     }
-                    if !loading {
+                    if !loading && self.state.settings.remember_history {
                         let _ = self.storage.visit(&t.title, &t.url);
                     }
                 }
@@ -1577,6 +1639,7 @@ impl ApplicationHandler<Event> for App {
         match event {
             WindowEvent::Focused(false) => self.dismiss_tab_preview(),
             WindowEvent::CloseRequested => {
+                if !self.confirm_quit() { return; }
                 self.save();
                 event_loop.exit()
             }
@@ -1614,8 +1677,10 @@ fn register_page_events(
     proxy: EventLoopProxy<Event>,
     peek_visible: Rc<Cell<bool>>,
     navigation: Rc<NavigationPolicy>,
+    settings: Rc<RefCell<crate::settings::Settings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let p = proxy.clone();
+    let shortcut_settings = settings.clone();
     let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
             unsafe {
@@ -1631,31 +1696,12 @@ fn register_page_events(
                 let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
                 let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
                 let alt = GetKeyState(VK_MENU.0 as i32) < 0;
-                let action = if ctrl && !alt {
-                    match key {
-                        76 => Some("address"),
-                        84 => Some(if shift { "restore" } else { "new" }),
-                        87 => Some("close"),
-                        9 => Some("cycle"),
-                        66 => Some("sidebar"),
-                        82 => Some("reload"),
-                        220 if shift => Some("desk"),
-                        _ => None,
-                    }
-                } else if alt {
-                    match key {
-                        37 => Some("back"),
-                        39 => Some("forward"),
-                        _ => None,
-                    }
-                } else if key == 27 && !shift && peek_visible.get() {
-                    Some("escape")
-                } else {
-                    None
-                };
+                let action = if key == 27 && !ctrl && !alt && !shift && peek_visible.get() { Some("escape".into()) }
+                    else if ctrl && !alt && !shift && (49..=57).contains(&key) { Some(format!("space:{}", key - 49)) }
+                    else { shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift}) };
                 if let Some(action) = action {
                     args.SetHandled(true)?;
-                    let _ = p.send_event(Event::Shortcut(action.into(), shift));
+                    let _ = p.send_event(Event::Shortcut(action, false));
                 }
             }
         }
@@ -1666,6 +1712,28 @@ fn register_page_events(
         view.controller()
             .add_AcceleratorKeyPressed(&handler, &mut token)?;
     }
+    let download = DownloadStartingEventHandler::create(Box::new(move |_, args| {
+        if let Some(args) = args {
+            let folder = settings.borrow().download_folder.clone();
+            if !folder.is_empty() {
+                unsafe {
+                    let mut suggested = PWSTR::null();
+                    args.ResultFilePath(&mut suggested)?;
+                    let suggested = PathBuf::from(take_pwstr(suggested));
+                    let filename = suggested.file_name().unwrap_or(std::ffi::OsStr::new("download"));
+                    let mut destination = PathBuf::from(&folder).join(filename);
+                    if !std::path::Path::new(&folder).is_dir() { args.SetCancel(true)?; return Ok(()); }
+                    let stem = suggested.file_stem().unwrap_or(filename).to_string_lossy();
+                    let ext = suggested.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+                    let mut index = 1;
+                    while destination.exists() { destination = PathBuf::from(&folder).join(format!("{stem} ({index}){ext}")); index += 1; }
+                    args.SetResultFilePath(&HSTRING::from(destination.as_os_str()))?;
+                }
+            }
+        }
+        Ok(())
+    }));
+    unsafe { view.webview().cast::<ICoreWebView2_4>()?.add_DownloadStarting(&download, &mut token)?; }
     let p = proxy.clone();
     let source_id = id.clone();
     let popup = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {

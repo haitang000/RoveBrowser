@@ -2,6 +2,7 @@
 // Copyright 2026 Zigao Wang; modified for Vue, CSS pixels and WebView2.
 import type { BrowserState, Rect } from "./types";
 import { liveTab, savedPage } from "./bookmarks";
+import { isSettingsUrl } from "./settings";
 
 export const TAB_PREVIEW = { delay: 600, hideDelay: 120, refresh: 1000, width: 320, caption: 48, enter: 160, leave: 120, reduced: 80, ease: "cubic-bezier(0.23, 1, 0.32, 1)" };
 export interface PreviewPage {
@@ -40,7 +41,7 @@ export function previewPages(state: BrowserState, id: string): PreviewPage[] {
     }
   }
   const active = state.tabs.find((t) => t.id === state.activeTab);
-  return pages.some((p) => p.tabId && (p.tabId === active?.id || p.tabId === active?.splitWith)) ? [] : pages;
+  return pages.some((p) => isSettingsUrl(p.url) || p.tabId && (p.tabId === active?.id || p.tabId === active?.splitWith)) ? [] : pages;
 }
 
 export function previewFrame(row: Rect, sidebar: Rect, page: Rect, viewport: { width: number; height: number }): Rect | undefined {

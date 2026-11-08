@@ -25,6 +25,7 @@ const shellStyle = computed(() => ({
     : {}),
 }));
 let frameAnimation: Animation | undefined;
+watch(() => b.settings.reduceMotion, (value) => { document.documentElement.dataset.reduceMotion = String(value); if (value) finishFrameAnimation(); }, { immediate: true });
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 function finishFrameAnimation() { frameAnimation?.cancel(); frameAnimation = undefined; }
 // ColorView.setColor/CALayer.set: retarget from the color currently on screen.
@@ -36,7 +37,7 @@ watch(
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.color = color;
     finishFrameAnimation();
-    if (!shell.value || !from || reducedMotion.matches || glassActive.value) return;
+    if (!shell.value || !from || reducedMotion.matches || b.settings.reduceMotion || glassActive.value) return;
     const to = getComputedStyle(document.documentElement).getPropertyValue("--frame").trim();
     frameAnimation = shell.value.animate([{ backgroundColor: from }, { backgroundColor: to }], {
       duration: SPACE_SWIPE.backgroundDuration, easing: "ease",

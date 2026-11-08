@@ -36,6 +36,7 @@ impl Storage {
     pub fn visit(&self, title: &str, url: &str) -> rusqlite::Result<usize> {
         self.conn.execute("INSERT INTO history(url,title,visited) VALUES(?1,?2,unixepoch()) ON CONFLICT(url) DO UPDATE SET title=excluded.title,visited=excluded.visited",params![url,title])
     }
+    pub fn clear_history(&self) -> rusqlite::Result<usize> { self.conn.execute("DELETE FROM history", []) }
     pub fn search(&self, text: &str) -> rusqlite::Result<Vec<Entry>> {
         let mut q=self.conn.prepare("SELECT title,url FROM history WHERE instr(lower(title),lower(?1))>0 OR instr(lower(url),lower(?1))>0 ORDER BY visited DESC LIMIT 30")?;
         let entries = q

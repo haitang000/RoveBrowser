@@ -5,6 +5,7 @@ import { favorite, MAX_FAVORITES, sameFavoriteUrl } from "./favorites";
 import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, upgradeLibrary } from "./bookmarks";
 import { tabsToDismiss } from "./command";
 import { sameOrigin } from "./favicon";
+import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type SettingsPane, type Settings } from "./settings";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -17,6 +18,7 @@ export function initialState(): BrowserState {
     theme: "light",
     sidebarCollapsed: false,
     borderless: true,
+    settings: settingsFor(),
     closed: [],
     favorites: [
       { id: "favorite-github", title: "GitHub", url: "https://github.com" },
@@ -61,6 +63,37 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
   };
   if (bookmarkCommand(s, c, (id) => { Object.assign(s, reduce(s, { type: "close", id })); })) return { ...s };
   switch (c.type) {
+    case "settingsOpen": {
+      const existing = s.tabs.find((t) => t.spaceId === s.activeSpace && isSettingsUrl(t.url)) || s.tabs.find((t) => isSettingsUrl(t.url));
+      if (existing) { if (c.pane) existing.url = settingsUrl(c.pane as SettingsPane); activate(existing); }
+      else return reduce(s, { type: "new", url: settingsUrl(c.pane as SettingsPane) });
+      break;
+    }
+    case "settingsPane": {
+      const t = tab(); if (t && isSettingsUrl(t.url)) t.url = settingsUrl(c.pane as SettingsPane);
+      break;
+    }
+    case "settingsUpdate": {
+      const next = settingsFor(c.settings as Settings);
+      if (next.customSearchTemplate && !validSearchTemplate(next.customSearchTemplate)) throw Error("搜索地址需要包含 %s，并使用有效的 HTTP 或 HTTPS 网址");
+      validateShortcuts(next); s.settings = next; break;
+    }
+    case "spaceReorder": {
+      const index = s.spaces.findIndex((space) => space.id === c.id);
+      if (index >= 0 && c.id !== c.before && s.spaces.some((space) => space.id === c.before)) { const [space] = s.spaces.splice(index, 1); s.spaces.splice(s.spaces.findIndex((space) => space.id === c.before), 0, space!); }
+      break;
+    }
+    case "spaceDelete": {
+      if (s.spaces.length <= 1) throw Error("至少保留一个工作区");
+      const removed = new Set(s.tabs.filter((t) => t.spaceId === c.id && !s.favorites.some((f) => f.id === t.bookmarkId)).map((t) => t.id));
+      s.spaces = s.spaces.filter((space) => space.id !== c.id); s.pins = s.pins?.filter((p) => p.spaceId !== c.id);
+      if (s.activeSpace === c.id) s.activeSpace = s.spaces[0]!.id;
+      s.tabs = s.tabs.filter((t) => !removed.has(t.id));
+      s.tabs.forEach((t) => { if (t.spaceId === c.id) t.spaceId = s.activeSpace; if (t.splitWith && removed.has(t.splitWith)) delete t.splitWith; });
+      s.closed = s.closed.filter((t) => t.spaceId !== c.id);
+      if (!s.tabs.some((t) => t.id === s.activeTab)) { s.activeTab = s.tabs.find((t) => t.spaceId === s.activeSpace)?.id || ""; if (!s.activeTab) return reduce(s, { type: "new" }); }
+      break;
+    }
     case "favoriteSave": {
       const next = favorite(String(c.title || ""), String(c.url || ""));
       const index = c.previousUrl === undefined ? -1 :
@@ -87,11 +120,11 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
     case "new": {
-      const url = address(String(c.url || ""));
+      const url = address(String(c.url || ""), s.settings);
       const t: Tab = {
         id: crypto.randomUUID(),
         spaceId: s.activeSpace,
-        title: host(url) || "New Tab",
+        title: isSettingsUrl(url) ? "设置" : host(url) || "New Tab",
         url,
         pinned: false,
       };
@@ -105,8 +138,8 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     case "navigate": {
       const t = tab();
       if (t) {
-        t.url = address(String(c.url));
-        t.title = host(t.url) || "New Tab";
+        t.url = address(String(c.url), s.settings);
+        t.title = isSettingsUrl(t.url) ? "设置" : host(t.url) || "New Tab";
       }
       break;
     }
@@ -160,13 +193,17 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
     case "spaceCreate": {
+      if (s.spaces.length >= 16) throw Error("最多创建 16 个工作区");
       const id = crypto.randomUUID();
       s.spaces.push({
         id,
         name: String(c.name).slice(0, 40) || "Untitled",
         color: (c.color as any) || "sage",
+        translucency: Number(c.translucency) > .005 ? Math.min(1, Number(c.translucency)) : undefined,
+        clearGlass: c.clearGlass === false ? false : undefined,
       });
-      return reduce(s, { type: "space", id });
+      if (!c.background) return reduce(s, { type: "space", id });
+      break;
     }
     case "spaceUpdate": {
       const space = s.spaces.find((x) => x.id === c.id);

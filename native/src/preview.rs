@@ -53,7 +53,7 @@ pub fn targets(state: &State, id: &str) -> Option<Vec<Tab>> {
         }
     }
     if tabs.iter().any(|t| {
-        t.id == state.active_tab
+        crate::settings::is_settings(&t.url) || t.id == state.active_tab
             || state.active().and_then(|a| a.split_with.as_ref()) == Some(&t.id)
     }) {
         return None;

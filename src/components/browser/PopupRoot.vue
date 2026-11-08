@@ -11,6 +11,7 @@ import TabPreviewCard from "./TabPreviewCard.vue";
 import ErrorToast from "./ErrorToast.vue";
 import { browserKey } from "../../lib/browser-key";
 const b = useBrowser();
+watch(() => b.settings.reduceMotion, (value) => document.documentElement.dataset.reduceMotion = String(value), { immediate: true });
 const area = computed(() => ({ left: b.popupArea.x + "px", top: b.popupArea.y + "px", width: b.popupArea.width + "px", height: b.popupArea.height + "px" }));
 watch(() => [b.state.theme, b.space.color], ([theme, color]) => {
   document.documentElement.dataset.theme = theme;

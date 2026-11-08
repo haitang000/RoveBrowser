@@ -22,7 +22,7 @@ onBeforeUnmount(() => { if (list.value) emit("scroll", props.spaceId, list.value
   <section ref="list" class="space-list" :data-space-id="spaceId" :aria-label="space?.name" @scroll="emit('scroll', spaceId, list!.scrollTop)">
     <PinnedTabs :tabs="pins" :space-id="spaceId" @menu="(e, t) => emit('menu', e, t)" />
     <div class="section-label"><span>Tabs</span><span>{{ tabs.length }}</span></div>
-    <button class="new-tab" @click="b.openCommand()"><Icon name="plus" :size="16" /><span>New Tab</span><kbd>Ctrl T</kbd></button>
+    <button class="new-tab" @click="b.openCommand()"><Icon name="plus" :size="16" /><span>New Tab</span><kbd v-if="b.shortcutLabel('new')">{{ b.shortcutLabel('new') }}</kbd></button>
     <TabList :tabs="tabs" aria-label="标签页" @menu="(e, t) => emit('menu', e, t)" />
   </section>
 </template>

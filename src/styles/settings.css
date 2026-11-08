@@ -1,0 +1,460 @@
+/* Zigzag Tokens.Page / SettingsView layout, Copyright 2026 Zigao Wang,
+   Apache-2.0; adapted to container queries and Windows typography. */
+.settings-page {
+  position: absolute;
+  inset: 0;
+  container: settings / inline-size;
+  color: var(--ink);
+  background: var(--surface);
+}
+.settings-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: 100%;
+}
+.settings-navigation {
+  min-width: 0;
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--frame) 26%, var(--surface));
+  border-right: 1px solid var(--separator);
+}
+.settings-brand {
+  height: 48px;
+  padding: 0 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.settings-brand > span {
+  font-size: 19px;
+  font-weight: 550;
+  letter-spacing: -0.8px;
+}
+.settings-brand h1 {
+  font-size: 16px;
+  font-weight: 450;
+  margin: 0;
+}
+.settings-navigation nav {
+  display: grid;
+  gap: 2px;
+}
+.settings-navigation nav button {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--quiet);
+}
+.settings-navigation nav button:hover {
+  background: var(--separator);
+  color: var(--ink);
+}
+.settings-navigation nav button[aria-current] {
+  background: var(--chosen);
+  color: var(--ink);
+}
+.settings-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.settings-page-header {
+  min-height: 64px;
+  padding: 16px 44px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--separator);
+}
+.settings-page-header h2 {
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 450;
+  margin: 0;
+}
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 280px;
+  max-width: 65%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--separator);
+  color: var(--quiet);
+}
+.settings-search input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--ink);
+}
+.settings-search:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-scroll {
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.settings-content {
+  max-width: 936px;
+  margin: 0 auto;
+  padding: 16px 28px 36px;
+}
+.settings-group {
+  margin-bottom: 24px;
+}
+.settings-group h3 {
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 550;
+}
+.settings-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 16px;
+  gap: 12px;
+  min-height: 36px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 44px;
+  padding: 12px 16px;
+}
+.setting-row + .setting-row {
+  position: relative;
+}
+.setting-row + .setting-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: var(--separator);
+}
+.setting-description {
+  flex: 1;
+  min-width: 0;
+}
+.setting-description label,
+.setting-description strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 20px;
+}
+.setting-description p {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--quiet);
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.setting-row select,
+.setting-button,
+.setting-input-form input {
+  min-height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--edge);
+  background: var(--control);
+  color: var(--ink);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+}
+.setting-row select {
+  max-width: 180px;
+  min-width: 110px;
+}
+.setting-button {
+  white-space: nowrap;
+}
+.setting-button:hover {
+  background: color-mix(in srgb, var(--ink) 5%, var(--control));
+}
+.setting-button:active {
+  background: color-mix(in srgb, var(--ink) 10%, var(--control));
+}
+.setting-toggle {
+  width: 32px;
+  height: 20px;
+  min-width: 32px;
+  border-radius: 12px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--ink) 20%, transparent);
+  transition: background 100ms ease;
+}
+.setting-toggle > span {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px #0002;
+  transition: transform 150ms var(--ease-out);
+}
+.setting-toggle[aria-checked="true"] {
+  background: var(--accent);
+}
+.setting-toggle[aria-checked="true"] > span {
+  transform: translateX(12px);
+}
+.setting-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--tertiary);
+}
+.setting-input-form {
+  width: 300px;
+  max-width: 55%;
+  display: flex;
+  gap: 6px;
+}
+.setting-input-form input {
+  width: 100%;
+  min-width: 0;
+}
+.setting-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.space-color-tile {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: oklch(var(--frame-l) 0.045 var(--frame-h));
+}
+.space-setting {
+  gap: 12px;
+}
+.space-setting .setting-inline-actions {
+  margin-left: auto;
+}
+.setting-hint {
+  color: var(--tertiary);
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 8px 16px 12px;
+}
+.setting-shortcut {
+  flex-shrink: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--edge);
+  min-width: 100px;
+  background: var(--control);
+}
+.setting-shortcut kbd {
+  font-family: inherit;
+  font-size: 11px;
+}
+.setting-shortcut.recording {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-empty {
+  padding: 36px 16px;
+  font-size: 13px;
+  color: var(--quiet);
+  overflow-wrap: anywhere;
+}
+.settings-feedback {
+  margin: 0 16px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.settings-local-scrim {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  background: #0002;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.settings-space-editor {
+  width: 360px;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: auto;
+  padding: 20px;
+  background: var(--panel);
+  border-radius: 14px;
+  border: 1px solid var(--panel-edge);
+  box-shadow: 0 3px 16px var(--panel-shadow);
+}
+.settings-space-editor header,
+.settings-space-editor footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-space-editor h2 {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0 0 12px;
+}
+.settings-space-editor p {
+  color: var(--quiet);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.settings-space-editor footer {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.settings-space-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.settings-space-editor input:not([type="range"]) {
+  height: 32px;
+  width: 100%;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+.settings-space-editor .swatches {
+  gap: 7px;
+}
+.settings-page button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.settings-page :is(button, select, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.space-name.compact {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+@container settings (width < 720px) {
+  .settings-layout {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .settings-navigation {
+    padding: 16px 12px;
+  }
+  .settings-brand,
+  .settings-navigation nav button > span {
+    display: none;
+  }
+  .settings-navigation nav {
+    padding-top: 48px;
+  }
+  .settings-navigation nav button {
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+  .settings-page-header {
+    padding-inline: 32px;
+  }
+  .settings-content {
+    padding-inline: 16px;
+  }
+}
+@container settings (width < 520px) {
+  .settings-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 60px 48px minmax(0, 1fr);
+  }
+  .settings-navigation {
+    grid-row: 2;
+    padding: 4px 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--separator);
+  }
+  .settings-navigation nav {
+    display: flex;
+    padding-top: 0;
+    justify-content: space-between;
+    gap: 0;
+  }
+  .settings-navigation nav button {
+    width: 28px;
+    height: 36px;
+  }
+  .settings-main {
+    display: contents;
+  }
+  .settings-page-header {
+    grid-row: 1;
+    min-height: 60px;
+    padding: 12px 16px;
+    gap: 8px;
+  }
+  .settings-scroll {
+    grid-row: 3;
+  }
+  .settings-page-header h2 {
+    font-size: 14px;
+  }
+  .settings-search {
+    max-width: 65%;
+  }
+  .settings-content {
+    padding: 12px 0 24px;
+  }
+  .setting-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .setting-row .setting-description {
+    flex-basis: 100%;
+  }
+  .setting-row:has(.setting-toggle) {
+    flex-wrap: nowrap;
+  }
+  .setting-row:has(.setting-toggle) .setting-description {
+    flex-basis: auto;
+  }
+  .setting-input-form {
+    max-width: 100%;
+    width: 100%;
+  }
+  .space-setting .setting-description {
+    flex-basis: 0;
+  }
+  .settings-group-heading {
+    padding-right: 16px;
+  }
+  .settings-space-editor .swatches {
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+}

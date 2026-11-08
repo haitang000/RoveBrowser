@@ -28,10 +28,13 @@ npm run test:native # 先 cargo build；本地固定网页 + Windows 原生宿�
 npm run test:native:favorites # 本地 PNG 图标、8 个上限及离线重启缓存
 npm run test:native:spaces # 先 cargo build；独立临时目录验证真实 WebView2 Space 切换
 npm run test:native:preview # 先 cargo build；本地网页验证真实 WebView2 悬停预览与分屏
+npm run test:native:settings # 先 cargo build；设置持久化、真实下载和浏览数据清理
 cargo test --manifest-path native/Cargo.toml
 ```
 
 ## 已实现
+
+- Zigzag 设置页：7 个分类、跨分类搜索、响应式导航、设置标签页与分类地址恢复；搜索引擎／自定义搜索地址、外观、工作区增删排序、下载目录、密码／表单偏好、历史与网站数据清理、自定义快捷键和退出确认。入口为侧栏底部设置按钮、命令面板 Settings 或 Ctrl+,。移植范围和平台适配见 [设置移植记录](docs/SETTINGS_PORT.md)。
 
 - 源码参数化侧栏、Favorites、固定/普通标签、选中/hover/focus、浅深主题、数字工作区、统一设计 tokens。
 - 侧栏顶部置顶网站最多 8 个，所有工作区共用。通过标签页右键或拖拽添加、拖动排序、网站右键编辑和移除；移除独立管理弹窗及区域标题。网站图标从 WebView2 获取真实 PNG 并随 SQLite 会话缓存，卸载网页、离线及重启后继续显示；旧会话超出上限的项目保留为当前工作区固定标签，分屏组合一同迁移。
@@ -44,7 +47,7 @@ cargo test --manifest-path native/Cargo.toml
 - 两个受信 UI WebView 分别承载浏览器外壳和透明弹窗层；每个已激活网页独立 WebView2，首次激活延迟创建，切换后隐藏，关闭时销毁。
 - 真网页导航、后退/前进/刷新、标题/favicon/加载状态、target=_blank 在新标签打开。
 - 命令面板：在当前网页区域上方淡入、轻微缩放展开，背景保持实时网页；支持地址/Google 搜索、打开的标签页与本地历史、上下键/Enter/Esc、点击外侧关闭及焦点返回。
-- 所有应用内弹窗共用独立透明 WebView：命令栏、设置、全部标签页、右键菜单、固定网址编辑、悬停预览、Peek 外壳和错误提示。弹窗直接叠加在真实网页上，不捕获整页背景、不隐藏来源网页，空白区域通过原生窗口区域透传鼠标。
+- 所有应用内弹窗共用独立透明 WebView：命令栏、工作区快速编辑、全部标签页、右键菜单、固定网址编辑、悬停预览、Peek 外壳和错误提示。弹窗直接叠加在真实网页上，不捕获整页背景、不隐藏来源网页，空白区域通过原生窗口区域透传鼠标。完整设置页在普通标签页中显示。
 - 多工作区新增/重命名/颜色、独立 pins/tabs、右键跨空间移动、底栏拖动移动、标签排序。
 - 侧栏触控板左右轻扫切换 Space：相邻列表跟手滑动、方向锁定、短促轻扫、首尾阻尼回弹及可中断弹簧收尾，保留各空间的列表滚动位置；横向滚轮一次只切换一个空间。点击和快捷键沿空间方向切换，背景从当前屏幕颜色平滑过渡，遵循“减少动态效果”。行为及参数移植自 Zigzag 的 `SpaceSwipe`、`transitionList` 与 `ColorView.setColor`。
 - 中键关闭普通/固定标签和全部标签页视图中的卡片，关闭后台标签保留当前页；侧栏标签打开时滑入淡入、关闭时淡出、排序及相邻标签补位时平滑移动，遵循系统“减少动态效果”设置。
@@ -58,7 +61,7 @@ cargo test --manifest-path native/Cargo.toml
 - Peek：Shift 点击 HTTP/HTTPS 链接（含 target=_blank）打开独立临时 WebView2；支持 Esc、关闭按钮、点击遮罩关闭，或不重新加载地转为普通标签页。预览内 Shift 点击替换当前 Peek，临时页面不写入会话/历史；晋升后才作为普通访问记录。标签右键菜单也提供预览入口。
 - Peek 动效：从链接点击位置渐入放大（240ms），关闭时向同一位置缩小淡出（180ms），中途关闭可连续反向，不跳回起点。原生网页在动画期间使用内存快照，完成后切回可交互控制器；开启“减少动态效果”时仅做80ms淡入淡出。菜单入口没有链接坐标时使用居中的轻微缩放。
 
-快捷键：Ctrl+L/T/W/Tab/Shift+T、Ctrl+B、Ctrl+R、Alt+左右、Ctrl+Shift+反斜线。网页获得焦点时通过原生 AcceleratorKeyPressed 转发，普通网页不能调用内部命令。UI 焦点下额外支持 Ctrl+1…9 切换工作区。
+默认快捷键：Ctrl+L/T/W/Tab/Shift+T、Ctrl+B、Ctrl+R、Alt+左右、Ctrl+Shift+反斜线、Ctrl+,；可在设置中修改，按钮提示同步更新。网页获得焦点时通过原生 AcceleratorKeyPressed 转发，普通网页不能调用内部命令。Ctrl+1…9 切换工作区。
 
 ## 架构与边界
 

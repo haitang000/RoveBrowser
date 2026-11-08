@@ -40,6 +40,7 @@ export interface BrowserState {
   closed: Tab[];
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
+  settings?: import("./settings").Settings;
   /** Legacy session preference; the restored framed layout ignores this flag. */
   borderless?: boolean;
 }
@@ -65,6 +66,7 @@ export interface Point {
 export type PeekPhase = "opening" | "open" | "closing";
 export type Command = { type: string; [key: string]: unknown };
 declare global {
+  const __APP_VERSION__: string;
   interface Window {
     ipc?: { postMessage(message: string): void };
     __ERA_NATIVE__?: boolean;

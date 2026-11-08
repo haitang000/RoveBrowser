@@ -22,7 +22,7 @@ watch(() => [b.hoverPreview?.id, b.hoverPreview?.ticket, b.hoverPreview?.phase],
   await nextTick();
   if (!card.value || generation !== epoch) return;
   const closing = preview.phase === "closing";
-  const duration = matchMedia("(prefers-reduced-motion: reduce)").matches ? TAB_PREVIEW.reduced : closing ? TAB_PREVIEW.leave : preview.instant ? 0 : TAB_PREVIEW.enter;
+  const duration = matchMedia("(prefers-reduced-motion: reduce)").matches || b.settings.reduceMotion ? TAB_PREVIEW.reduced : closing ? TAB_PREVIEW.leave : preview.instant ? 0 : TAB_PREVIEW.enter;
   const from = getComputedStyle(card.value).opacity;
   animation = card.value.animate([{ opacity: from }, { opacity: closing ? 0 : 1 }], { duration, easing: TAB_PREVIEW.ease, fill: "both" });
   try { await animation.finished; } catch { return; }

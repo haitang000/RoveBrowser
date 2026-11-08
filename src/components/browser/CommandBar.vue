@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useBrowser } from "../../stores/browser";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
+import { searchUrl } from "../../lib/settings";
 import {
   commandContext,
   completionAllowed,
@@ -57,7 +58,7 @@ function refreshRemote() {
   const query = scope.value && !typed.value.trim() ? domain(scope.value) : typed.value;
   historyTimer = setTimeout(() => b.send({ type: "history", query }), 100);
   const suggest = suggestionQuery(typed.value);
-  if (suggest) suggestTimer = setTimeout(() => b.suggest(suggest), 90);
+  if (suggest && b.settings.searchSuggestions && b.settings.searchEngine === "google") suggestTimer = setTimeout(() => b.suggest(suggest), 90);
   else b.suggestions = [];
 }
 function onInput(event: Event) {
@@ -103,7 +104,7 @@ function step(delta: number) {
 }
 function runAction(id: string) {
   const active = b.peek ?? b.active;
-  if (id === "settings") { b.commandOpen = false; b.settingsOpen = true; return; }
+  if (id === "settings") { b.openSettings(); return; }
   if (id === "pin" || id === "unpin") b.send({ type: "pin", id: active?.id });
   else if (id === "favorite" && active) b.send({ type: "favoriteTab", id: active.id });
   else if (id === "separate") b.send({ type: "unsplit" });
@@ -134,7 +135,7 @@ function run(index = selected.value) {
   const kind = item.kind;
   try {
     if (kind.type === "open" || kind.type === "history" || kind.type === "searchOn") open(kind.url);
-    else if (kind.type === "search" || kind.type === "suggestion") open(`https://www.google.com/search?q=${encodeURIComponent(kind.query)}`);
+    else if (kind.type === "search" || kind.type === "suggestion") open(searchUrl(kind.query, b.settings));
     else if (kind.type === "switchTo" || kind.type === "bookmark") { b.send({ type: "activate", id: kind.id }); b.commandOpen = false; }
     else if (kind.type === "action") runAction(kind.id);
   } catch (error) { b.error = String(error); }

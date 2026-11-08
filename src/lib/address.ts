@@ -1,7 +1,9 @@
-export function address(input: string): string {
+import { isSettingsUrl, normalizeSettingsUrl, searchUrl, type Settings } from "./settings";
+export function address(input: string, settings?: Partial<Settings>): string {
   const value = input.trim();
   if (!value) return "era://newtab";
   if (value === "era://newtab") return value;
+  if (isSettingsUrl(value)) return normalizeSettingsUrl(value);
   if (/^https?:\/\//i.test(value)) {
     try {
       return new URL(value).href;
@@ -17,7 +19,7 @@ export function address(input: string): string {
       /^localhost(?::\d+)?(?:\/|$)/.test(value))
   )
     return new URL(`https://${value}`).href;
-  return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
+  return searchUrl(value, settings);
 }
 export function host(url: string): string {
   try {

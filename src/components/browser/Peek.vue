@@ -165,15 +165,16 @@ async function play() {
   if (!card || !viewport) return;
   freeze();
   const collapsed = collapsedPeekTransform(card, b.peekOrigin, viewport);
-  const transform = reduced.matches ? "none" : collapsed;
-  const duration = reduced.matches
+  const reduceMotion = reduced.matches || b.settings.reduceMotion;
+  const transform = reduceMotion ? "none" : collapsed;
+  const duration = reduceMotion
     ? PEEK_MOTION.reduced
     : closing
       ? PEEK_MOTION.exit
       : PEEK_MOTION.enter;
   const start = closing
     ? {
-        transform: reduced.matches
+        transform: reduceMotion
           ? "none"
           : getComputedStyle(panel.value).transform,
         opacity: getComputedStyle(panel.value).opacity,

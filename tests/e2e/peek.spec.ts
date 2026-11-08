@@ -15,7 +15,7 @@ test("Peek UI dismissal, command stacking, promotion and minimum layout", async 
   await page.keyboard.press("Escape");
   await expect(panel).toBeVisible();
   await page.keyboard.press('Control+w');await expect(panel).toHaveCount(0);
-  await expect(page.getByRole('tab',{name:'New Tab 关闭 New Tab',exact:true})).toBeVisible();
+  await expect(page.getByRole('tab',{name:'New Tab',exact:true})).toBeVisible();
   await page.getByRole('tab',{name:'GitHub',exact:true}).click({button:'right'});
   await page.getByRole('menuitem',{name:'在 Peek 中预览'}).click();
   await page.setViewportSize({ width: 560, height: 400 });

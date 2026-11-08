@@ -11,6 +11,8 @@ import { host } from "../../lib/address";
 import { pageClip } from "../../lib/page-clip";
 import Icon from "../common/Icon.vue";
 import Peek from "./Peek.vue";
+import SettingsPage from "./SettingsPage.vue";
+import { isSettingsUrl } from "../../lib/settings";
 const b = useBrowser(),
   primary = ref<HTMLElement>(),
   secondary = ref<HTMLElement>(),
@@ -106,8 +108,9 @@ function split(e: DragEvent) {
         </button>
       </div>
       <div ref="primary" class="webview-slot">
+        <SettingsPage v-if="b.active && isSettingsUrl(b.active.url)" :key="b.active.id" :tab-id="b.active.id" :url="b.active.url" />
         <div
-          v-if="b.active?.url === 'era://newtab' || !b.active"
+          v-else-if="b.active?.url === 'era://newtab' || !b.active"
           class="new-tab-page"
         >
           <div class="new-tab-content">
@@ -115,12 +118,12 @@ function split(e: DragEvent) {
             <p>A little room to explore.</p>
             <button class="start-search" @click="b.openCommand()">
               <Icon name="search" /><span>Search or enter address</span
-              ><kbd>Ctrl L</kbd>
+              ><kbd v-if="b.shortcutLabel('address')">{{ b.shortcutLabel('address') }}</kbd>
             </button>
           </div>
           <div class="new-tab-hints">
-            <span><kbd>Ctrl T</kbd> New tab</span
-            ><span><kbd>Ctrl Shift \\</kbd> All tabs</span>
+            <span v-if="b.shortcutLabel('new')"><kbd>{{ b.shortcutLabel('new') }}</kbd> New tab</span
+            ><span v-if="b.shortcutLabel('desk')"><kbd>{{ b.shortcutLabel('desk') }}</kbd> All tabs</span>
           </div>
         </div>
         <div v-else-if="!b.native" class="preview-page">
@@ -156,8 +159,9 @@ function split(e: DragEvent) {
           </button>
         </div>
         <div ref="secondary" class="webview-slot">
+          <SettingsPage v-if="isSettingsUrl(other.url)" :key="other.id" :tab-id="other.id" :url="other.url" />
           <div
-            v-if="other.url === 'era://newtab' || !b.native"
+            v-else-if="other.url === 'era://newtab' || !b.native"
             class="preview-page"
           >
             <Icon name="globe" :size="28" />

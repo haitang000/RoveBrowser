@@ -38,6 +38,7 @@ async function launch(){
   uiBrowser=await waitFor(()=>chromium.connectOverCDP(`http://127.0.0.1:${port}`),'UI debugger')
   const ui=await waitFor(async()=>uiBrowser.contexts().flatMap(c=>c.pages()).find(p=>p.url()==='https://era.ui/index.html'),'UI page')
   await ui.waitForSelector('.sidebar')
+  await ui.evaluate(() => window.ipc.postMessage(JSON.stringify({ type: 'settingsUpdate', settings: { ...window.__ERA_INITIAL_STATE__.settings, askBeforeQuit: false } })))
   popup=await waitFor(()=>ui.context().pages().find(p=>p.url().endsWith('?popup')),'popup renderer')
   // MainWindowHandle is nonzero only for a visible top-level process window.
   // CDP alone can operate an invisible WebView, so also verify the paint handshake.

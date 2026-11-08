@@ -39,6 +39,7 @@ async function launch() {
   uiBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 'UI debugger');
   const ui = await waitFor(() => uiBrowser.contexts().flatMap((c) => c.pages()).find((p) => p.url() === 'https://era.ui/index.html'), 'trusted UI');
   await ui.locator('.space-viewport').waitFor();
+  await ui.evaluate(() => window.ipc.postMessage(JSON.stringify({ type: 'settingsUpdate', settings: { ...window.__ERA_INITIAL_STATE__.settings, askBeforeQuit: false } })));
   // App.vue reveals the native window after fonts and two paint opportunities.
   // Do not measure compositor motion while the startup window is still hidden.
   await ui.evaluate(async () => {

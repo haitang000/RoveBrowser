@@ -2,6 +2,7 @@
 import type { BrowserState, Command, Favorite, Tab } from "./types";
 import { favoriteUrl, MAX_FAVORITES } from "./favorites";
 import { sameOrigin } from "./favicon";
+import { normalizeSettingsUrl } from "./settings";
 
 export function samePinnedUrl(a: string, b: string) {
   const key = (input: string) => {
@@ -33,6 +34,7 @@ export function bookmarkTitle(title: string, input: string) {
   return title;
 }
 export function upgradeLibrary(s: BrowserState) {
+  for (const tab of [...s.tabs, ...s.closed]) tab.url = normalizeSettingsUrl(tab.url);
   s.pins ||= [];
   s.favorites.forEach((f) => { f.id ||= crypto.randomUUID(); });
   if (!s.libraryVersion) {

@@ -8,7 +8,13 @@ defineProps<{ swipeShares?: Record<string, number> | null }>();
   <footer class="workspace-switcher">
     <button
       class="icon-button"
-      title="全部标签页 (Ctrl+Shift+\\)"
+      :title="b.shortcutTitle('设置', 'settings')"
+      aria-label="设置"
+      @click="b.openSettings()"
+    ><Icon name="settings" :size="14" /></button>
+    <button
+      class="icon-button"
+      :title="b.shortcutTitle('全部标签页', 'desk')"
       aria-label="全部标签页"
       @click="b.deskOpen = true"
     >

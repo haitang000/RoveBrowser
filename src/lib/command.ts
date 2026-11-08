@@ -1,8 +1,9 @@
 // Command ranking, site search and inline completion adapted from Zigzag
 // CommandBarModel.swift, SiteSearch.swift and InlineCompletion.swift.
 // Copyright 2026 Zigao Wang, Apache-2.0. Modified for Rove: only commands the
-// Windows app can run, Google as the search engine, and a reduced public-suffix list.
+// Windows app can run, selectable search engines, and a reduced public-suffix list.
 import type { BrowserState, HistoryEntry, Tab } from "./types";
+import { isSettingsUrl, normalizeSettingsUrl, searchName } from "./settings";
 
 export const COMMAND_LIMIT = 8;
 const LOCAL_TLDS = new Set(["local", "lan", "internal", "test", "localhost", "home", "arpa", "corp", "intranet"]);
@@ -95,6 +96,7 @@ export function matchSite(typed: string): SiteSearch | undefined {
 
 export function urlFrom(text: string): string | undefined {
   const trimmed = text.trim();
+  if (isSettingsUrl(trimmed)) return normalizeSettingsUrl(trimmed);
   if (!trimmed || /\s/.test(trimmed)) return;
   const lower = trimmed.toLowerCase();
   if (lower.startsWith("http://") || lower.startsWith("https://")) {
@@ -262,7 +264,7 @@ export function rankCommands(text: string, input: {
   addActions(named);
   const address = urlFrom(query);
   if (address) add(row({ type: "open", url: address }, displayUrl(address), "", "globe", "Open", normalizeKey(address)));
-  else add(row({ type: "search", query }, query, "Google", "search", "Search", `search:${query}`));
+  else add(row({ type: "search", query }, query, searchName(input.state.settings), "search", "Search", `search:${query}`));
   addActions(matched.filter((action) => !isNamed(action, words)));
   let tabCount = 0;
   const ordered = [...input.recent.map((id) => input.state.tabs.find((tab) => tab.id === id)), ...input.state.tabs].filter((tab): tab is Tab => Boolean(tab));

@@ -36,7 +36,7 @@ function drop(e: DragEvent, before?: string) {
 }
 </script>
 <template>
-  <div class="favorites" aria-label="常用网站" @dragover.prevent @drop.prevent.self="drop($event)">
+  <div class="favorites" :style="{gridTemplateColumns: b.settings.favoritesPerRow ? `repeat(${b.settings.favoritesPerRow}, minmax(0, 1fr))` : 'repeat(auto-fit, minmax(56px, 1fr))'}" aria-label="常用网站" @dragover.prevent @drop.prevent.self="drop($event)">
     <div v-for="f in tiles" :key="f.id" class="favorite-tile" :data-bookmark-id="f.id" draggable="true" @dragstart="drag($event, f)" @dragend="b.dragging = false" @dragover.prevent @drop.prevent.stop="drop($event, f.id)" @contextmenu.prevent="showMenu($event, f)" @mousedown.middle.prevent @auxclick.middle.prevent.stop="b.send({ type: 'bookmarkUnload', id: f.id })">
     <button class="favorite-open" draggable="true" @dragstart.stop="drag($event, f)"
       :title="b.previewTarget === f.id ? undefined : f.title"

@@ -11,6 +11,7 @@ import type {
   PeekPhase,
 } from "../lib/types";
 import { address, host } from "../lib/address";
+import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
@@ -59,6 +60,20 @@ export const useBrowser = defineStore("browser", () => {
     .filter((f) => f.spaceId === state.value.activeSpace)
     .map((f) => ({ ...(liveTab(state.value, f.id) || { id: f.id, spaceId: f.spaceId!, url: f.url, unloaded: true }), title: f.title, favicon: liveTab(state.value, f.id)?.favicon || f.favicon, pinned: true, bookmarkId: f.id })));
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedPage(state.value, active.value.bookmarkId) : undefined);
+  const settings = computed(() => settingsFor(state.value.settings));
+  function shortcutLabel(id: string) {
+    const binding = shortcutFor(id, settings.value);
+    return binding ? shortcutText(binding) : "";
+  }
+  function shortcutTitle(title: string, id: string) {
+    const label = shortcutLabel(id);
+    return label ? `${title} (${label})` : title;
+  }
+  const dataStatus = ref("");
+  function openSettings(pane?: SettingsPane) {
+    commandOpen.value = false; settingsOpen.value = false; deskOpen.value = false;
+    send({ type: "settingsOpen", ...(pane ? { pane } : {}) });
+  }
   const overlay = computed(
     () =>
       commandOpen.value ||
@@ -257,16 +272,19 @@ export const useBrowser = defineStore("browser", () => {
       );
     }
     if (e.type === "history" && e.entries) history.value = e.entries;
-    if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions) suggestions.value = e.suggestions;
+    if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions && settings.value.searchSuggestions) suggestions.value = e.suggestions;
+    if (e.type === "dataCleared") { dataStatus.value = e.message || "已清除"; if (e.action === "history") history.value = []; }
     if (e.type === "error") error.value = e.message || "操作失败";
     if (e.type === "glassUnavailable") glassBlocked.value = true;
     if (e.type === "shortcut") {
       if (e.action === "address") openCommand("edit");
       if (e.action === "new") openCommand();
       if (e.action === "desk") deskOpen.value = !deskOpen.value;
+      if (e.action === "settings") openSettings();
     }
   };
   let suggestTicket = 0;
+  watch(() => [settings.value.searchSuggestions, settings.value.searchEngine], () => { suggestTicket++; suggestions.value = []; });
   watch(() => state.value.activeTab, (id) => {
     if (!id) return;
     recent.value = [id, ...recent.value.filter((item) => item !== id)].slice(0, 24);
@@ -274,7 +292,7 @@ export const useBrowser = defineStore("browser", () => {
   function suggest(query: string) {
     suggestions.value = [];
     const ticket = ++suggestTicket;
-    send({ type: "suggest", query, ticket });
+    if (settings.value.searchSuggestions && settings.value.searchEngine === "google") send({ type: "suggest", query, ticket });
     return ticket;
   }
   // Only transient UI state crosses the trusted popup bridge. Each renderer keeps
@@ -322,6 +340,11 @@ export const useBrowser = defineStore("browser", () => {
     peekMoving,
     peekSurface,
     state,
+    settings,
+    shortcutLabel,
+    shortcutTitle,
+    dataStatus,
+    openSettings,
     history,
     suggestions,
     recent,
