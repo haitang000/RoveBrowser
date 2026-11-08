@@ -5,6 +5,8 @@ import type {
   Command,
   HistoryEntry,
   Tab,
+  Rect,
+  Favorite,
   Point,
   PeekPhase,
 } from "../lib/types";
@@ -12,18 +14,21 @@ import { address, host } from "../lib/address";
 import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
+  const popupWindow = Boolean(window.__ERA_POPUP__);
+  const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
+  const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
+  const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
+  const previewAnimationDone = ref(0);
   const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || initialState())),
     history = ref<HistoryEntry[]>([]),
     suggestions = ref<string[]>([]),
     recent = ref<string[]>([]),
     error = ref("");
   const commandOpen = ref(false),
-    commandBackdrop = ref<{ ticket: number; images: (string | null)[]; ready: boolean; shown: boolean } | null>(null),
     thumbnails = ref<Record<string, string>>({}),
     previewTarget = ref<string>(),
     previewHiddenTicket = ref(0),
     previewDismissals = ref(0),
-    previewBackdrop = ref<{ ticket: number; images: (string | null)[] } | null>(null),
     previewPresentedTicket = ref(0),
     previewFailures = ref<Record<string, boolean>>({}),
     peek = ref<Tab | null>(null),
@@ -59,6 +64,7 @@ export const useBrowser = defineStore("browser", () => {
       commandOpen.value ||
       deskOpen.value ||
       settingsOpen.value ||
+      Boolean(contextMenu.value) ||
       dragging.value,
   );
   function send(c: Command) {
@@ -74,12 +80,10 @@ export const useBrowser = defineStore("browser", () => {
         "thumbnails",
         "tabPreview",
         "tabPreviewRefresh",
-        "tabPreviewClose",
-        "tabPreviewReady",
-        "tabPreviewFailed",
         "windowChrome",
-        "commandBackdropReady",
-        "commandBackdropFailed",
+        "popupState",
+        "popupLayer",
+        "popupReady",
       ].includes(c.type)
     )
       error.value = "";
@@ -189,20 +193,11 @@ export const useBrowser = defineStore("browser", () => {
     if (t) send({ type: "activate", id: t.id });
   }
   window.__ERA_RECEIVE__ = (e) => {
-    if (e.type === "tabPreviewBackdrop" && e.ticket !== undefined && e.backgrounds)
-      previewBackdrop.value = { ticket: e.ticket, images: e.backgrounds };
     if (e.type === "tabPreviewPresented" && e.ticket !== undefined) previewPresentedTicket.value = e.ticket;
     if (e.type === "tabPreviewUnavailable" && e.id) previewFailures.value[e.id] = true;
     if (e.type === "tabPreviewHidden" && e.ticket !== undefined) previewHiddenTicket.value = e.ticket;
     if (e.type === "tabPreviewDismissed") previewDismissals.value++;
-    if (e.type === "commandBackdrop") {
-      commandBackdrop.value = e.backgrounds && e.ticket !== undefined
-        ? { ticket: e.ticket, images: e.backgrounds, ready: Boolean(e.backgroundReady), shown: false }
-        : null;
-    }
-    if (e.type === "commandPresented" && commandBackdrop.value?.ticket === e.ticket)
-      commandBackdrop.value!.shown = true;
-    if (e.type === "commandDismissed") commandOpen.value = false;
+    if (e.type === "popupState" && e.popup) receivePopup(e.popup);
     if (e.type === "thumbnails" && e.images) thumbnails.value = e.images;
     if (e.type === "thumbnail" && e.id) {
       const allowed = new Set(e.kept || Object.keys(thumbnails.value));
@@ -282,14 +277,40 @@ export const useBrowser = defineStore("browser", () => {
     send({ type: "suggest", query, ticket });
     return ticket;
   }
-  send({ type: "ready" });
+  // Only transient UI state crosses the trusted popup bridge. Each renderer keeps
+  // its own DOM; native browser state continues to come from the host.
+  let receivingPopup = false;
+  const popupFields = { commandOpen, commandMode, deskOpen, settingsOpen, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error };
+  function receivePopup(patch: Record<string, unknown>) {
+    receivingPopup = true;
+    for (const [key, value] of Object.entries(patch)) {
+      if (key in popupFields) (popupFields[key as keyof typeof popupFields] as { value: unknown }).value = value ?? undefined;
+    }
+    receivingPopup = false;
+  }
+  for (const [key, value] of Object.entries(popupFields)) {
+    watch(value, (next) => {
+      if (!native || receivingPopup) return;
+      // Cached favicons are already in native browser state and can exceed the
+      // IPC message limit. Menus only need the saved item/controller identity.
+      const patch = key === "contextMenu" && next
+        ? JSON.parse(JSON.stringify(next, (name, value) => name === "favicon" ? undefined : value))
+        : next ?? null;
+      send({ type: "popupState", popup: { [key]: patch } });
+    }, { deep: true, flush: "sync" });
+  }
+  send({ type: popupWindow ? "popupReady" : "ready" });
   return {
     native,
+    popupWindow,
+    contextMenu,
+    popupArea,
+    hoverPreview,
+    previewAnimationDone,
     thumbnails,
     previewTarget,
     previewHiddenTicket,
     previewDismissals,
-    previewBackdrop,
     previewPresentedTicket,
     previewFailures,
     peek,
@@ -312,7 +333,6 @@ export const useBrowser = defineStore("browser", () => {
     pinnedTabs,
     activeBookmark,
     commandOpen,
-    commandBackdrop,
     commandMode,
     deskOpen,
     settingsOpen,

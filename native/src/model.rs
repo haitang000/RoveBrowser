@@ -129,12 +129,6 @@ pub enum Command {
     },
     #[serde(rename = "tabPreviewRefresh")]
     TabPreviewRefresh { id: String },
-    #[serde(rename = "tabPreviewReady")]
-    TabPreviewReady { ticket: u64 },
-    #[serde(rename = "tabPreviewClose")]
-    TabPreviewClose { ticket: u64 },
-    #[serde(rename = "tabPreviewFailed")]
-    TabPreviewFailed { ticket: u64 },
     #[serde(rename = "windowChrome")]
     WindowChrome {
         maximize: Rect,
@@ -250,10 +244,12 @@ pub enum Command {
         #[serde(default)]
         command: bool,
     },
-    #[serde(rename = "commandBackdropReady")]
-    FloatingBackdropReady { ticket: u64 },
-    #[serde(rename = "commandBackdropFailed")]
-    FloatingBackdropFailed { ticket: u64 },
+    #[serde(rename = "popupReady")]
+    PopupReady,
+    #[serde(rename = "popupState")]
+    PopupState { popup: serde_json::Value },
+    #[serde(rename = "popupLayer")]
+    PopupLayer { regions: Vec<Rect>, cutout: Option<Rect>, focus: bool },
     #[serde(rename = "window")]
     Window { action: String },
     #[serde(rename = "history")]

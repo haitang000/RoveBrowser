@@ -36,7 +36,7 @@ async function launch() {
   child = spawn(exe, [], { env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) }, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   child.stderr.on('data', (data) => process.stderr.write(data));
   uiBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 'UI debugger');
-  const ui = await waitFor(() => uiBrowser.contexts().flatMap((c) => c.pages()).find((p) => p.url().startsWith('https://era.ui/')), 'trusted UI');
+  const ui = await waitFor(() => uiBrowser.contexts().flatMap((c) => c.pages()).find((p) => p.url() === 'https://era.ui/index.html'), 'trusted UI');
   await ui.locator('.space-viewport').waitFor();
   return ui;
 }
@@ -55,7 +55,7 @@ async function close() {
   await pageBrowser?.close(); pageBrowser = undefined;
   if (child && child.exitCode === null) {
     const done = once(child, 'exit');
-    const ui = uiBrowser?.contexts().flatMap((c) => c.pages()).find((p) => p.url().startsWith('https://era.ui/'));
+    const ui = uiBrowser?.contexts().flatMap((c) => c.pages()).find((p) => p.url() === 'https://era.ui/index.html');
     if (ui) await send(ui, { type: 'window', action: 'close' }).catch(() => {});
     else child.kill();
     await done;

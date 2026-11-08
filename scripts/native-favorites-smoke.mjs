@@ -39,7 +39,7 @@ async function launch() {
     return targets.some(t => t.url.startsWith('https://era.ui/'));
   }, 'UI renderer');
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  ui = await waitFor(() => Promise.resolve(browser.contexts().flatMap(c => c.pages()).find(p => p.url().startsWith('https://era.ui/'))), 'UI page');
+  ui = await waitFor(() => Promise.resolve(browser.contexts().flatMap(c => c.pages()).find(p => p.url() === 'https://era.ui/index.html')), 'UI page');
   await ui.waitForSelector('.sidebar');
   await ui.evaluate(() => {
     window.__favoriteErrors = [];
@@ -72,19 +72,20 @@ try {
   await waitFor(() => ui.evaluate(() => window.__favoriteErrors.some(e => e.includes('8'))), 'native limit rejects ninth favorite');
   assert.equal(await ui.locator('.favorite-tile').count(), 8);
   await ui.locator('.favorite-open').last().click({ button: 'right' });
-  await ui.getByRole('menuitem', { name: '移除常用网站', exact: true }).click();
+  await ui.context().pages().find(p => p.url().endsWith('?popup')).getByRole('menuitem', { name: '移除常用网站', exact: true }).click();
   await ui.locator('.favorite-open').first().click({ button: 'right' });
-  await ui.getByRole('menuitem', { name: '编辑常用网站', exact: true }).click();
-  await ui.getByRole('textbox', { name: '置顶网站名称' }).fill('本地图标');
-  await ui.getByRole('textbox', { name: '置顶网站网址' }).fill(base + '/home');
-  await ui.getByRole('button', { name: '保存修改', exact: true }).click();
+  await ui.context().pages().find(p => p.url().endsWith('?popup')).getByRole('menuitem', { name: '编辑常用网站', exact: true }).click();
+  const popup = ui.context().pages().find(p => p.url().endsWith('?popup'));
+  await popup.getByRole('textbox', { name: '置顶网站名称' }).fill('本地图标');
+  await popup.getByRole('textbox', { name: '置顶网站网址' }).fill(base + '/home');
+  await popup.getByRole('button', { name: '保存修改', exact: true }).click();
   await send({ type: 'new', url: base + '/other' });
   pageBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port + 1}`), 'page debugger');
   const web = await waitFor(() => Promise.resolve(pageBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === base + '/other')), 'fixture page');
   await web.waitForSelector('h1');
   await waitFor(() => ui.evaluate(() => window.__favoriteState?.tabs.some(t => t.url.endsWith('/other') && t.favicon?.startsWith('data:image/png;base64,'))), 'native favicon capture');
   await ui.getByRole('tab', { name: /^Cached icon fixture/ }).click({ button: 'right' });
-  await ui.getByRole('menuitem', { name: '添加到顶部常用网站', exact: true }).click();
+  await ui.context().pages().find(p => p.url().endsWith('?popup')).getByRole('menuitem', { name: '添加到顶部常用网站', exact: true }).click();
   assert.equal(await ui.locator('.favorite-tile').count(), 8);
   const favorite = () => ui.locator('.favorite-tile').filter({ has: ui.getByRole('button', { name: '本地图标', exact: true }) });
   const cached = await favorite().locator('img').getAttribute('src');

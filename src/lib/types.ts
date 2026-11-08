@@ -68,6 +68,7 @@ declare global {
   interface Window {
     ipc?: { postMessage(message: string): void };
     __ERA_NATIVE__?: boolean;
+    __ERA_POPUP__?: boolean;
     __ERA_INITIAL_STATE__?: BrowserState;
     __ERA_RECEIVE__?: (event: {
       type: string;
@@ -89,6 +90,7 @@ declare global {
       images?: Record<string, string>;
       image?: string | null;
       kept?: string[];
+      popup?: Record<string, unknown>;
     }) => void;
   }
 }

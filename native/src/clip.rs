@@ -7,7 +7,7 @@ use windows::{
         Foundation::{HWND, RECT},
         Graphics::Gdi::{
             CombineRgn, CreateEllipticRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject,
-            SetWindowRgn, HRGN, RGN_DIFF,
+            SetWindowRgn, HRGN, RGN_DIFF, RGN_OR,
         },
         UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
     },
@@ -119,6 +119,50 @@ pub struct WindowClip {
     last: Cell<Option<Shape>>,
 }
 impl WindowClip {
+    /// Limit the transparent popup HWND to its actual surfaces. Empty regions
+    /// pass input to the browser shell and live pages without hiding controllers.
+    pub fn popup(
+        hwnd: HWND,
+        rects: &[crate::model::Rect],
+        cutout: Option<crate::model::Rect>,
+        scale: f64,
+    ) -> Result<()> {
+        // SAFETY: the caller supplies a live WebView HWND and validated logical
+        // rectangles. Region owns each GDI handle until USER32 accepts it.
+        unsafe {
+            let mut region = Region::new(CreateRectRgn(0, 0, 0, 0))?;
+            for r in rects {
+                let part = Region::new(CreateRectRgn(
+                    (r.x * scale).floor() as i32,
+                    (r.y * scale).floor() as i32,
+                    ((r.x + r.width) * scale).ceil() as i32,
+                    ((r.y + r.height) * scale).ceil() as i32,
+                ))?;
+                if CombineRgn(Some(region.handle()), Some(region.handle()), Some(part.handle()), RGN_OR).0 == 0 {
+                    return Err(Error::from_thread());
+                }
+            }
+            if let Some(r) = cutout {
+                let radius = (r.corners[0] * scale).round() as i32;
+                let part = Region::new(CreateRoundRectRgn(
+                    (r.x * scale).round() as i32,
+                    (r.y * scale).round() as i32,
+                    ((r.x + r.width) * scale).round() as i32,
+                    ((r.y + r.height) * scale).round() as i32,
+                    radius * 2,
+                    radius * 2,
+                ))?;
+                if CombineRgn(Some(region.handle()), Some(region.handle()), Some(part.handle()), RGN_DIFF).0 == 0 {
+                    return Err(Error::from_thread());
+                }
+            }
+            if SetWindowRgn(hwnd, Some(region.handle()), true) == 0 {
+                return Err(Error::from_thread());
+            }
+            region.0.take();
+        }
+        Ok(())
+    }
     /// Root window regions include non-client bounds. Clear the custom region
     /// while maximized so Windows can manage the monitor/work-area edges.
     pub fn apply_window(&self, hwnd: HWND, radius: f64, scale: f64, maximized: bool) -> Result<()> {
@@ -338,6 +382,29 @@ mod tests {
                 let expected = Shape::new(70, 40, [12.; 4], scale).region().unwrap();
                 assert!(unsafe { EqualRgn(actual.handle(), expected.handle()) }.as_bool());
             }
+        }
+        // Popup surfaces share one HWND. Their union must leave empty areas
+        // transparent and preserve the live Peek input hole at every DPI.
+        let surfaces = [
+            crate::model::Rect { x: 10., y: 10., width: 60., height: 50., corners: [0.; 4] },
+            crate::model::Rect { x: 100., y: 20., width: 30., height: 30., corners: [0.; 4] },
+        ];
+        let cutout = crate::model::Rect { x: 20., y: 20., width: 30., height: 30., corners: [6.; 4] };
+        for scale in [1., 1.5, 2.] {
+            for hole in [None, Some(cutout)] {
+                WindowClip::popup(window.0, &surfaces, hole, scale).unwrap();
+                let actual = Region::new(unsafe { CreateRectRgn(0, 0, 0, 0) }).unwrap();
+                assert_ne!(unsafe { GetWindowRgn(window.0, actual.handle()) }.0, 0);
+                let point = |x: f64, y: f64| contains(&actual, (x * scale) as i32, (y * scale) as i32);
+                assert!(point(15., 15.) && point(110., 30.));
+                assert!(!point(80., 30.) && !point(0., 0.));
+                assert_eq!(point(30., 30.), hole.is_none());
+                assert!(point(20., 20.)); // rounded cutout corner belongs to the popup
+            }
+            WindowClip::popup(window.0, &[], None, scale).unwrap();
+            let empty = Region::new(unsafe { CreateRectRgn(0, 0, 0, 0) }).unwrap();
+            assert_ne!(unsafe { GetWindowRgn(window.0, empty.handle()) }.0, 0);
+            assert!(!contains(&empty, 15, 15));
         }
     }
 }

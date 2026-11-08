@@ -195,20 +195,6 @@ watch(() => b.commandOpen, async (open) => {
     previous?.focus();
   }
 });
-watch([() => b.commandBackdrop, () => b.commandOpen], async ([backdrop, open]) => {
-  if (!open || !backdrop?.ready) return;
-  const current = () => b.commandOpen && b.commandBackdrop?.ticket === backdrop.ticket;
-  await nextTick();
-  try {
-    await Promise.all(Array.from(document.querySelectorAll<HTMLImageElement>(".command-background")).map((image) => image.decode()));
-  } catch {
-    if (current()) b.send({ type: "commandBackdropFailed", ticket: backdrop.ticket });
-    return;
-  }
-  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-  if (current()) b.send({ type: "commandBackdropReady", ticket: backdrop.ticket });
-});
-watch(() => b.commandBackdrop?.shown, async (shown) => { if (shown && b.commandOpen) { await nextTick(); field.value?.focus(); } });
 function dismissOutside(event: PointerEvent) {
   if (b.commandOpen && panel.value && event.target instanceof Node && !panel.value.contains(event.target)) {
     if (event.target instanceof Element && event.target.closest(".command-scrim")) event.preventDefault();
@@ -227,7 +213,7 @@ onBeforeUnmount(() => {
     ><div
       v-if="b.commandOpen"
       class="command-scrim"
-      :data-presented="!b.native || Boolean(b.commandBackdrop?.shown)"
+      data-presented="true"
       @pointerdown.self="b.commandOpen = false"
       @keydown="key"
     >

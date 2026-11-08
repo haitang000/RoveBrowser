@@ -88,33 +88,41 @@ test("preview stays inside a narrow viewport and works with reduced motion and d
   expect(rect!.y + rect!.height).toBeLessThanOrEqual(400 - 15);
 });
 
-test("native handoff keeps the card until its page region is restored, ignoring old acknowledgments", async ({ page }) => {
-  await page.addInitScript(() => {
-    const messages: { type: string; rect?: unknown; ticket?: number }[] = [];
-    Object.assign(window, { __ERA_NATIVE__: true, __previewMessages: messages, ipc: { postMessage(text: string) {
+test("native preview uses the popup renderer and ignores old close acknowledgments", async ({ page, context }) => {
+  const messages: { type: string; rect?: unknown; ticket?: number; popup?: Record<string, unknown> }[] = [];
+  const popup = await context.newPage();
+  for (const [target, isPopup] of [[page, false], [popup, true]] as const) {
+    await target.exposeFunction("popupTestSend", async (text: string) => {
       const command = JSON.parse(text); messages.push(command);
-      if ((command.type === 'tabPreview' && command.rect) || command.type === 'tabPreviewClose') queueMicrotask(() => window.__ERA_RECEIVE__?.({ type: 'tabPreviewBackdrop', ticket: command.ticket, backgrounds: [] }));
-      if (command.type === 'tabPreviewReady') queueMicrotask(() => window.__ERA_RECEIVE__?.({ type: 'tabPreviewPresented', ticket: command.ticket }));
-    } } });
-  });
+      if (command.type === "popupState") {
+        const other = target === page ? popup : page;
+        await other.evaluate(patch => window.__ERA_RECEIVE__?.({ type: "popupState", popup: patch }), command.popup);
+      }
+      if (command.type === "tabPreview" && command.rect)
+        await page.evaluate(ticket => window.__ERA_RECEIVE__?.({ type: "tabPreviewPresented", ticket }), command.ticket);
+    });
+    await target.addInitScript(isPopup => {
+      window.__ERA_NATIVE__ = true; window.__ERA_POPUP__ = isPopup;
+      window.ipc = { postMessage: text => { void (window as unknown as { popupTestSend(text: string): Promise<void> }).popupTestSend(text); } };
+    }, isPopup);
+  }
+  await popup.goto("/");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator('.pinned-tabs [data-bookmark-id="pin-wiki"]').hover();
-  await expect(page.locator(preview)).toBeVisible();
-  await expect(page.locator(preview)).toHaveAttribute('data-phase', 'open');
-  await page.mouse.move(900, 600);
-  await expect(page.locator(preview)).toHaveAttribute('data-closing', 'true');
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __previewMessages: { type: string; rect?: unknown }[] }).__previewMessages.some(m => m.type === 'tabPreview' && !m.rect))).toBe(true);
-  const ticket = await page.evaluate(() => {
-    const messages = (window as unknown as { __previewMessages: { type: string; rect?: unknown; ticket: number }[] }).__previewMessages;
-    return messages.filter(m => m.type === 'tabPreview' && !m.rect).at(-1)!.ticket;
-  });
-  await page.evaluate(ticket => window.__ERA_RECEIVE__!({ type: 'tabPreviewHidden', ticket: ticket - 1 }), ticket);
-  await expect(page.locator(preview)).toBeVisible();
-  await page.evaluate(ticket => window.__ERA_RECEIVE__!({ type: 'tabPreviewHidden', ticket }), ticket);
   await expect(page.locator(preview)).toHaveCount(0);
+  await expect(popup.locator(preview)).toHaveAttribute("data-phase", "open");
+  await expect(popup.locator(".tab-preview-background")).toHaveCount(0);
+  await page.mouse.move(900, 600);
+  await expect.poll(() => messages.some(m => m.type === "tabPreview" && !m.rect)).toBe(true);
+  const ticket = messages.filter(m => m.type === "tabPreview" && !m.rect).at(-1)!.ticket!;
+  await page.evaluate(ticket => window.__ERA_RECEIVE__!({ type: "tabPreviewHidden", ticket: ticket - 1 }), ticket);
+  await expect(popup.locator(preview)).toHaveCount(1);
+  await page.evaluate(ticket => window.__ERA_RECEIVE__!({ type: "tabPreviewHidden", ticket }), ticket);
+  await expect(popup.locator(preview)).toHaveCount(0);
+  expect(messages.some(m => /Backdrop|tabPreviewReady/.test(m.type))).toBe(false);
 });
 
-test("entry and exit fade reverse from the displayed opacity", async ({ page }) => {
+test("entry and exit fade reverse from the displayed opacity and reset after dismissal", async ({ page }) => {
   await page.evaluate(() => {
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
@@ -148,6 +156,15 @@ test("entry and exit fade reverse from the displayed opacity", async ({ page }) 
   await expect(card).toHaveAttribute('data-phase', 'opening');
   const resumed = await card.evaluate(e => Number((e.getAnimations()[0].effect as KeyframeEffect).getKeyframes()[0].opacity));
   expect(resumed).toBeCloseTo(leaving, 2);
+  await card.evaluate(e => e.getAnimations()[0].finish());
+  await expect(card).toHaveAttribute('data-phase', 'open');
+  await page.mouse.move(900, 600);
+  await expect(card).toHaveAttribute('data-phase', 'closing');
+  await card.evaluate(e => e.getAnimations()[0].finish());
+  await expect(card).toHaveCount(0);
+  await row.hover();
+  await expect(card).toHaveAttribute('data-phase', 'opening');
+  expect(await card.evaluate(e => Number((e.getAnimations()[0].effect as KeyframeEffect).getKeyframes()[0].opacity))).toBe(0);
   await card.evaluate(e => e.getAnimations()[0].finish());
   await expect(card).toHaveAttribute('data-phase', 'open');
 });

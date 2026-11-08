@@ -21,7 +21,7 @@ const server = createServer((req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 const checks = [];
-let child, uiBrowser, pageBrowser, ui;
+let child, uiBrowser, pageBrowser, ui, popup;
 async function waitFor(fn, label) {
   for (let i = 0; i < 150; i++) {
     try { const result = await fn(); if (result) return result; } catch {}
@@ -30,7 +30,7 @@ async function waitFor(fn, label) {
   throw Error('Timed out: ' + label);
 }
 const send = command => ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
-const tooltip = () => ui.locator('#tab-hover-preview');
+const tooltip = () => popup.locator('#tab-hover-preview');
 const site = path => waitFor(() => pageBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === base + path), path);
 async function selected() { return ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id'); }
 async function hover(id) {
@@ -52,8 +52,9 @@ try {
   });
   child.stderr.on('data', data => process.stderr.write(data));
   uiBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 'UI debugger');
-  ui = await waitFor(() => uiBrowser.contexts().flatMap(c => c.pages()).find(p => p.url().startsWith('https://era.ui/')), 'trusted UI');
+  ui = await waitFor(() => uiBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === 'https://era.ui/index.html'), 'trusted UI');
   await ui.waitForSelector('.sidebar');
+  popup = await waitFor(() => ui.context().pages().find(p => p.url().endsWith('?popup')), 'popup renderer');
   assert(await ui.evaluate(() => window.__ERA_NATIVE__ === true && !!window.__ERA_INITIAL_STATE__ && document.documentElement.dataset.native === 'true'), 'document-created initialization must select the native store before mounting');
   await ui.evaluate(() => {
     const receive = window.__ERA_RECEIVE__;
@@ -119,7 +120,7 @@ try {
   checks.push('无缓存常用网站现场加载并生成真实预览，不增加标签、不写历史；收起释放控制器，下次命中缓存');
 
   // Slow entry/exit down with the browser animation timeline, without altering app durations.
-  await ui.evaluate(() => {
+  await popup.evaluate(() => {
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
       const result = animate.apply(this, args);
@@ -130,8 +131,7 @@ try {
   });
   await ui.mouse.move(900, 740); await ui.locator(`[data-tab-id="${firstId}"]`).hover();
   await waitFor(async () => await tooltip().getAttribute('data-phase') === 'opening', 'native entry animation');
-  assert.equal(await ui.locator('.tab-preview-background').count(), 1);
-  await ui.locator('.tab-preview-background').evaluate(img => img.decode());
+  assert.equal(await popup.locator('.tab-preview-background').count(), 0);
   const entering = await tooltip().evaluate(e => {
     const a = e.getAnimations()[0]; a.currentTime = 80;
     return Number(getComputedStyle(e).opacity);
@@ -148,8 +148,8 @@ try {
   await tooltip().evaluate(e => e.getAnimations()[0].finish());
   await tooltip().waitFor({ state: 'detached' });
   assert.equal(await ui.locator('.tab-preview-background').count(), 0);
-  await ui.evaluate(() => window.__restorePreviewAnimate());
-  checks.push('真实网页上160ms入场/120ms离场，透明中间帧有已解码背景，当前网页始终可见，关闭后回收背景');
+  await popup.evaluate(() => window.__restorePreviewAnimate());
+  checks.push('真实网页上160ms入场/120ms离场，透明中间帧直接显示真实网页，当前网页始终可见');
 
   await send({ type: 'split', id: secondId, other: firstId });
   await send({ type: 'new', url: base + '/third' });
@@ -185,10 +185,10 @@ try {
   }
   await ui.keyboard.press('Escape'); await tooltip().waitFor({ state: 'detached' });
   await ui.keyboard.press('Control+l');
-  await ui.locator('.command-scrim[data-presented="true"]').waitFor();
+  await popup.locator('.command-scrim[data-presented="true"]').waitFor();
   assert.equal(await tooltip().count(), 0);
-  await ui.keyboard.press('Escape');
-  await ui.locator('.command-scrim').waitFor({ state: 'detached' });
+  await popup.keyboard.press('Escape');
+  await popup.locator('.command-scrim').waitFor({ state: 'detached' });
   checks.push('Esc和命令栏正确收起预览，原有浮层仍正常工作');
   const result = { passed: true, profile, checks };
   await writeFile(join(output, 'native-tab-preview-smoke.json'), JSON.stringify(result, null, 2));

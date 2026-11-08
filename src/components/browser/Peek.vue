@@ -16,6 +16,7 @@ const b = useBrowser(),
   panel = ref<HTMLElement>(),
   scrim = ref<HTMLElement>(),
   surfaceImage = ref<HTMLImageElement>(),
+  exitSurfaceReady = ref(false),
   insets = ref({ x: 32, y: 24 }),
   backgroundBounds = ref<Record<number, Record<string, string>>>({});
 let observer: ResizeObserver,
@@ -114,8 +115,8 @@ async function prepare() {
   if (layer.value) observer?.observe(layer.value);
   await measure();
   if (!current(id, ticket, generation)) return;
-  // The UI is still below the live source HWNDs here. Decode every split-pane
-  // backdrop before asking Rust to raise it, otherwise the white PageArea leaks.
+  // Standalone fixtures may supply background images. Native popups leave the
+  // live source pages beneath the transparent renderer and supply none.
   try {
     await Promise.all(
       Array.from(layer.value?.querySelectorAll<HTMLImageElement>(".peek-background") || [])
@@ -135,10 +136,12 @@ async function prepare() {
     } catch {
       /* A capture failure keeps the themed loading surface. */
     }
+    if (!current(id, ticket, generation)) return;
+    exitSurfaceReady.value = true;
+    await nextTick();
   }
   if (!current(id, ticket, generation)) return;
-  // decode() only guarantees pixels in memory. Give Chromium a paint opportunity
-  // before the native sibling Z-order handoff (also needed for the exit proxy).
+  // Paint the decoded exit proxy before the native Peek controller is hidden.
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   if (!current(id, ticket, generation)) return;
   prepared = key;
@@ -217,6 +220,7 @@ watch(
 watch(
   () => [b.peek?.id, b.peekPhase, b.peekTicket],
   () => {
+    exitSurfaceReady.value = false;
     if (!b.peek) {
       epoch++;
       prepared = "";
@@ -262,6 +266,7 @@ onBeforeUnmount(() => {
     v-if="b.peek"
     ref="layer"
     class="peek-layer"
+    :class="{ 'is-popup': b.popupWindow, 'has-exit-surface': exitSurfaceReady }"
     aria-label="网页预览区域"
     :data-phase="b.peekPhase"
     :data-ticket="b.peekTicket"
@@ -324,7 +329,6 @@ onBeforeUnmount(() => {
         </button>
       </header>
       <div ref="content" class="peek-content">
-        <img v-if="b.commandBackdrop?.images[2]" class="command-background" :src="b.commandBackdrop.images[2]" alt="" draggable="false" />
         <img
           v-if="b.native && b.peekSurface?.image"
           ref="surfaceImage"
@@ -380,6 +384,18 @@ onBeforeUnmount(() => {
   transform-origin: 0 0;
   opacity: 0;
 }
+.peek-layer[data-phase="open"] .peek-panel { opacity: 1; }
+/* The live Peek controller stays below the transparent popup renderer. A modal
+   above Peek must dim those live pixels, rather than cover them with its loader. */
+.peek-layer.is-popup[data-phase="open"] .peek-panel,
+.peek-layer.is-popup[data-phase="open"] .peek-content,
+.peek-layer.is-popup[data-phase="closing"]:not(.has-exit-surface) .peek-panel,
+.peek-layer.is-popup[data-phase="closing"]:not(.has-exit-surface) .peek-content { background: transparent; }
+.peek-layer.is-popup .peek-header { background: var(--panel); }
+.peek-layer.is-popup[data-phase="open"] .peek-loading-page,
+.peek-layer.is-popup[data-phase="open"] .peek-surface,
+.peek-layer.is-popup[data-phase="closing"]:not(.has-exit-surface) .peek-loading-page,
+.peek-layer.is-popup[data-phase="closing"]:not(.has-exit-surface) .peek-surface { visibility: hidden; }
 .peek-header {
   height: 40px;
   display: flex;

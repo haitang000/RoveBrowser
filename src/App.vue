@@ -8,7 +8,9 @@ import CommandBar from "./components/browser/CommandBar.vue";
 import Desk from "./components/browser/Desk.vue";
 import SettingsPanel from "./components/browser/SettingsPanel.vue";
 import TabPreview from "./components/browser/TabPreview.vue";
+import ErrorToast from "./components/browser/ErrorToast.vue";
 import Icon from "./components/common/Icon.vue";
+import { browserKey } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
 import { coverage, isSeeThrough, usesClearGlass } from "./lib/page-frame";
 const b = useBrowser();
@@ -50,53 +52,12 @@ watch(glassActive, (enabled) => {
   if (b.native) b.send({ type: "glass", enabled });
 }, { immediate: true });
 function syncTransparency() { transparencyReduced.value = reducedTransparency.matches; }
-function key(e: KeyboardEvent) {
-  const k = e.key.toLowerCase();
-  if (e.ctrlKey && !e.altKey) {
-    if (k === "l") {
-      e.preventDefault();
-      b.openCommand("edit");
-    }
-    if (k === "t") {
-      e.preventDefault();
-      if (e.shiftKey) b.send({ type: "restore" });
-      else b.openCommand();
-    }
-    if (k === "w") {
-      e.preventDefault();
-      b.send({ type: "close" });
-    }
-    if (k === "tab") {
-      e.preventDefault();
-      b.cycle(e.shiftKey);
-    }
-    if (k === "b") {
-      e.preventDefault();
-      b.send({ type: "sidebar" });
-    }
-    if (k === "r") {
-      e.preventDefault();
-      b.send({ type: "reload" });
-    }
-    if (e.code === "Backslash" && e.shiftKey) {
-      e.preventDefault();
-      b.deskOpen = !b.deskOpen;
-    }
-    if (/^[1-9]$/.test(k)) {
-      const s = b.state.spaces[Number(k) - 1];
-      if (s) {
-        e.preventDefault();
-        b.send({ type: "space", id: s.id });
-      }
-    }
-  }
-  if (e.altKey && (k === "arrowleft" || k === "arrowright")) {
-    e.preventDefault();
-    b.send({ type: k === "arrowleft" ? "back" : "forward" });
-  }
-}
+const key = (event: KeyboardEvent) => browserKey(b, event);
+function dismissCommand() { if (b.native) b.commandOpen = false; }
+
 onMounted(async () => {
   window.addEventListener("keydown", key);
+  document.addEventListener("pointerdown", dismissCommand, true);
   reducedMotion.addEventListener("change", finishFrameAnimation);
   reducedTransparency.addEventListener("change", syncTransparency);
   if (b.native) document.documentElement.dataset.native = "true";
@@ -111,6 +72,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", key);
+  document.removeEventListener("pointerdown", dismissCommand, true);
   reducedMotion.removeEventListener("change", finishFrameAnimation);
   reducedTransparency.removeEventListener("change", syncTransparency);
   finishFrameAnimation();
@@ -144,12 +106,9 @@ onBeforeUnmount(() => {
         @click="b.send({ type: 'sidebar' })"
       >
         <Icon name="sidebar" /></button
-      ><PageArea><CommandBar /></PageArea>
+      ><PageArea><CommandBar v-if="!b.native" /></PageArea>
     </div>
-    <Desk /><SettingsPanel /><TabPreview />
-    <div v-if="b.error && !b.commandOpen" class="error-toast" role="alert">
-      {{ b.error
-      }}<button aria-label="关闭提示" @click="b.error = ''">×</button>
-    </div>
+    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><TabPreview />
+    <ErrorToast v-if="!b.native" />
   </div>
 </template>

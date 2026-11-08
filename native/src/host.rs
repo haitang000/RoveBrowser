@@ -92,13 +92,10 @@ enum Event {
     Shortcut(String, bool),
     Open(String),
     PeekRequest(String, String, Option<Point>),
-    PeekBackground(String, usize, Option<String>),
     PeekSurface(String, u64, Option<String>),
-    CommandBackground(u64, usize, Option<String>),
     Suggestions(u64, Vec<String>),
     CaptureTabs,
     Thumbnail(String, String, u64, Option<String>),
-    PreviewBackground(u64, usize, Option<String>),
     PreviewLoad(String, u64, String, bool),
     PreviewThumbnail(String, u64, u64, Option<String>),
     PreviewCapture,
@@ -144,9 +141,6 @@ struct Peek {
     tab: Tab,
     page: Page,
     rect: Option<Rect>,
-    background: [Option<String>; 2],
-    background_pending: [bool; 2],
-    covering: bool,
     shown: Cell<bool>,
     origin: Option<Point>,
     phase: PeekPhase,
@@ -164,9 +158,10 @@ struct App {
     caption: Option<crate::caption::Caption>,
     thumbnails: crate::thumbnails::Cache,
     tab_preview: Option<(String, Rect)>,
-    preview_backdrop: Option<PreviewBackdrop>,
     preview_renders: HashMap<String, PreviewRender>,
     preview_epoch: u64,
+    popup: Option<WebView>,
+    popup_state: serde_json::Map<String, serde_json::Value>,
     ui: Option<WebView>,
     window: Option<Window>,
     window_clip: WindowClip,
@@ -177,26 +172,10 @@ struct App {
     primary: Rect,
     secondary: Option<Rect>,
     overlay: bool,
-    command_backdrop: Option<CommandBackdrop>,
-    command_ticket: u64,
     ready: bool,
     last_error: Option<String>,
     ui_data: PathBuf,
     glass: bool,
-}
-struct CommandBackdrop {
-    ticket: u64,
-    images: [Option<String>; 3],
-    pending: [bool; 3],
-    covering: bool,
-}
-struct PreviewBackdrop {
-    id: String,
-    rect: Rect,
-    ticket: u64,
-    images: [Option<String>; 2],
-    pending: [bool; 2],
-    closing: bool,
 }
 struct PreviewRender {
     view: WebView,
@@ -227,9 +206,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         caption: None,
         thumbnails: crate::thumbnails::Cache::default(),
         tab_preview: None,
-        preview_backdrop: None,
         preview_renders: HashMap::new(),
         preview_epoch: 0,
+        popup: None,
+        popup_state: serde_json::Map::new(),
         ui: None,
         window: None,
         window_clip: WindowClip::default(),
@@ -240,8 +220,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         primary: Rect::default(),
         secondary: None,
         overlay: false,
-        command_backdrop: None,
-        command_ticket: 0,
         ready: false,
         last_error: None,
         ui_data: data.join("UI"),
@@ -302,6 +280,11 @@ impl App {
     }
 
     fn emit(&self, value: serde_json::Value) {
+        if value["type"] != "shortcut" {
+            if let Some(popup) = &self.popup {
+                let _ = popup.evaluate_script(&format!("window.__ERA_RECEIVE__?.({value})"));
+            }
+        }
         if let Some(ui) = &self.ui {
             let _ = ui.evaluate_script(&format!("window.__ERA_RECEIVE__?.({value})"));
         }
@@ -464,33 +447,6 @@ impl App {
         Some(tabs)
     }
 
-    fn publish_preview_backdrop(&self) {
-        if let Some(b) = self.preview_backdrop.as_ref().filter(|b| !b.pending.contains(&true)) {
-            self.emit(json!({"type":"tabPreviewBackdrop","ticket":b.ticket,"backgrounds":b.images,"phase":if b.closing {"closing"} else {"opening"}}));
-        }
-    }
-    fn prepare_preview_backdrop(&mut self, id: String, rect: Rect, ticket: u64, closing: bool) {
-        let ids = [Some(self.state.active_tab.clone()), self.state.active().and_then(|t| t.split_with.clone())];
-        let pending = ids.each_ref().map(|id| id.as_ref().is_some_and(|id| self.pages.contains_key(id)));
-        self.preview_backdrop = Some(PreviewBackdrop { id, rect, ticket, images: [None, None], pending, closing });
-        for (pane, id) in ids.into_iter().enumerate() {
-            let Some(page) = id.and_then(|id| self.pages.get(&id)) else { continue };
-            let proxy = self.proxy.clone();
-            if crate::capture::background(&page.view, move |image| {
-                let _ = proxy.send_event(Event::PreviewBackground(ticket, pane, image));
-            }).is_err() {
-                let _ = self.proxy.send_event(Event::PreviewBackground(ticket, pane, None));
-            }
-        }
-        self.publish_preview_backdrop();
-        if pending.contains(&true) {
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                for pane in 0..2 { let _ = proxy.send_event(Event::PreviewBackground(ticket, pane, None)); }
-            });
-        }
-    }
     fn ensure_preview_renders(&mut self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let targets = crate::preview::targets(&self.state, id).unwrap_or_default();
         self.preview_renders.retain(|key, p| targets.iter().any(|t| &t.id == key && t.url == p.source));
@@ -546,8 +502,7 @@ impl App {
         }
     }
     fn dismiss_tab_preview(&mut self) {
-        let existed = self.tab_preview.take().is_some() || self.preview_backdrop.is_some();
-        self.preview_backdrop = None;
+        let existed = self.tab_preview.take().is_some();
         self.preview_renders.clear();
         if existed {
             let _ = self.sync_layout();
@@ -597,7 +552,7 @@ impl App {
         }
     }
     fn publish_peek(&self) {
-        self.emit(json!({"type":"peek","peek":self.peek.as_ref().map(|p|&p.tab),"phase":self.peek.as_ref().map(|p|p.phase),"ticket":self.peek.as_ref().map(|p|p.ticket),"origin":self.peek.as_ref().and_then(|p|p.origin),"backgrounds":self.peek.as_ref().map(|p|&p.background),"backgroundReady":self.peek.as_ref().is_some_and(|p|!p.background_pending.contains(&true))}));
+        self.emit(json!({"type":"peek","peek":self.peek.as_ref().map(|p|&p.tab),"phase":self.peek.as_ref().map(|p|p.phase),"ticket":self.peek.as_ref().map(|p|p.ticket),"origin":self.peek.as_ref().and_then(|p|p.origin),"backgroundReady":true}));
     }
     fn open_peek(
         &mut self,
@@ -620,39 +575,12 @@ impl App {
             favicon: None,
             split_with: None,
         };
-        let id = tab.id.clone();
-        let background = self
-            .peek
-            .as_ref()
-            .map(|p| p.background.clone())
-            .unwrap_or_default();
-        let reuse = self
-            .peek
-            .as_ref()
-            .is_some_and(|p| !p.background_pending.contains(&true));
-        let covering = self.peek.as_ref().is_some_and(|p| p.covering);
-        let sources = if reuse {
-            [None, None]
-        } else {
-            [
-                Some(self.state.active_tab.clone()),
-                self.state.active().and_then(|t| t.split_with.clone()),
-            ]
-        };
-        let background_pending = std::array::from_fn(|pane| {
-            sources[pane]
-                .as_ref()
-                .is_some_and(|id| self.pages.contains_key(id))
-        });
         let page = self.build_page(&tab)?;
         // Replacing a Peek drops its controller, without stacking temporary tabs.
         self.peek = Some(Peek {
             tab,
             page,
             rect: None,
-            background: background.clone(),
-            background_pending,
-            covering,
             shown: Cell::new(false),
             origin: origin.filter(|p| p.valid()),
             phase: PeekPhase::Opening,
@@ -664,29 +592,6 @@ impl App {
         });
         self.peek_visible.set(true);
         self.publish_peek();
-        for (pane, source) in sources.into_iter().enumerate() {
-            if let Some(opener) = source.and_then(|id| self.pages.get(&id)) {
-                let proxy = self.proxy.clone();
-                let capture_id = id.clone();
-                let result = crate::capture::background(&opener.view, move |image| {
-                    let _ = proxy.send_event(Event::PeekBackground(capture_id, pane, image));
-                });
-                if result.is_err() {
-                    let _ = self
-                        .proxy
-                        .send_event(Event::PeekBackground(id.clone(), pane, None));
-                }
-            }
-        }
-        if background_pending.contains(&true) {
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                for pane in 0..2 {
-                    let _ = proxy.send_event(Event::PeekBackground(id.clone(), pane, None));
-                }
-            });
-        }
         self.sync()?;
         Ok(())
     }
@@ -784,7 +689,7 @@ impl App {
         if let Err(e) = self.sync() {
             self.error(e)
         }
-        // Put the continuously rendered source HWNDs above the UI before removing its snapshots.
+        // Source pages keep rendering beneath the popup throughout Peek dismissal.
         self.publish_peek();
         if !self.overlay {
             if let Some(p) = self.page() {
@@ -813,77 +718,6 @@ impl App {
         }
         if let Some(p) = self.page() {
             let _ = p.focus();
-        }
-    }
-    fn publish_command_backdrop(&self) {
-        if let Some(backdrop) = &self.command_backdrop {
-            self.emit(json!({"type":"commandBackdrop","ticket":backdrop.ticket,
-                "backgrounds":backdrop.images,"backgroundReady":!backdrop.pending.contains(&true)}));
-        } else {
-            self.emit(json!({"type":"commandBackdrop","backgrounds":null}));
-        }
-    }
-    fn prepare_command_backdrop(&mut self) {
-        if self.command_backdrop.is_some() {
-            return;
-        }
-        self.command_ticket += 1;
-        let ticket = self.command_ticket;
-        let views = [
-            self.pages.get(&self.state.active_tab).map(|p| &p.view),
-            self.state
-                .active()
-                .and_then(|t| t.split_with.as_ref())
-                .and_then(|id| self.pages.get(id))
-                .map(|p| &p.view),
-            self.peek
-                .as_ref()
-                .filter(|p| p.shown.get())
-                .map(|p| &p.page.view),
-        ];
-        let pending = views.each_ref().map(|view| view.is_some());
-        self.command_backdrop = Some(CommandBackdrop {
-            ticket,
-            images: [None, None, None],
-            pending,
-            covering: false,
-        });
-        for (pane, view) in views.into_iter().enumerate() {
-            if let Some(view) = view {
-                let proxy = self.proxy.clone();
-                if crate::capture::background(view, move |image| {
-                    let _ = proxy.send_event(Event::CommandBackground(ticket, pane, image));
-                })
-                .is_err()
-                {
-                    let _ = self
-                        .proxy
-                        .send_event(Event::CommandBackground(ticket, pane, None));
-                }
-            }
-        }
-        self.publish_command_backdrop();
-        if pending.contains(&true) {
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                for pane in 0..3 {
-                    let _ = proxy.send_event(Event::CommandBackground(ticket, pane, None));
-                }
-            });
-        }
-    }
-    fn fail_command_backdrop(&mut self) {
-        self.command_backdrop = None;
-        self.overlay = false;
-        if let Err(e) = self.sync_layout() {
-            self.error(e);
-        }
-        self.publish_command_backdrop();
-        self.emit(json!({"type":"commandDismissed"}));
-        self.error("无法准备命令栏的网页背景，请重试");
-        if let Some(page) = self.page() {
-            let _ = page.focus();
         }
     }
     fn bounds(&self, r: Rect) -> wry::Rect {
@@ -979,9 +813,9 @@ impl App {
         };
         let second = self.state.active().and_then(|t| t.split_with.as_ref());
         let watched = self
-            .preview_backdrop
+            .tab_preview
             .as_ref()
-            .and_then(|b| self.preview_tabs(&b.id))
+            .and_then(|(id, _)| self.preview_tabs(id))
             .unwrap_or_default();
         for (id, page) in &self.pages {
             let r = if id == &self.state.active_tab {
@@ -993,20 +827,8 @@ impl App {
             };
             if let Some(r) = r.filter(|r| r.width > 0. && r.height > 0.) {
                 page.view.set_bounds(self.bounds(r))?;
-                let cutout = self.tab_preview.as_ref().map(|(_, rect)| Rect {
-                    x: rect.x - r.x,
-                    y: rect.y - r.y,
-                    ..*rect
-                });
-                page.clip.apply_with_cutout(
-                    page.view.hwnd(),
-                    r.corners,
-                    window.scale_factor(),
-                    cutout,
-                )?;
-                // Cover rather than hide: toggling IsVisible discards/resumes native surfaces
-                // and exposes a white frame when returning from the screenshot animation.
-                page.set_visible(!self.overlay || self.command_backdrop.is_some())?;
+                page.clip.apply(page.view.hwnd(), r.corners, window.scale_factor())?;
+                page.set_visible(true)?;
             } else {
                 // WebView2 stops painting IsVisible=false controllers. Let only the
                 // watched pages render behind the trusted UI while their card is up.
@@ -1015,9 +837,8 @@ impl App {
         }
         if let Some(peek) = &self.peek {
             if let Some(r) = peek.rect.filter(|r| r.width > 0. && r.height > 0.) {
-                let visible = (!self.overlay || self.command_backdrop.is_some())
-                    && (peek.phase == PeekPhase::Open
-                        || (peek.phase == PeekPhase::Closing && !peek.moving && peek.shown.get()));
+                let visible = peek.phase == PeekPhase::Open
+                        || (peek.phase == PeekPhase::Closing && !peek.moving && peek.shown.get());
                 let was_visible = peek.shown.replace(visible);
                 peek.page.view.set_bounds(self.bounds(r))?;
                 peek.page
@@ -1033,12 +854,10 @@ impl App {
             }
         }
         if let Some(ui) = &self.ui {
-            let command_covering = self.command_backdrop.as_ref().is_some_and(|b| b.covering);
-            let covering = command_covering || self.peek.as_ref().is_some_and(|p| p.covering);
             unsafe {
                 SetWindowPos(
                     ui.hwnd(),
-                    Some(if covering { HWND_TOP } else { HWND_BOTTOM }),
+                    Some(HWND_BOTTOM),
                     0,
                     0,
                     0,
@@ -1048,7 +867,7 @@ impl App {
                 if let Some(p) = self
                     .peek
                     .as_ref()
-                    .filter(|p| p.shown.get() && !command_covering)
+                    .filter(|p| p.shown.get())
                 {
                     SetWindowPos(
                         p.page.view.hwnd(),
@@ -1061,6 +880,9 @@ impl App {
                     )?;
                 }
             }
+        }
+        if let Some(popup) = &self.popup {
+            unsafe { SetWindowPos(popup.hwnd(), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
         }
         for id in watched {
             if let Some(page) = self.pages.get(&id) {
@@ -1087,12 +909,6 @@ impl App {
     fn shortcut(&mut self, key: String, shift: bool) {
         match key.as_str() {
             "address" | "new" | "desk" => {
-                // Address/new commands capture the still-visible page after Vue opens
-                // the floating panel. Hiding it here would capture an empty surface.
-                if key == "desk" {
-                    self.overlay = true;
-                    let _ = self.sync();
-                }
                 if let Some(ui) = &self.ui {
                     let _ = ui.focus();
                 }
@@ -1155,36 +971,15 @@ impl App {
                 });
                 if let Some((id, rect)) = valid {
                     let id = id.clone();
-                    self.prepare_preview_backdrop(id.clone(), rect, ticket, false);
+                    self.tab_preview = Some((id.clone(), rect));
+                    self.emit(json!({"type":"tabPreviewPresented","ticket":ticket}));
                     if let Err(e) = self.ensure_preview_renders(&id) { self.error(e); self.dismiss_tab_preview(); }
                 } else {
                     self.tab_preview = None;
-                    self.preview_backdrop = None;
                     self.preview_renders.clear();
                     if let Err(e) = self.sync_layout() { self.error(e); }
                     self.emit(json!({"type":"tabPreviewHidden","ticket":ticket}));
                 }
-                return;
-            }
-            Command::TabPreviewReady { ticket } => {
-                if let Some(b) = self.preview_backdrop.as_ref().filter(|b| b.ticket == ticket && !b.pending.contains(&true)) {
-                    self.tab_preview = Some((b.id.clone(), b.rect));
-                    if let Err(e) = self.sync_layout() { self.error(e); }
-                    self.emit(json!({"type":"tabPreviewPresented","ticket":ticket}));
-                }
-                return;
-            }
-            Command::TabPreviewClose { ticket } => {
-                if let Some((id, rect)) = self.tab_preview.clone() {
-                    self.prepare_preview_backdrop(id, rect, ticket, true);
-                } else {
-                    self.dismiss_tab_preview();
-                    self.emit(json!({"type":"tabPreviewHidden","ticket":ticket}));
-                }
-                return;
-            }
-            Command::TabPreviewFailed { ticket } => {
-                if self.preview_backdrop.as_ref().is_some_and(|b| b.ticket == ticket) { self.dismiss_tab_preview(); }
                 return;
             }
             Command::TabPreviewRefresh { id } => {
@@ -1256,16 +1051,14 @@ impl App {
                 if let Some(p) = self.peek.as_mut().filter(|p| {
                     p.tab.id == id
                         && p.ticket == ticket
-                        && !p.background_pending.contains(&true)
                         && (p.phase == PeekPhase::Opening || p.surface_sent)
                 }) {
-                    p.covering = true;
                     p.moving = true;
                     if let Err(e) = self.sync() {
                         self.error(e)
                     }
-                    if let Some(ui) = &self.ui {
-                        let _ = ui.focus();
+                    if let Some(popup) = &self.popup {
+                        let _ = popup.focus();
                     }
                     self.emit(json!({"type":"peekMoving","id":id,"ticket":ticket}));
                 }
@@ -1381,56 +1174,41 @@ impl App {
                 if visible {
                     self.dismiss_tab_preview();
                 }
-                let clearing = self.command_backdrop.is_some() && !(visible && command);
-                if visible && command {
-                    self.prepare_command_backdrop();
-                } else {
-                    self.command_backdrop = None;
-                }
-                if visible && !self.overlay && !command {
-                    self.refresh_visible_thumbnails();
-                }
+                if visible && !self.overlay && !command { self.refresh_visible_thumbnails(); }
                 self.overlay = visible;
-                if let Err(e) = self.sync_layout() {
-                    self.error(e);
-                }
-                // Restore live sibling HWNDs before Vue removes the covering pixels.
-                if clearing {
-                    self.publish_command_backdrop();
-                }
-                if visible {
-                    if let Some(ui) = &self.ui {
-                        let _ = ui.focus();
+                if let Err(e) = self.sync_layout() { self.error(e); }
+                // PopupLayer requests focus once its input region is installed.
+                // Dragging/split resizing also use Overlay and keep shell capture.
+                if !visible {
+                    if let Some(page) = self.page() {
+                        let _ = page.focus();
                     }
-                } else if let Some(page) = self.page() {
-                    let _ = page.focus();
                 }
                 return;
             }
-            Command::FloatingBackdropReady { ticket } => {
-                if let Some(backdrop) = self
-                    .command_backdrop
-                    .as_mut()
-                    .filter(|b| b.ticket == ticket && !b.pending.contains(&true))
-                {
-                    backdrop.covering = true;
-                    if let Err(e) = self.sync_layout() {
-                        self.error(e);
-                    }
-                    if let Some(ui) = &self.ui {
-                        let _ = ui.focus();
-                    }
-                    self.emit(json!({"type":"commandPresented","ticket":ticket}));
+            Command::PopupReady => {
+                self.emit(json!({"type":"state","state":self.state}));
+                self.emit(json!({"type":"popupState","popup":self.popup_state}));
+                self.publish_peek();
+                return;
+            }
+            Command::PopupState { popup } => {
+                if let Some(patch) = popup.as_object() {
+                    for (key, value) in patch { self.popup_state.insert(key.clone(), value.clone()); }
+                    self.emit(json!({"type":"popupState","popup":patch}));
                 }
                 return;
             }
-            Command::FloatingBackdropFailed { ticket } => {
-                if self
-                    .command_backdrop
-                    .as_ref()
-                    .is_some_and(|b| b.ticket == ticket)
-                {
-                    self.fail_command_backdrop();
+            Command::PopupLayer { regions, cutout, focus } => {
+                if regions.len() > 16 || !regions.iter().all(|r| r.valid()) || cutout.is_some_and(|r| !r.valid()) { return; }
+                if let (Some(popup), Some(window)) = (&self.popup, &self.window) {
+                    let result = WindowClip::popup(popup.hwnd(), &regions, cutout, window.scale_factor());
+                    if result.is_ok() && focus { let _ = popup.focus(); }
+                    if let Err(e) = result { self.error(e); }
+                }
+                if regions.is_empty() {
+                    if let Some(page) = self.page() { let _ = page.focus(); }
+                    else if let Some(ui) = &self.ui { let _ = ui.focus(); }
                 }
                 return;
             }
@@ -1572,6 +1350,31 @@ impl ApplicationHandler<Event> for App {
                     if req.uri().scheme_str()!=Some("https")||req.uri().host()!=Some("era.ui")||req.uri().path()!="/index.html"||req.body().len()>16384{return}
                     if let Ok(c)=serde_json::from_str::<Command>(req.body()){let _=proxy.send_event(Event::Command(c));}
                 }).build_as_child(&window)?;
+            let proxy = self.proxy.clone();
+            let popup=WebViewBuilder::new_with_web_context(&mut ui_context)
+                .with_custom_protocol("era".into(),|_,req|{
+                    let path=req.uri().path().trim_start_matches('/');
+                    let file=ASSETS.get_file(if path.is_empty(){"index.html"}else{path});
+                    let mime=if path.ends_with(".js"){"text/javascript"}else if path.ends_with(".css"){"text/css"}else if path.ends_with(".woff2"){"font/woff2"}else{"text/html"};
+                    wry::http::Response::builder().status(if file.is_some(){200}else{404})
+                        .header("Content-Type",mime)
+                        .header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+                        .body(Cow::Borrowed(file.map(|f|f.contents()).unwrap_or(b"Not found"))).unwrap()
+                }).with_https_scheme(true).with_url("era://ui/index.html?popup")
+                .with_additional_browser_args(browser_args(true))
+                .with_background_color((0, 0, 0, 0))
+                .with_transparent(true)
+                .with_theme(if dark { wry::Theme::Dark } else { wry::Theme::Light })
+                .with_hotkeys_zoom(false)
+                .with_initialization_script(format!("{initialization}window.__ERA_POPUP__=true;"))
+                .with_navigation_handler(|url|url=="https://era.ui/index.html?popup"||url=="era://ui/index.html?popup")
+                .with_ipc_handler(move|req|{
+                    if req.uri().scheme_str()!=Some("https")||req.uri().host()!=Some("era.ui")||req.uri().path()!="/index.html"||req.body().len()>16384{return}
+                    if let Ok(c)=serde_json::from_str::<Command>(req.body()){let _=proxy.send_event(Event::Command(c));}
+                }).build_as_child(&window)?;
+            popup.set_bounds(wry::Rect { position: LogicalPosition::new(0, 0).into(), size: window.inner_size().into() })?;
+            WindowClip::popup(popup.hwnd(), &[], None, window.scale_factor())?;
+            self.popup = Some(popup);
             ui.set_bounds(wry::Rect {
                 position: LogicalPosition::new(0, 0).into(),
                 size: window.inner_size().into(),
@@ -1597,15 +1400,6 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
-            Event::PreviewBackground(ticket, pane, image) => {
-                if let Some(b) = self.preview_backdrop.as_mut().filter(|b| b.ticket == ticket && b.pending[pane]) {
-                    b.pending[pane] = false;
-                    if let Some(image) = image {
-                        b.images[pane] = Some(image);
-                        self.publish_preview_backdrop();
-                    } else { self.dismiss_tab_preview(); }
-                }
-            }
             Event::PreviewLoad(key, epoch, url, loading) => {
                 if let Some(render) = self.preview_renders.get_mut(&key).filter(|p| p.epoch == epoch) {
                     if url.is_empty() {
@@ -1630,23 +1424,6 @@ impl ApplicationHandler<Event> for App {
                         self.thumbnails.insert(key.clone(), render.source.clone(), image.clone());
                         self.emit(json!({"type":"thumbnail","id":key,"image":image,"kept":self.thumbnails.images().keys().collect::<Vec<_>>()}));
                     } else { self.emit(json!({"type":"tabPreviewUnavailable","id":key})); }
-                }
-            }
-            Event::CommandBackground(ticket, pane, image) => {
-                if let Some(backdrop) = self
-                    .command_backdrop
-                    .as_mut()
-                    .filter(|b| b.ticket == ticket && b.pending[pane])
-                {
-                    backdrop.pending[pane] = false;
-                    if let Some(image) = image {
-                        backdrop.images[pane] = Some(image);
-                        if !backdrop.pending.contains(&true) {
-                            self.publish_command_backdrop();
-                        }
-                    } else {
-                        self.fail_command_backdrop();
-                    }
                 }
             }
             Event::CaptureTabs => self.pump_thumbnails(),
@@ -1680,24 +1457,6 @@ impl ApplicationHandler<Event> for App {
                     let origin = self.peek_origin(&source, point);
                     if let Err(e) = self.open_peek(&url, origin) {
                         self.error(e)
-                    }
-                }
-            }
-            Event::PeekBackground(id, pane, background) => {
-                if let Some(p) = self
-                    .peek
-                    .as_mut()
-                    .filter(|p| p.tab.id == id && p.background_pending[pane])
-                {
-                    p.background_pending[pane] = false;
-                    if let Some(background) = background {
-                        p.background[pane] = Some(background.clone());
-                        let ready = !p.background_pending.contains(&true);
-                        self.emit(json!({"type":"peekBackground","id":id,"pane":pane,"background":background,"backgroundReady":ready}));
-                    } else {
-                        // Keep the live page on capture failure; never reveal an empty backdrop.
-                        self.close_peek();
-                        self.error("无法准备 Peek 背景，请重试");
                     }
                 }
             }
@@ -1827,6 +1586,7 @@ impl ApplicationHandler<Event> for App {
                     self.error(e);
                 }
                 if let (Some(ui), Some(w)) = (&self.ui, &self.window) {
+                    if let Some(popup) = &self.popup { let _ = popup.set_bounds(wry::Rect { position: LogicalPosition::new(0, 0).into(), size: w.inner_size().into() }); }
                     let _ = ui.set_bounds(wry::Rect {
                         position: LogicalPosition::new(0, 0).into(),
                         size: w.inner_size().into(),

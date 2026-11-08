@@ -655,15 +655,8 @@ kbd {
   color: var(--ink);
   pointer-events: none;
 }
-.command-background {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: fill;
-  pointer-events: none;
-  z-index: 1;
-}
+html[data-popup], html[data-popup] body, html[data-popup] #app { background: transparent; }
+.popup-page-area { position: fixed; overflow: hidden; border-radius: 7px; }
 .command-scrim {
   position: absolute;
   inset: 0;
