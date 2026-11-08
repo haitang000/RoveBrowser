@@ -3,7 +3,7 @@
 // Copyright 2026 Zigao Wang, Apache-2.0; modified for Vue and Web Animations.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { SPACE_SWIPE, settleFrames, swipeLanding, swipeOffset, swipeTravel, swipeVelocity, type SwipeSample } from "../../lib/space-swipe";
+import { SPACE_SWIPE, settleFrames, swipeCoasting, swipeLanding, swipeNewImpulse, swipeOffset, swipeOffsetVelocity, swipeReleaseDelay, swipeTravel, swipeVelocity, type SwipeSample } from "../../lib/space-swipe";
 import type { Tab } from "../../lib/types";
 import SpaceList from "./SpaceList.vue";
 
@@ -17,7 +17,7 @@ const scroll = new Map<string, number>();
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const reduced = ref(motion.matches);
 let phase: "idle" | "deciding" | "scrolling" | "tracking" | "finished" = "idle";
-let lastEvent = -Infinity, accumX = 0, accumY = 0, travel = 0;
+let lastEvent = -Infinity, lastDeltaX = 0, accumX = 0, accumY = 0, travel = 0;
 let samples: SwipeSample[] = [], release: ReturnType<typeof setTimeout> | undefined;
 let animations: Animation[] = [], generation = 0, observer: ResizeObserver | undefined;
 const index = computed(() => b.state.spaces.findIndex((s) => s.id === center.value));
@@ -27,7 +27,9 @@ function clearRelease() { clearTimeout(release); release = undefined; }
 
 /** Read the compositor's presentation value before cancelling an interrupted slide. */
 function interrupt() {
-  const shown = track.value ? new DOMMatrixReadOnly(getComputedStyle(track.value).transform).m41 : offset.value;
+  // During tracking Vue may not have painted the latest packet yet. Only an
+  // active compositor animation needs a presentation read.
+  const shown = animations.length && track.value ? new DOMMatrixReadOnly(getComputedStyle(track.value).transform).m41 : offset.value;
   generation++;
   animations.forEach((a) => a.cancel());
   animations = [];
@@ -66,6 +68,10 @@ async function settle(from: number, velocity?: number, switching = false) {
       if (outgoing) animations.push(outgoing.animate({ opacity: [1, 0] }, { duration: 180, fill: "both", easing: SPACE_SWIPE.ease }));
     }
   }
+  // Start on the current timeline sample. Leaving WAAPI's start pending adds
+  // another compositor frame after the release detector has already fired.
+  const startedAt = document.timeline.currentTime;
+  if (startedAt !== null) animations.forEach((animation) => { animation.startTime = startedAt; });
   void Promise.all(animations.map((a) => a.finished)).then(() => {
     if (ticket !== generation) return;
     panes.value = [{ id: center.value, slot: 0 }];
@@ -111,9 +117,10 @@ function finish(cancelled = false) {
   // Use the last input time, not the silence timer, so a flick retains its release velocity.
   const velocity = cancelled ? 0 : swipeVelocity(samples, lastEvent);
   const direction = cancelled ? 0 : swipeLanding(swipeOffset(travel, geometry()), velocity, width.value);
+  const visibleVelocity = swipeOffsetVelocity(travel, velocity, geometry());
   const target = b.state.spaces[index.value + direction];
-  if (direction && target) void switchTo(target.id, velocity, true);
-  else void settle(interrupt(), velocity);
+  if (direction && target) void switchTo(target.id, visibleVelocity, true);
+  else void settle(interrupt(), visibleVelocity);
 }
 function cancel() {
   clearRelease();
@@ -133,11 +140,16 @@ function wheel(event: WheelEvent) {
   if (!dx && !dy) return;
   const now = performance.now() / 1000, gap = now - lastEvent;
   const reversed = phase === "finished" && dx * accumX < 0 && Math.abs(dx) >= SPACE_SWIPE.axisLock;
-  if (gap > SPACE_SWIPE.wheelTurnGap || phase === "idle" || reversed) {
+  const precise = event.deltaMode === 0;
+  const renewed = precise && phase === "finished" && Math.abs(dx) > Math.abs(dy)
+    && (swipeNewImpulse(dx, lastDeltaX)
+      || (gap * 1000 > swipeReleaseDelay(samples) && Math.abs(dx) >= SPACE_SWIPE.axisLock && Math.abs(dx) >= Math.abs(lastDeltaX)));
+  if (gap > SPACE_SWIPE.wheelTurnGap || phase === "idle" || reversed || renewed) {
     if (phase === "tracking") finish();
     begin();
   }
   lastEvent = now;
+  lastDeltaX = dx;
   if (phase === "scrolling") return;
   if (phase === "finished") { if (Math.abs(dx) > Math.abs(dy)) event.preventDefault(); return; }
   accumX += dx; accumY += dy;
@@ -163,13 +175,24 @@ function wheel(event: WheelEvent) {
   } else {
     travel += dx;
     samples.push({ time: now, dx });
-    samples = samples.filter((s) => now - s.time <= SPACE_SWIPE.velocityWindow);
+    // Keep enough packets to distinguish deceleration from a single noisy delta;
+    // swipeVelocity still limits release speed to its own 80ms time window.
+    samples = samples.filter((s, i) => samples.length - i <= 5 || now - s.time <= SPACE_SWIPE.velocityWindow);
   }
   event.preventDefault();
-  offset.value = reduced.value ? 0 : swipeOffset(travel, geometry());
+  const pulled = swipeOffset(travel, geometry());
+  offset.value = reduced.value ? 0 : pulled;
   updateProgress();
+  const direction = swipeLanding(pulled, swipeVelocity(samples, now), width.value);
+  // Coasting releases both a successful swipe and a spring home. At the edges
+  // there is no target space; its inertia must not keep stretching the list.
+  if (swipeCoasting(samples)
+    || (direction && b.state.spaces[index.value + direction] && Math.abs(pulled) >= width.value)) {
+    finish();
+    return;
+  }
   clearRelease();
-  release = setTimeout(() => finish(), SPACE_SWIPE.releaseDelay);
+  release = setTimeout(() => finish(), swipeReleaseDelay(samples));
 }
 
 function reset() {

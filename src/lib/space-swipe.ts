@@ -14,8 +14,10 @@ export const SPACE_SWIPE = {
   backgroundDuration: 200,
   reducedDuration: 200,
   ease: "cubic-bezier(.23,1,.32,1)",
-  // DOM WheelEvent has no NSEvent phase/momentumPhase: silence releases the gesture.
-  releaseDelay: 120,
+  // DOM WheelEvent has no NSEvent phase/momentumPhase. Release on a clear
+  // momentum decay, with a short silence fallback for streams without a tail.
+  releaseDelay: 32,
+  maxReleaseDelay: 64,
 } as const;
 
 export interface SwipeGeometry { width: number; hasLeft: boolean; hasRight: boolean }
@@ -54,6 +56,50 @@ export function swipeVelocity(samples: SwipeSample[], now: number): number {
   const first = recent[0];
   if (!first || recent.length < 2 || now <= first.time) return 0;
   return recent.slice(1).reduce((sum, s) => sum + s.dx, 0) / (now - first.time);
+}
+
+/** Two packet intervals cover a missed frame without pausing a fast touchpad
+ * for a fixed 80ms. Slower devices get a longer, bounded release window. */
+export function swipeReleaseDelay(samples: SwipeSample[]): number {
+  const recent = samples.slice(-5);
+  const intervals = recent.slice(1).map((s, i) => (s.time - recent[i]!.time) * 1000)
+    .filter((interval) => interval > 0).sort((a, b) => a - b);
+  const cadence = intervals[Math.floor(intervals.length / 2)] || 0;
+  return Math.max(SPACE_SWIPE.releaseDelay, Math.min(SPACE_SWIPE.maxReleaseDelay, cadence * 2));
+}
+
+/** The spring inherits the list's velocity, including edge resistance, rather
+ * than the much faster raw finger travel outside the first/last space. */
+export function swipeOffsetVelocity(travel: number, velocity: number, g: SwipeGeometry): number {
+  if (g.width <= 0) return 0;
+  if (travel > 0 ? g.hasLeft : g.hasRight) return Math.abs(travel) < g.width ? velocity : 0;
+  const limit = g.width * SPACE_SWIPE.edgeGive;
+  const resistance = 1 + Math.abs(travel) * SPACE_SWIPE.edgeStiffness / limit;
+  return velocity * SPACE_SWIPE.edgeStiffness / (resistance * resistance);
+}
+
+/** Compare two short speed windows instead of requiring perfectly monotonic
+ * deltas: touchpad inertia often contains small rebounds and quantized steps.
+ * Normalize by packet spacing so a change in event frequency is not a release. */
+export function swipeCoasting(samples: SwipeSample[]): boolean {
+  if (samples.length < 5) return false;
+  const tail = samples.slice(-5);
+  const speeds: number[] = [];
+  for (let i = 1; i < tail.length; i++) {
+    const previous = tail[i - 1]!, current = tail[i]!;
+    const elapsed = current.time - previous.time;
+    if (current.dx * previous.dx <= 0 || elapsed <= 0 || elapsed > SPACE_SWIPE.velocityWindow) return false;
+    speeds.push(Math.abs(current.dx) / elapsed);
+  }
+  const before = (speeds[0]! + speeds[1]!) / 2;
+  const after = (speeds[2]! + speeds[3]!) / 2;
+  return after <= before * 0.75 && speeds[2]! <= before * 0.9 && speeds[3]! <= before * 0.8;
+}
+
+/** Ignore tail jitter, but let a distinct new push take over a finished swipe. */
+export function swipeNewImpulse(dx: number, previous: number): boolean {
+  return Math.abs(dx) > Math.abs(previous) * 2
+    && Math.abs(dx) - Math.abs(previous) >= SPACE_SWIPE.axisLock * 2;
 }
 
 /** Analytic critically damped spring. Cap inward speed at its natural frequency,

@@ -25,25 +25,142 @@ async function packets(page: Page, deltas: number[]) {
   }, deltas);
 }
 
-test.beforeEach(async ({ page }) => { await page.goto("/"); });
+test.beforeEach(async ({ page }) => {
+  // Space interactions do not depend on live favicons or external network timing.
+  await page.route("**/favicon.ico", (route) => route.abort());
+  await page.goto("/");
+});
 
 test("a real horizontal wheel gesture tracks the neighboring list and lands once", async ({ page }) => {
   const bounds = await page.locator(".sidebar-header").boundingBox();
   await page.mouse.move(bounds!.x + 50, bounds!.y + 15);
   await page.mouse.wheel(100, 0);
-  await expect(page.locator(".space-tracking")).toHaveCount(1);
-  await expect.poll(() => offset(page)).toBeCloseTo(-100, 0);
-  await expect(currentName(page)).toHaveText("Personal");
-  const incoming = page.locator('[data-space-id="work"]');
-  await expect(incoming).toHaveAttribute("inert", "");
-  await expect(incoming).toHaveAttribute("aria-hidden", "true");
-  expect(await incoming.evaluate((e) => e.getBoundingClientRect().x)).toBeCloseTo(146, 0);
-  await expect(page.locator('.space-key[title="Work"]')).toHaveCSS("--space-share", String(100 / 240));
+  // Capture the drag in one frame; sequential round trips can outlast release.
+  const shown = await page.locator(".space-track").evaluate((track) => {
+    const incoming = document.querySelector('[data-space-id="work"]')!;
+    return { offset: new DOMMatrixReadOnly(getComputedStyle(track).transform).m41,
+      name: document.querySelector('.sidebar-header .space-name')!.textContent,
+      inert: incoming.hasAttribute("inert"), hidden: incoming.getAttribute("aria-hidden"),
+      x: incoming.getBoundingClientRect().x,
+      share: getComputedStyle(document.querySelector('.space-key[title="Work"]')!).getPropertyValue("--space-share") };
+  });
+  expect(shown).toEqual({ offset: -100, name: "Personal", inert: true, hidden: "true", x: 146, share: String(100 / 240) });
   await expect(currentName(page)).toHaveText("Work");
   await expect(page.locator("html")).toHaveAttribute("data-color", "sage");
   await expect(page.locator('.space-key[title="Work"]')).toHaveAttribute("aria-pressed", "true");
   // Descending packets in one turn are consumed even after the switch.
   await packets(page, [50, 30, 15, 5]);
+  await settled(page);
+  await expect(currentName(page)).toHaveText("Work");
+});
+
+test("a decaying touchpad stream commits before its inertia tail ends", async ({ page }) => {
+  const result = await page.locator(".sidebar").evaluate(async (target) => {
+    const names: string[] = [];
+    let handoff: number | undefined, expectedHandoff: number | undefined, travel = 0;
+    for (const dx of [12, 28, 42, 38, 30, 22, 16, 11, 7, 4, 2, 1, 0.5, 0.25]) {
+      travel += dx;
+      target.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      names.push(document.querySelector(".sidebar-header .space-name")!.textContent!);
+      const animation = document.querySelector(".space-track")!.getAnimations()[0];
+      if (handoff === undefined && animation) {
+        const first = (animation.effect as KeyframeEffect).getKeyframes()[0]!;
+        handoff = new DOMMatrixReadOnly(String(first.transform)).m41;
+        expectedHandoff = 240 - travel;
+      }
+    }
+    return { names, handoff, expectedHandoff };
+  });
+  expect(result.names.slice(0, 3)).toEqual(["Personal", "Personal", "Personal"]);
+  expect(result.names.slice(6)).toEqual(Array(8).fill("Work"));
+  // The spring must include the triggering packet, even before Vue paints it.
+  expect(result.handoff).toBeCloseTo(result.expectedHandoff!, 0);
+  await settled(page);
+  await expect(currentName(page)).toHaveText("Work");
+});
+
+for (const gesture of [
+  { name: "edge", deltas: [-12, -28, -42, -38, -30, -22, -16, -11, -7, -4, -2, -1, -0.5, -0.25] },
+  { name: "small drag", deltas: [2, 4, 6, 5.5, 4, 3, 2, 1.5, 1, 0.7, 0.4, 0.2, 0.1, 0.05] },
+  { name: "noisy edge", deltas: [-8, -18, -30, -28, -22, -24, -18, -14, -15, -11, -8, -9, -6, -4] },
+]) {
+  test(`${gesture.name} springs home while inertia packets are still arriving`, async ({ page }) => {
+    const result = await page.locator(".sidebar").evaluate(async (target, deltas) => {
+      const frames: { tracking: boolean; settling: boolean; offset: number }[] = [];
+      for (const dx of deltas) {
+        target.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, bubbles: true, cancelable: true }));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        frames.push({ tracking: Boolean(document.querySelector(".space-tracking")),
+          settling: Boolean(document.querySelector(".space-settling")),
+          offset: new DOMMatrixReadOnly(getComputedStyle(document.querySelector(".space-track")!).transform).m41 });
+      }
+      return frames;
+    }, gesture.deltas);
+    expect(result.slice(7).every((frame) => !frame.tracking)).toBe(true);
+    expect(result[7]!.settling).toBe(true);
+    expect(Math.abs(result.at(-1)!.offset)).toBeLessThan(Math.abs(result[6]!.offset) / 2);
+    await settled(page);
+    await expect(currentName(page)).toHaveText("Personal");
+  });
+}
+
+test("a stopped drag starts returning within three frames without a momentum tail", async ({ page }) => {
+  const result = await page.locator(".sidebar").evaluate(async (target) => {
+    target.dispatchEvent(new WheelEvent("wheel", { deltaX: 40, bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 55));
+    return { tracking: Boolean(document.querySelector(".space-tracking")),
+      offset: new DOMMatrixReadOnly(getComputedStyle(document.querySelector(".space-track")!).transform).m41 };
+  });
+  expect(result.tracking).toBe(false);
+  expect(Math.abs(result.offset)).toBeLessThan(40);
+  await settled(page);
+  await expect(currentName(page)).toHaveText("Personal");
+});
+
+test("a new same-speed drag takes over a returning list after a brief pause", async ({ page }) => {
+  const delta = await page.locator(".sidebar").evaluate(async (target) => {
+    target.dispatchEvent(new WheelEvent("wheel", { deltaX: 40, bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    const track = document.querySelector(".space-track")!;
+    const animation = track.getAnimations()[0]!;
+    animation.pause(); await animation.ready;
+    const before = new DOMMatrixReadOnly(getComputedStyle(track).transform).m41;
+    target.dispatchEvent(new WheelEvent("wheel", { deltaX: 40, bubbles: true, cancelable: true }));
+    await new Promise(requestAnimationFrame);
+    return { moved: new DOMMatrixReadOnly(getComputedStyle(track).transform).m41 - before,
+      tracking: Boolean(document.querySelector(".space-tracking")) };
+  });
+  expect(delta.tracking).toBe(true);
+  expect(delta.moved).toBeCloseTo(-40, 0);
+  await settled(page);
+});
+
+test("a fresh same-direction impulse can interrupt the previous tail", async ({ page }) => {
+  const names = await page.locator(".sidebar").evaluate(async (target) => {
+    const names: string[] = [];
+    // A little jitter stays in the old tail; the 14px push starts another swipe.
+    for (const dx of [12, 28, 42, 38, 30, 22, 16, 7, 2, 1, 3, 2, 1, 14, 28, 42, 30, 18, 8, 3, 1]) {
+      target.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      names.push(document.querySelector(".sidebar-header .space-name")!.textContent!);
+    }
+    return names;
+  });
+  expect(names.slice(6, 13)).toEqual(Array(7).fill("Work"));
+  expect(names.at(-1)).toBe("Studio");
+  await settled(page);
+});
+
+test("exposing a whole neighbor commits immediately and consumes the remaining drag", async ({ page }) => {
+  const result = await page.locator(".sidebar").evaluate(async (target) => {
+    target.dispatchEvent(new WheelEvent("wheel", { deltaX: 250, bubbles: true, cancelable: true }));
+    await new Promise(requestAnimationFrame);
+    return { name: document.querySelector(".sidebar-header .space-name")!.textContent,
+      tracking: Boolean(document.querySelector(".space-tracking")) };
+  });
+  expect(result).toEqual({ name: "Work", tracking: false });
+  await packets(page, [100, 100, 50, 20, 5]);
   await settled(page);
   await expect(currentName(page)).toHaveText("Work");
 });
