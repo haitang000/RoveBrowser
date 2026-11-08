@@ -1,0 +1,37 @@
+/* Adapted from Zigzag Design/Tokens.swift, Copyright 2026 Zigao Wang, Apache-2.0.
+ * Modified for Rove: CSS tokens, Windows title bar and CSS pixels. See THIRD_PARTY_NOTICES.md. */
+:root {
+  --sidebar-width: 240px;
+  --sidebar-edge: 6px;
+  --row-height: 30px;
+  --row-gap: 2px;
+  --favicon: 16px;
+  --icon-gap: 8px;
+  --row-inset: 6px;
+  --favorite-height: 36px;
+  --favorite-gap: 6px;
+  --toolbar-button: 26px;
+  --address-height: 30px;
+  --bottom-height: 34px;
+  --titlebar-height: 32px;
+  --card-inset: 8px;
+  --radius-small: 4px;
+  --radius-control: 6px;
+  --radius-field: 8px;
+  --radius-row: 10px;
+  --radius-tile: 12px;
+  --radius-panel: 14px;
+  --radius-large: 16px;
+  --radius-window: 12px;
+  --command-width: 640px;
+  --command-field: 56px;
+  --command-row: 40px;
+  --motion-quick: 100ms;
+  --motion-selection: 150ms;
+  --motion-standard: 200ms;
+  --motion-large: 300ms;
+  --motion-slide: 180ms;
+  --motion-space: 220ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-move: cubic-bezier(0.77, 0, 0.175, 1);
+}

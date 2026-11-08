@@ -1,0 +1,48 @@
+<script setup lang="ts">
+import { useBrowser } from "../../stores/browser";
+import Icon from "../common/Icon.vue";
+const b = useBrowser();
+</script>
+<template>
+  <footer class="workspace-switcher">
+    <button
+      class="icon-button"
+      title="全部标签页 (Ctrl+Shift+\\)"
+      aria-label="全部标签页"
+      @click="b.deskOpen = true"
+    >
+      <Icon name="grid" :size="14" />
+    </button>
+    <div class="space-keys" aria-label="工作区">
+      <button
+        v-for="(s, i) in b.state.spaces"
+        :key="s.id"
+        class="space-key"
+        :class="{ current: s.id === b.state.activeSpace }"
+        :title="s.name"
+        :aria-label="`工作区 ${s.name}`"
+        :aria-pressed="s.id === b.state.activeSpace"
+        @click="b.send({ type: 'space', id: s.id })"
+        @dragover.prevent
+        @drop.prevent="
+          b.send({
+            type: 'move',
+            id: $event.dataTransfer?.getData('text/era-tab'),
+            spaceId: s.id,
+          });
+          b.dragging = false;
+        "
+      >
+        {{ i + 1 }}
+      </button>
+    </div>
+    <button
+      class="icon-button"
+      title="工作区与外观"
+      aria-label="工作区与外观"
+      @click="b.settingsOpen = true"
+    >
+      <Icon name="plus" :size="14" />
+    </button>
+  </footer>
+</template>

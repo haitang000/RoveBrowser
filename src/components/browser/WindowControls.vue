@@ -1,0 +1,95 @@
+<script setup lang="ts">
+import { useBrowser } from "../../stores/browser";
+import Icon from "../common/Icon.vue";
+import WindowResizeEdges from "./WindowResizeEdges.vue";
+import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+const b = useBrowser();
+const maximize = ref<HTMLButtonElement>();
+let observer: ResizeObserver;
+function report() {
+  if (!b.native || !maximize.value) return;
+  const r = maximize.value.getBoundingClientRect(),
+    style = getComputedStyle(document.documentElement);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 1;
+  const context = canvas.getContext("2d")!;
+  const frame = style.getPropertyValue("--frame").trim();
+  const color = (...fills: string[]) => {
+    context.clearRect(0, 0, 1, 1);
+    for (const fill of fills) {
+      context.fillStyle = fill;
+      context.fillRect(0, 0, 1, 1);
+    }
+    return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+  };
+  b.send({
+    type: "windowChrome",
+    maximize: { x: r.x, y: r.y, width: r.width, height: r.height },
+    viewportWidth: innerWidth,
+    background: color(frame),
+    hover: color(frame, style.getPropertyValue("--hover").trim()),
+    foreground: color(frame, style.getPropertyValue("--icon").trim()),
+  });
+}
+watch(
+  () => [b.state.theme, b.space.color],
+  async () => {
+    await nextTick();
+    report();
+  },
+);
+onMounted(() => {
+  observer = new ResizeObserver(report);
+  if (maximize.value) observer.observe(maximize.value);
+  window.addEventListener("resize", report);
+  report();
+});
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  window.removeEventListener("resize", report);
+});
+</script>
+<template>
+  <header
+    class="titlebar"
+    @pointerdown="
+      (e) => {
+        if (e.button === 0 && e.target === e.currentTarget)
+          b.send({ type: 'window', action: 'drag' });
+      }
+    "
+    @dblclick.self="b.send({ type: 'window', action: 'maximize' })"
+  >
+    <span
+      class="app-name"
+      @pointerdown="b.send({ type: 'window', action: 'drag' })"
+      >Rove</span
+    ><span v-if="!b.native" class="preview-label"
+      >界面预览 · 网页由 Windows 应用加载</span
+    >
+    <div class="window-controls">
+      <button
+        aria-label="最小化"
+        title="最小化"
+        @click="b.send({ type: 'window', action: 'minimize' })"
+      >
+        <Icon name="minimize" :size="12" /></button
+      ><button
+        ref="maximize"
+        aria-label="最大化或还原"
+        title="最大化或还原"
+        @click="b.send({ type: 'window', action: 'maximize' })"
+      >
+        <Icon name="maximize" :size="11" /></button
+      ><button
+        class="window-close"
+        aria-label="关闭窗口"
+        title="关闭窗口"
+        @click="b.send({ type: 'window', action: 'close' })"
+      >
+        <Icon name="close" :size="13" />
+      </button>
+    </div>
+  </header>
+  <WindowResizeEdges />
+</template>

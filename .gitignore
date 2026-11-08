@@ -1,0 +1,39 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+out/
+target/
+release/
+*.tsbuildinfo
+
+# Local references and application data
+.reference/
+.local/
+.env
+.env.*
+!.env.example
+
+# Test output and caches
+test-results/
+playwright-report/
+blob-report/
+coverage/
+.cache/
+.vite/
+
+# Temporary files and logs
+tmp/
+temp/
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

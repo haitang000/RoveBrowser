@@ -1,0 +1,23 @@
+/* Generated from upstream SpaceColor/OKLab; Copyright 2026 Zigao Wang, Apache-2.0.
+ * Modified for Rove. Run node scripts/extract-colors.mjs to reproduce. */
+:root[data-color="sky"] { --frame-h: 256.791463; --frame: #d4e4fb; }
+:root[data-theme="dark"][data-color="sky"] { --frame: #1d2736; }
+.swatches [data-color="sky"] { background: #d4e4fb; }
+:root[data-color="sage"] { --frame-h: 140.859977; --frame: #d3ebcf; }
+:root[data-theme="dark"][data-color="sage"] { --frame: #1b2b19; }
+.swatches [data-color="sage"] { background: #d3ebcf; }
+:root[data-color="sand"] { --frame-h: 72.382514; --frame: #f6dfc3; }
+:root[data-theme="dark"][data-color="sand"] { --frame: #32230f; }
+.swatches [data-color="sand"] { background: #f6dfc3; }
+:root[data-color="rose"] { --frame-h: 11.273448; --frame: #fed8dc; }
+:root[data-theme="dark"][data-color="rose"] { --frame: #371e21; }
+.swatches [data-color="rose"] { background: #fed8dc; }
+:root[data-color="lavender"] { --frame-h: 301.121143; --frame: #e8ddfd; }
+:root[data-theme="dark"][data-color="lavender"] { --frame: #2a2237; }
+.swatches [data-color="lavender"] { background: #e8ddfd; }
+:root[data-color="mint"] { --frame-h: 167.513789; --frame: #c7eddd; }
+:root[data-theme="dark"][data-color="mint"] { --frame: #102d22; }
+.swatches [data-color="mint"] { background: #c7eddd; }
+:root[data-color="peach"] { --frame-h: 38.597833; --frame: #ffd9cd; }
+:root[data-theme="dark"][data-color="peach"] { --frame: #371f18; }
+.swatches [data-color="peach"] { background: #ffd9cd; }

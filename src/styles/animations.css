@@ -1,0 +1,97 @@
+.panel-enter-active,
+.panel-leave-active {
+  transition: opacity var(--motion-standard) var(--ease-out);
+}
+.panel-enter-active .command-panel,
+.panel-leave-active .command-panel {
+  transition: transform var(--motion-standard) var(--ease-out);
+}
+.panel-enter-from,
+.panel-leave-to {
+  opacity: 0;
+}
+.panel-enter-from .command-panel,
+.panel-leave-to .command-panel {
+  transform: translateY(-6px) scale(0.985);
+}
+.space-enter-active,
+.space-leave-active {
+  transition:
+    transform var(--motion-space) var(--ease-out),
+    opacity var(--motion-selection) var(--ease-out);
+}
+.space-enter-from {
+  transform: translateX(12px);
+  opacity: 0;
+}
+.space-leave-to {
+  transform: translateX(-12px);
+  opacity: 0;
+}
+.desk-enter-active,
+.desk-leave-active {
+  transition: opacity var(--motion-large) var(--ease-out);
+}
+.desk-enter-from,
+.desk-leave-to {
+  opacity: 0;
+}
+.tab-row,
+.favorites button,
+.icon-button,
+.address-field {
+  transition: background var(--motion-quick) var(--ease-out);
+}
+.tab-list {
+  position: relative;
+}
+.tab-enter-active,
+.tab-leave-active,
+.tab-move {
+  transition:
+    transform var(--motion-slide) var(--ease-out),
+    opacity var(--motion-selection) var(--ease-out),
+    background var(--motion-quick) var(--ease-out);
+}
+.tab-enter-from {
+  opacity: 0;
+  transform: translateX(-8px) scale(0.98);
+}
+.tab-leave-active {
+  position: absolute;
+  pointer-events: none;
+  transition-duration: var(--motion-quick);
+}
+.tab-leave-to {
+  opacity: 0;
+  transform: translateX(-6px) scale(0.98);
+}
+.loading .tab-picture {
+  animation: loading 1s ease-in-out infinite;
+}
+@keyframes loading {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *:before,
+  *:after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  .panel-enter-from .command-panel,
+  .panel-leave-to .command-panel,
+  .space-enter-from,
+  .space-leave-to,
+  .tab-enter-from,
+  .tab-leave-to {
+    transform: none;
+  }
+  .tab-move {
+    transition: none;
+  }
+}
