@@ -25,6 +25,7 @@ npm run dev       # 浏览器中预览 UI，明确标记为预览，不加载外
 npm test
 npm run test:e2e  # 使用本机 Microsoft Edge headless
 npm run test:native # 先 cargo build；本地固定网页 + Windows 原生宿主集成
+npm run test:native:favorites # 本地 PNG 图标、8 个上限及离线重启缓存
 npm run test:native:spaces # 先 cargo build；独立临时目录验证真实 WebView2 Space 切换
 npm run test:native:preview # 先 cargo build；本地网页验证真实 WebView2 悬停预览与分屏
 cargo test --manifest-path native/Cargo.toml
@@ -33,7 +34,7 @@ cargo test --manifest-path native/Cargo.toml
 ## 已实现
 
 - 源码参数化侧栏、Favorites、固定/普通标签、选中/hover/focus、浅深主题、数字工作区、统一设计 tokens。
-- 顶部常用网站可由用户添加、编辑名称和网址、上移/下移及移除；点击该区域的设置按钮或在“工作区与外观”中管理，标签页右键可直接添加。列表在所有工作区共用，随 SQLite 会话保存，重启后保留，支持清空默认网站。
+- 侧栏顶部置顶网站最多 8 个，所有工作区共用。通过标签页右键或拖拽添加、拖动排序、网站右键编辑和移除；移除独立管理弹窗及区域标题。网站图标从 WebView2 获取真实 PNG 并随 SQLite 会话缓存，卸载网页、离线及重启后继续显示；旧会话超出上限的项目保留为当前工作区固定标签，分屏组合一同迁移。
 - 固定标签逻辑迁自 Zigzag 的 Swift Library/TabManager：保存项与运行中页面分离；关闭只卸载网页，固定项及起始网址保留；支持返回固定网址、分离为普通标签、编辑保存的名称/网址，普通标签/固定项/Favorites 间拖动转换保留同一网页实例。Favorites 跨工作区复用单个实例；已有分屏可整体固定并恢复配对。旧会话自动迁移，细节与平台差异见 [固定标签移植记录](docs/PINNED_TABS_PORT.md)。
 - Windows 无边框标题栏、拖动、边缘原生 resize、最小化/最大化/关闭，逻辑坐标与 DPI 换算。
 - 基本布局恢复为整行32px标题栏（Rove位于左上角）、下方240px侧栏和内缩圆角网页卡片；旧会话保存的无边框页面选项不再改变布局。工作区玻璃外观与标签悬停预览保留。

@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => { await page.goto("/"); });
+test.beforeEach(async ({ page }) => {
+  await page.route("**/favicon.ico", route => route.abort());
+  await page.goto("/");
+});
 
 test("a pin keeps its name and home, unloads without disappearing, and reopens fresh", async ({ page }) => {
   let pin = page.locator('.pinned-tabs [data-bookmark-id="pin-wiki"]');
@@ -37,6 +40,8 @@ test("editing a pin changes its saved item without navigating the open page", as
 });
 
 test("dragging between tabs, favorites and pins converts the saved item", async ({ page }) => {
+  await page.locator('.favorite-open').last().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '移除常用网站', exact: true }).click();
   await page.keyboard.press("Control+t");
   await page.getByRole("combobox").fill("https://example.com/docs");
   await page.keyboard.press("Enter");

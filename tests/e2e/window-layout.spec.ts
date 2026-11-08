@@ -15,6 +15,7 @@ declare global {
 }
 
 async function nativeShell(page: import("@playwright/test").Page, state: BrowserState) {
+  await page.route("**/favicon.ico", route => route.abort());
   await page.addInitScript((state) => {
     window.__ERA_NATIVE__ = true;
     window.__ERA_INITIAL_STATE__ = state;
@@ -92,7 +93,7 @@ test("restores the full-width titlebar and framed page even for a saved borderle
   expect(name.x).toBe(12);
   expect(sidebar).toMatchObject({ x: 0, y: 32, width: 240, height: 788 });
   const heading = (await page.locator('.sidebar-header .space-name').boundingBox())!;
-  const favorites = (await page.locator('.favorites-heading').boundingBox())!;
+  const favorites = (await page.locator('.favorites').boundingBox())!;
   expect(heading.y).toBeGreaterThanOrEqual(sidebar.y);
   expect(heading.y + heading.height).toBeLessThanOrEqual(favorites.y);
   await expect(page.locator('.sidebar .address-field, .sidebar .browser-navigation, .space-list .space-name')).toHaveCount(0);

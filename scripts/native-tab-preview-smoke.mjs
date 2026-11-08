@@ -98,7 +98,7 @@ try {
   assert.equal(await second.evaluate(() => window.__previewMarker), marker);
   checks.push('移出后恢复网页区域；原网页按钮、DOM和控制器保持正常');
 
-  await send({ type: 'favoriteSave', title: 'Unopened preview', url: base + '/unopened' });
+  await send({ type: 'favoriteSave', title: 'Unopened preview', url: base + '/unopened', previousUrl: 'https://linear.app' });
   const unloaded = ui.locator('.favorite-tile').filter({ has: ui.getByRole('button', { name: 'Unopened preview', exact: true }) });
   await unloaded.hover(); await tooltip().waitFor();
   await waitFor(async () => await tooltip().locator('.tab-preview-pane > img').count() === 1, 'unloaded item renders on demand');

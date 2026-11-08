@@ -1,6 +1,7 @@
 // Port of Zigzag Library / TabManager behavior (Apache-2.0). The native model is authoritative.
 import type { BrowserState, Command, Favorite, Tab } from "./types";
 import { favoriteUrl, MAX_FAVORITES } from "./favorites";
+import { sameOrigin } from "./favicon";
 
 export function samePinnedUrl(a: string, b: string) {
   const key = (input: string) => {
@@ -37,7 +38,7 @@ export function upgradeLibrary(s: BrowserState) {
   if (!s.libraryVersion) {
     for (const t of s.tabs.filter((t) => t.pinned)) {
       t.bookmarkId ||= `pin-${t.id}`;
-      s.pins.push({ id: t.bookmarkId, title: t.title, url: t.url, spaceId: t.spaceId });
+      s.pins.push({ id: t.bookmarkId, title: t.title, url: t.url, favicon: t.favicon, spaceId: t.spaceId });
     }
     for (const t of s.tabs) {
       const other = s.tabs.find((x) => x.id === t.splitWith);
@@ -47,6 +48,14 @@ export function upgradeLibrary(s: BrowserState) {
       }
     }
     s.libraryVersion = 1;
+  }
+  const overflow = new Set(s.favorites.slice(MAX_FAVORITES).map((f) => f.id));
+  for (const f of s.favorites) if (overflow.has(f.id) && f.splitWith) overflow.add(f.splitWith);
+  s.pins.push(...s.favorites.filter((f) => overflow.has(f.id)).map((f) => ({ ...f, spaceId: s.activeSpace })));
+  s.favorites = s.favorites.filter((f) => !overflow.has(f.id));
+  for (const t of s.tabs) {
+    const pin = s.pins.find((f) => f.id === t.bookmarkId);
+    if (pin) { t.pinned = true; t.spaceId = pin.spaceId!; }
   }
   return s;
 }
@@ -72,7 +81,7 @@ export function openBookmark(s: BrowserState, id: string) {
   const tabs = marks.map((f) => {
     let t = liveTab(s, f.id);
     if (!t) {
-      t = { id: crypto.randomUUID(), spaceId: f.spaceId || s.activeSpace, title: f.title, url: f.url, pinned: !!f.spaceId, bookmarkId: f.id };
+      t = { id: crypto.randomUUID(), spaceId: f.spaceId || s.activeSpace, title: f.title, url: f.url, favicon: f.favicon, pinned: !!f.spaceId, bookmarkId: f.id };
       s.tabs.push(t);
     }
     return t;
@@ -93,7 +102,7 @@ function keep(s: BrowserState, id: string, favorite: boolean, space?: string) {
   let marks: Favorite[];
   if (saved) {
     marks = group(s, saved);
-    if (favorite && s.favorites.length + marks.filter((f) => f.spaceId).length > MAX_FAVORITES) throw Error("最多添加 32 个常用网站");
+    if (favorite && s.favorites.length + marks.filter((f) => f.spaceId).length > MAX_FAVORITES) throw Error("最多置顶 8 个网站");
     s.pins = s.pins!.filter((f) => !marks.includes(f)); s.favorites = s.favorites.filter((f) => !marks.includes(f));
   } else {
     const tab = s.tabs.find((t) => t.id === id);
@@ -101,8 +110,8 @@ function keep(s: BrowserState, id: string, favorite: boolean, space?: string) {
     const other = s.tabs.find((t) => t.id === tab.splitWith || t.splitWith === tab.id);
     const tabs = other && !other.bookmarkId ? [tab, other] : [tab];
     for (const t of tabs) favoriteUrl(t.url);
-    if (favorite && s.favorites.length + tabs.length > MAX_FAVORITES) throw Error("最多添加 32 个常用网站");
-    marks = tabs.map((t) => ({ id: crypto.randomUUID(), title: bookmarkTitle(t.title, t.url), url: t.url, spaceId: space || t.spaceId }));
+    if (favorite && s.favorites.length + tabs.length > MAX_FAVORITES) throw Error("最多置顶 8 个网站");
+    marks = tabs.map((t) => ({ id: crypto.randomUUID(), title: bookmarkTitle(t.title, t.url), url: t.url, favicon: t.favicon, spaceId: space || t.spaceId }));
     if (marks.length === 2) { marks[0].splitWith = marks[1].id; marks[1].splitWith = marks[0].id; }
     tabs.forEach((t, i) => { t.bookmarkId = marks[i].id; });
   }
@@ -165,7 +174,7 @@ export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string)
     }
     case "bookmarkOpen": openBookmark(s, id); break;
     case "bookmarkUnload": group(s, id).flatMap((f) => liveTab(s, f.id) || []).forEach((t) => close(t.id)); break;
-    case "bookmarkReset": { const t = liveTab(s, id), f = savedPage(s, id); if (t && f) { t.url = f.url; t.favicon = undefined; } break; }
+    case "bookmarkReset": { const t = liveTab(s, id), f = savedPage(s, id); if (t && f) { t.url = f.url; t.favicon = f.favicon; } break; }
     case "bookmarkSeparate": {
       const t = liveTab(s, id);
       if (t) { t.bookmarkId = undefined; t.pinned = false; t.spaceId = s.activeSpace; t.splitWith = undefined;
@@ -175,7 +184,7 @@ export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string)
     case "bookmarkUpdate": {
       const url = favoriteUrl(String(c.url)), title = String(c.title).trim();
       if (!title || Array.from(title).length > 80) throw Error("请输入 1–80 个字符的网站名称");
-      const f = savedPage(s, id); if (f) Object.assign(f, { title, url }); break;
+      const f = savedPage(s, id); if (f) Object.assign(f, { title, url, favicon: sameOrigin(f.url, url) ? f.favicon : undefined }); break;
     }
     case "bookmarkUnpin": unpin(s, id, c.spaceId as string | undefined); break;
     case "bookmarkPin": keep(s, id, false, c.spaceId as string | undefined); break;

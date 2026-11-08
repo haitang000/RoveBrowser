@@ -16,6 +16,7 @@ await mkdir(output,{recursive:true});
 const hits=new Map();
 const server=createServer((req,res)=>{
   hits.set(req.url,(hits.get(req.url)||0)+1);
+  if(req.url==='/favicon.ico'){res.setHeader('Content-Type','image/png');res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNoSXrxHwAGCgLO2e10KwAAAABJRU5ErkJggg==','base64'));return}
   res.setHeader('Content-Type','text/html')
   const name=req.url==='/outside'?'Outside':req.url==='/peek'?'Peek':req.url==='/ephemeral'?'Ephemeral':req.url==='/second'?'Second':'First';
   res.end(`<!doctype html><title>${name} fixture</title><style>html{background:${name==='Peek'?'#7c2d12':'#164e63'};color:white}a{color:#bae6fd}</style><h1>${name} real native page</h1><a href="/second">Next</a><a href="/second" target="_blank">New window</a> <a href="/peek">Peek link</a> <a href="/peek" target="_blank">Peek target link</a> <a href="http://localhost:${server.address().port}/outside">Other site</a> <a href="http://localhost:${server.address().port}/login">Sign in</a><div style="height:1600px"></div>`)
@@ -101,26 +102,26 @@ try{
   checks.push('整个原生窗口 12px 圆角，最大化恢复直角，还原恢复圆角');
   await send(ui,{type:'navigate',url:base+'/first'})
   let web=await site();await web.waitForSelector('h1');assert.equal(await web.title(),'First fixture');checks.push('真实 WebView2 加载与标题')
-  await ui.getByRole('button',{name:'管理顶部常用网站',exact:true}).click();
-  const favoritesPanel=ui.getByRole('dialog',{name:'顶部常用网站',exact:true});
-  await favoritesPanel.getByRole('button',{name:'编辑 GitHub',exact:true}).click();
-  await favoritesPanel.getByRole('textbox',{name:'网站名称'}).fill('我的常用网页');
-  await favoritesPanel.getByRole('textbox',{name:'网站网址'}).fill(base+'/first');
-  await favoritesPanel.getByRole('button',{name:'保存修改',exact:true}).click();
-  await favoritesPanel.getByRole('button',{name:'编辑 我的常用网页',exact:true}).waitFor();
-  await favoritesPanel.getByRole('button',{name:'下移 我的常用网页',exact:true}).click();
-  await waitFor(async()=>await favoritesPanel.locator('li').nth(1).getByRole('button',{name:'编辑 我的常用网页',exact:true}).count(),'favorite order broadcast');
-  await favoritesPanel.getByRole('textbox',{name:'网站名称'}).fill('临时常用网页');
-  await favoritesPanel.getByRole('textbox',{name:'网站网址'}).fill(base+'/second');
-  await favoritesPanel.getByRole('button',{name:'添加网站',exact:true}).click();
-  await favoritesPanel.getByRole('button',{name:'移除 临时常用网页',exact:true}).click();
-  await favoritesPanel.getByRole('button',{name:'编辑 临时常用网页',exact:true}).waitFor({state:'detached'});
+  assert.equal(await ui.locator('.favorites-heading, .favorites-panel').count(),0);
+  const firstFavorite=ui.locator('.favorite-open').first();
+  await firstFavorite.click({button:'right'});
+  await ui.getByRole('menuitem',{name:'编辑常用网站',exact:true}).click();
+  await ui.getByRole('textbox',{name:'置顶网站名称'}).fill('我的常用网页');
+  await ui.getByRole('textbox',{name:'置顶网站网址'}).fill(base+'/first');
+  await ui.getByRole('button',{name:'保存修改',exact:true}).click();
+  await ui.locator('.favorite-tile').first().dragTo(ui.locator('.favorite-tile').nth(2));
+  await waitFor(async()=>await ui.locator('.favorite-tile').nth(1).getByRole('button',{name:'我的常用网页',exact:true}).count(),'favorite order broadcast');
+  await ui.locator('.favorite-open').last().click({button:'right'});
+  await ui.getByRole('menuitem',{name:'移除常用网站',exact:true}).click();
+  await send(ui,{type:'favoriteSave',title:'临时常用网页',url:base+'/second'});
+  await ui.locator('.favorites').getByRole('button',{name:'临时常用网页',exact:true}).click({button:'right'});
+  await ui.getByRole('menuitem',{name:'移除常用网站',exact:true}).click();
   await ui.screenshot({path:join(output,'native-favorites.png')});
-  await ui.keyboard.press('Escape');
   await web.evaluate(()=>window.__favoriteMarker='reuse existing page');
   await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click();
   const favoriteWeb=await waitFor(async()=>pageBrowser.contexts().flatMap(c=>c.pages()).find(p=>p!==web&&p.url()===base+'/first'),'favorite independent live page');
   await favoriteWeb.waitForSelector('h1');
+  await waitFor(()=>ui.locator('.favorite-tile').filter({has:ui.getByRole('button',{name:'我的常用网页',exact:true})}).locator('img').getAttribute('src').then(src=>src?.startsWith('data:image/png;base64,')),'favorite PNG cached');
   await favoriteWeb.evaluate(()=>window.__favoriteMarker='one shared favorite page');
   await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();
   await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click();
@@ -128,10 +129,11 @@ try{
   await waitFor(async()=>await ui.locator('.space-name').last().textContent()==='Work','favorite remains in current workspace');
   await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click({button:'middle'});
   await waitFor(()=>Promise.resolve(favoriteWeb.isClosed()),'favorite controller unloaded');
+  assert.match(await ui.locator('.favorite-tile').filter({has:ui.getByRole('button',{name:'我的常用网页',exact:true})}).locator('img').getAttribute('src'),/^data:image\/png;base64,/);
   await ui.getByRole('button',{name:'工作区 Personal',exact:true}).click();
   await ui.getByRole('tab',{name:'First fixture',exact:false}).click();
   assert.equal(await web.evaluate(()=>window.__favoriteMarker),'reuse existing page');
-  checks.push('顶部常用网站经真实 UI 添加、编辑、排序和移除；全工作区复用一个独立控制器，卸载后固定项保留');
+  checks.push('顶部置顶网站经右键编辑、拖拽排序和移除，图标卸载后保留；全工作区复用一个独立控制器，卸载后固定项保留');
   await send(ui,{type:'pin'});
   const retainedPin=ui.locator('.pinned-tabs .tab-row.selected');await retainedPin.waitFor();
   const retainedID=await retainedPin.getAttribute('data-bookmark-id');
@@ -312,7 +314,8 @@ try{
   assert.equal(await ui.locator('html').getAttribute('data-theme'),'dark');
   assert.deepEqual(await ui.evaluate(()=>{const f=window.__ERA_INITIAL_STATE__.favorites[1];return {title:f.title,url:f.url}}),{title:'我的常用网页',url:base+'/first'});
   assert.equal(await ui.evaluate(()=>window.__ERA_INITIAL_STATE__.favorites.some(f=>f.title==='临时常用网页')),false);
-  checks.push('顶部常用网站的名称、网址、顺序和移除结果经 SQLite 保存并在进程重启后恢复');
+  assert.match(await ui.evaluate(()=>window.__ERA_INITIAL_STATE__.favorites[1].favicon),/^data:image\/png;base64,/);
+  checks.push('顶部置顶网站的名称、网址、顺序和 PNG 图标经 SQLite 保存并在进程重启后恢复');
   assert.equal(await ui.locator('.sidebar-track').evaluate(e=>e.getBoundingClientRect().width),0);
   checks.push('重启首屏直接使用保存的深色主题和折叠布局；窗口在界面准备后实际可见');
   await send(ui,{type:'sidebar'});await waitFor(async()=>await ui.getByRole('tab',{name:'First fixture'}).count(),'restored title');checks.push('进程重启后恢复标签、固定状态和分屏关系')

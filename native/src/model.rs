@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub const MAX_FAVORITES: usize = 8;
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Tab {
@@ -37,6 +39,8 @@ pub struct Favorite {
     pub id: String,
     pub title: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -355,6 +359,7 @@ impl Default for State {
             split_with: None,
             title: t.to_string(),
             url: u.to_string(),
+            favicon: None,
         })
         .collect();
         let mut s = Self {
@@ -636,6 +641,11 @@ impl State {
                         .map(|i| self.favorites[i].id.clone())
                         .unwrap_or_else(new_id),
                     title,
+                    favicon: index.and_then(|i| {
+                        crate::favicon::same_origin(&self.favorites[i].url, &url)
+                            .then(|| self.favorites[i].favicon.clone())
+                            .flatten()
+                    }),
                     url,
                     space_id: None,
                     split_with: index.and_then(|i| self.favorites[i].split_with.clone()),
@@ -643,8 +653,8 @@ impl State {
                 if let Some(i) = index {
                     self.favorites[i] = favorite;
                 } else {
-                    if self.favorites.len() >= 32 {
-                        return Err("最多添加 32 个常用网站".into());
+                    if self.favorites.len() >= MAX_FAVORITES {
+                        return Err("最多置顶 8 个网站".into());
                     }
                     self.favorites.push(favorite);
                 }

@@ -23,7 +23,7 @@ export function previewPages(state: BrowserState, id: string): PreviewPage[] {
     if (bookmark.spaceId && bookmark.spaceId !== state.activeSpace) return [];
     pages = marks.map((f) => {
       const live = liveTab(state, f.id);
-      return { key: f.id, tabId: live?.id, title: f.title, url: live?.url || f.url, favicon: live?.favicon };
+      return { key: f.id, tabId: live?.id, title: f.title, url: live?.url || f.url, favicon: live?.favicon || f.favicon };
     });
   } else if (tab && tab.spaceId === state.activeSpace) {
     pages = state.tabs.filter((t) => t.id === tab.id || t.id === tab.splitWith || t.splitWith === tab.id)

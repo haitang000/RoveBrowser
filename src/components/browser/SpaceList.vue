@@ -13,7 +13,7 @@ const b = useBrowser(), list = ref<HTMLElement>();
 const space = computed(() => b.state.spaces.find((s) => s.id === props.spaceId));
 const tabs = computed(() => b.state.tabs.filter((t) => t.spaceId === props.spaceId && !t.pinned && !b.state.favorites.some((f) => f.id === t.bookmarkId)));
 const pins = computed<Tab[]>(() => (b.state.pins || []).filter((f) => f.spaceId === props.spaceId)
-  .map((f) => ({ ...(liveTab(b.state, f.id) || { id: f.id, spaceId: props.spaceId, url: f.url, unloaded: true }), title: f.title, pinned: true, bookmarkId: f.id })));
+  .map((f) => ({ ...(liveTab(b.state, f.id) || { id: f.id, spaceId: props.spaceId, url: f.url, unloaded: true }), title: f.title, favicon: liveTab(b.state, f.id)?.favicon || f.favicon, pinned: true, bookmarkId: f.id })));
 onMounted(() => { if (list.value) list.value.scrollTop = props.savedScroll; });
 onBeforeUnmount(() => { if (list.value) emit("scroll", props.spaceId, list.value.scrollTop); });
 </script>

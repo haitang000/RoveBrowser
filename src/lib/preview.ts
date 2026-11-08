@@ -4,6 +4,7 @@ import { address, host } from "./address";
 import { favorite, MAX_FAVORITES, sameFavoriteUrl } from "./favorites";
 import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, upgradeLibrary } from "./bookmarks";
 import { tabsToDismiss } from "./command";
+import { sameOrigin } from "./favicon";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -67,9 +68,9 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       if (c.previousUrl !== undefined && index < 0) throw Error("该常用网站已被移除");
       if (s.favorites.some((f, i) => i !== index && sameFavoriteUrl(f.url, next.url)))
         throw Error("该网址已在顶部常用网站中");
-      if (index >= 0) s.favorites[index] = { ...s.favorites[index], ...next };
+      if (index >= 0) s.favorites[index] = { ...s.favorites[index], ...next, favicon: sameOrigin(s.favorites[index].url, next.url) ? s.favorites[index].favicon : undefined };
       else {
-        if (s.favorites.length >= MAX_FAVORITES) throw Error("最多添加 32 个常用网站");
+        if (s.favorites.length >= MAX_FAVORITES) throw Error("最多置顶 8 个网站");
         s.favorites.push({ id: crypto.randomUUID(), ...next });
       }
       break;

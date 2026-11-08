@@ -3,6 +3,7 @@ mod bookmarks;
 mod caption;
 mod capture;
 mod clip;
+mod favicon;
 mod glass;
 mod host;
 mod model;

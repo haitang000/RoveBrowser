@@ -88,7 +88,7 @@ enum Event {
     Title(String, String),
     Load(String, String, bool),
     Source(String, String),
-    Favicon(String, String),
+    Favicon(String, String, String),
     Shortcut(String, bool),
     Open(String),
     PeekRequest(String, String, Option<Point>),
@@ -1801,20 +1801,16 @@ impl ApplicationHandler<Event> for App {
                     self.publish();
                 }
             }
-            Event::Favicon(id, url) => {
+            Event::Favicon(id, page_url, icon) => {
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
-                    if model::is_web(&url) || url.starts_with("data:image/") {
-                        p.tab.favicon = Some(url);
+                    if p.tab.url == page_url {
+                        p.tab.favicon = Some(icon);
                         self.publish_peek();
                     }
                     return;
                 }
-                if model::is_web(&url) || url.starts_with("data:image/") {
-                    if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
-                        t.favicon = Some(url)
-                    }
-                    self.publish();
-                }
+                if self.state.cache_favicon(&id, &page_url, icon) { self.save(); }
+                self.publish();
             }
         }
     }
@@ -2008,9 +2004,14 @@ fn register_page_events(
                 let core = sender.cast::<ICoreWebView2_15>()?;
                 let mut value = PWSTR::null();
                 unsafe {
-                    core.FaviconUri(&mut value)?;
+                    core.Source(&mut value)?;
                 }
-                let _ = proxy.send_event(Event::Favicon(id.clone(), take_pwstr(value)));
+                let page_url = take_pwstr(value);
+                let proxy = proxy.clone();
+                let id = id.clone();
+                crate::favicon::capture(&core, move |icon| {
+                    let _ = proxy.send_event(Event::Favicon(id, page_url, icon));
+                })?;
             }
             Ok(())
         }));

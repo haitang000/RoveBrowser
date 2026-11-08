@@ -7,7 +7,6 @@ import PageArea from "./components/browser/PageArea.vue";
 import CommandBar from "./components/browser/CommandBar.vue";
 import Desk from "./components/browser/Desk.vue";
 import SettingsPanel from "./components/browser/SettingsPanel.vue";
-import FavoritesPanel from "./components/browser/FavoritesPanel.vue";
 import TabPreview from "./components/browser/TabPreview.vue";
 import Icon from "./components/common/Icon.vue";
 import { SPACE_SWIPE } from "./lib/space-swipe";
@@ -147,7 +146,7 @@ onBeforeUnmount(() => {
         <Icon name="sidebar" /></button
       ><PageArea><CommandBar /></PageArea>
     </div>
-    <Desk /><SettingsPanel /><FavoritesPanel /><TabPreview />
+    <Desk /><SettingsPanel /><TabPreview />
     <div v-if="b.error && !b.commandOpen" class="error-toast" role="alert">
       {{ b.error
       }}<button aria-label="关闭提示" @click="b.error = ''">×</button>

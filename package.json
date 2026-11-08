@@ -11,6 +11,7 @@
     "native:build": "npm run build && cargo build --release --manifest-path native/Cargo.toml",
     "test:e2e": "playwright test",
     "test:native": "node scripts/native-smoke.mjs",
+    "test:native:favorites": "node scripts/native-favorites-smoke.mjs",
     "test:native:command": "node scripts/native-command-smoke.mjs",
     "test:native:spaces": "node scripts/native-spaces-smoke.mjs",
     "test:native:preview": "node scripts/native-tab-preview-smoke.mjs"

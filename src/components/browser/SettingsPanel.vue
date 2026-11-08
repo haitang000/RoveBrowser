@@ -106,9 +106,6 @@ function save(create = false) {
       </div>
       <p class="settings-note">通透时，工作区颜色罩在模糊的桌面之上。清透更薄，磨砂更实。</p>
       <hr />
-      <button class="theme-button" @click="b.favoritesOpen = true; b.settingsOpen = false">
-        <Icon name="pin" />管理顶部常用网站
-      </button>
       <button class="theme-button" @click="b.send({ type: 'theme' })">
         <Icon :name="b.state.theme === 'light' ? 'moon' : 'sun'" />{{
           b.state.theme === "light" ? "切换深色模式" : "切换浅色模式"

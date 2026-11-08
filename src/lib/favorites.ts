@@ -1,6 +1,6 @@
 import type { Favorite } from "./types";
 
-export const MAX_FAVORITES = 32;
+export const MAX_FAVORITES = 8;
 
 export function favoriteUrl(input: string): string {
   const value = input.trim();

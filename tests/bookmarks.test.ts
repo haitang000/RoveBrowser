@@ -18,6 +18,7 @@ it("unloading preserves a pin's saved address and title; reopening starts fresh"
 
 it("promotion, cross-space favorite activation, and unpinning keep live identity", () => {
   let s = reduce(initialState(), { type: "new", url: "https://example.com/docs" });
+  s.favorites.pop();
   const id = s.activeTab;
   s = reduce(s, { type: "favoriteTab", id });
   const f = s.favorites.at(-1)!;

@@ -32,7 +32,7 @@ pub fn targets(state: &State, id: &str) -> Option<Vec<Tab>> {
                         pinned: f.space_id.is_some(),
                         bookmark_id: Some(f.id.clone()),
                         loading: false,
-                        favicon: None,
+                        favicon: f.favicon.clone(),
                         split_with: None,
                     })
             })

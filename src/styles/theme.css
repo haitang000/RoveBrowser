@@ -283,16 +283,6 @@ kbd {
 .address-field:hover {
   background: var(--field-hover);
 }
-.favorites-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 24px;
-  flex-shrink: 0;
-  padding-left: 4px;
-  color: var(--tertiary);
-  font-size: 11px;
-}
 .favorites {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -956,87 +946,6 @@ hr {
   font-size: 11px;
   color: var(--tertiary);
   margin: 10px 0 0;
-}
-.favorites-panel {
-  width: 460px;
-}
-.favorites-panel header {
-  margin-bottom: 10px;
-}
-.favorites-description {
-  color: var(--quiet);
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 0 0 14px;
-}
-.favorite-editor-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  max-height: min(34dvh, 300px);
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-.favorite-editor-list li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 48px;
-  padding: 4px 6px;
-  border-radius: 8px;
-}
-.favorite-editor-list li:hover,
-.favorite-editor-list li.editing {
-  background: var(--chosen);
-}
-.favorite-edit {
-  min-width: 0;
-  flex: 1;
-  text-align: left;
-  padding: 4px;
-}
-.favorite-edit span,
-.favorite-edit small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.favorite-edit small {
-  color: var(--tertiary);
-  font-size: 11px;
-  margin-top: 3px;
-}
-.favorite-up {
-  transform: rotate(90deg);
-}
-.favorite-form {
-  display: grid;
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--separator);
-}
-.favorite-form h3 {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0;
-}
-.favorite-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-}
-.favorite-form-actions > span {
-  margin-right: auto;
-  color: var(--tertiary);
-  font-size: 11px;
-}
-.favorite-error {
-  color: var(--ink);
-  font-size: 12px;
-  margin: 0;
 }
 .desk {
   position: absolute;

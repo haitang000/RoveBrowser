@@ -1,6 +1,6 @@
 // Behavioral port of Zigzag's Library / TabManager (Apache-2.0), adapted to WebView2.
 // Saved pages survive unloading; only Tab records own live browser controllers.
-use crate::model::{favorite_url, new_id, Command, Favorite, State, Tab};
+use crate::model::{favorite_url, new_id, Command, Favorite, State, Tab, MAX_FAVORITES};
 
 // Tab.site(of:) and isSignIn, preserving sign-in/redirects in their existing controller.
 pub fn leaves_site(here: &str, there: &str) -> bool {
@@ -131,6 +131,7 @@ impl State {
                         id: id.clone(),
                         title: tab.title.clone(),
                         url: tab.url.clone(),
+                        favicon: tab.favicon.clone(),
                         space_id: Some(tab.space_id.clone()),
                         split_with: None,
                     });
@@ -156,6 +157,30 @@ impl State {
             self.library_version = 1;
         }
         let active_space = self.active_space.clone();
+        // Preserve overflow from older sessions as workspace pins, keeping split pairs together.
+        let mut overflow: std::collections::HashSet<_> = self
+            .favorites
+            .iter()
+            .skip(MAX_FAVORITES)
+            .map(|f| f.id.clone())
+            .collect();
+        for f in &self.favorites {
+            if overflow.contains(&f.id) {
+                if let Some(other) = &f.split_with {
+                    overflow.insert(other.clone());
+                }
+            }
+        }
+        let mut retained = Vec::new();
+        for mut f in self.favorites.drain(..) {
+            if overflow.contains(&f.id) {
+                f.space_id = Some(active_space.clone());
+                self.pins.push(f);
+            } else {
+                retained.push(f);
+            }
+        }
+        self.favorites = retained;
         for f in &mut self.pins {
             if !self
                 .spaces
@@ -222,7 +247,7 @@ impl State {
                     pinned: self.pins.iter().any(|p| &p.id == id),
                     bookmark_id: Some(id.clone()),
                     loading: false,
-                    favicon: None,
+                    favicon: f.favicon,
                     split_with: None,
                 });
                 live.push(tab_id);
@@ -280,9 +305,9 @@ impl State {
                         .iter()
                         .filter(|id| self.pins.iter().any(|f| &f.id == *id))
                         .count()
-                    > 32
+                    > MAX_FAVORITES
             {
-                return Err("最多添加 32 个常用网站".into());
+                return Err("最多置顶 8 个网站".into());
             }
             let mut moving = vec![];
             for id in &ids {
@@ -345,8 +370,8 @@ impl State {
         if tabs.iter().any(|t| favorite_url(&t.url).is_err()) {
             return Err("只有网页可以固定".into());
         }
-        if favorite && self.favorites.len() + tabs.len() > 32 {
-            return Err("最多添加 32 个常用网站".into());
+        if favorite && self.favorites.len() + tabs.len() > MAX_FAVORITES {
+            return Err("最多置顶 8 个网站".into());
         }
         let ids: Vec<_> = tabs.iter().map(|_| new_id()).collect();
         for (i, tab) in tabs.iter().enumerate() {
@@ -354,6 +379,7 @@ impl State {
                 id: ids[i].clone(),
                 title: bookmark_title(&tab.title, &tab.url),
                 url: tab.url.clone(),
+                favicon: tab.favicon.clone(),
                 space_id: if favorite {
                     None
                 } else {
@@ -509,7 +535,7 @@ impl State {
                     .find(|t| t.bookmark_id.as_ref() == Some(id))
                 {
                     t.url = f.url;
-                    t.favicon = None;
+                    t.favicon = f.favicon;
                 }
             }
             Command::SeparateBookmark { id } => {
@@ -543,6 +569,9 @@ impl State {
                     .find(|f| &f.id == id)
                 {
                     f.title = title.trim().into();
+                    if !crate::favicon::same_origin(&f.url, &url) {
+                        f.favicon = None;
+                    }
                     f.url = url;
                 }
             }
@@ -660,6 +689,58 @@ fn move_before(items: &mut Vec<Favorite>, id: &str, before: &str) {
 mod tests {
     use super::*;
     #[test]
+    fn favorite_limits_are_atomic_for_regular_tabs_pins_and_split_groups() {
+        let mut s = State::default();
+        assert!(s
+            .apply(&Command::SaveFavorite {
+                title: "Ninth".into(),
+                url: "https://extra.example".into(),
+                previous_url: None,
+            })
+            .unwrap_err()
+            .contains('8'));
+        s.new_tab("https://example.com/a").unwrap();
+        let a = s.active_tab.clone();
+        let before = serde_json::to_string(&s).unwrap();
+        for id in [&a, &s.pins[0].id.clone()] {
+            assert!(s.keep_tab(id, true, None).unwrap_err().contains('8'));
+            assert_eq!(serde_json::to_string(&s).unwrap(), before);
+        }
+        s.favorites.pop();
+        s.new_tab("https://example.com/b").unwrap();
+        s.apply(&Command::Split {
+            id: a.clone(),
+            other: s.active_tab.clone(),
+        })
+        .unwrap();
+        let before = serde_json::to_string(&s).unwrap();
+        assert!(s.keep_tab(&a, true, None).is_err());
+        assert_eq!(serde_json::to_string(&s).unwrap(), before);
+        s.favorites.pop();
+        let mark = s.keep_tab(&a, true, None).unwrap();
+        assert_eq!(s.favorites.len(), MAX_FAVORITES);
+        s.keep_tab(&mark, true, None).unwrap();
+        assert_eq!(s.favorites.len(), MAX_FAVORITES);
+    }
+
+    #[test]
+    fn legacy_overflow_preserves_saved_split_pairs_as_workspace_pins() {
+        let mut s = State::default();
+        let mut extra = s.favorites[7].clone();
+        extra.id = "overflow".into();
+        extra.split_with = Some(s.favorites[7].id.clone());
+        s.favorites[7].split_with = Some(extra.id.clone());
+        s.favorites.push(extra);
+        s.repair();
+        assert_eq!(s.favorites.len(), 7);
+        assert_eq!(s.pins.len(), 4);
+        assert!(s.pins[2..]
+            .iter()
+            .all(|f| f.space_id.as_deref() == Some("personal") && f.split_with.is_some()));
+        s.repair();
+        assert_eq!(s.pins.len(), 4);
+    }
+    #[test]
     fn unload_retains_pin_and_reopens_its_saved_address() {
         let mut s = State::default();
         let live = s.tabs[0].id.clone();
@@ -676,6 +757,7 @@ mod tests {
     #[test]
     fn favorite_reuses_one_controller_identity_across_spaces_and_unpinning() {
         let mut s = State::default();
+        s.favorites.pop();
         s.new_tab("https://example.com/docs").unwrap();
         let live = s.active_tab.clone();
         s.apply(&Command::FavoriteTab {

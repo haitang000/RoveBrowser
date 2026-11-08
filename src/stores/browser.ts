@@ -37,8 +37,6 @@ export const useBrowser = defineStore("browser", () => {
     commandMode = ref<"new" | "edit">("new"),
     deskOpen = ref(false),
     settingsOpen = ref(false),
-    favoritesOpen = ref(false),
-    favoriteEditId = ref<string>(),
     dragging = ref(false),
     glassBlocked = ref(false);
   const active = computed(() =>
@@ -54,14 +52,13 @@ export const useBrowser = defineStore("browser", () => {
   );
   const pinnedTabs = computed<Tab[]>(() => (state.value.pins || [])
     .filter((f) => f.spaceId === state.value.activeSpace)
-    .map((f) => ({ ...(liveTab(state.value, f.id) || { id: f.id, spaceId: f.spaceId!, url: f.url, unloaded: true }), title: f.title, pinned: true, bookmarkId: f.id })));
+    .map((f) => ({ ...(liveTab(state.value, f.id) || { id: f.id, spaceId: f.spaceId!, url: f.url, unloaded: true }), title: f.title, favicon: liveTab(state.value, f.id)?.favicon || f.favicon, pinned: true, bookmarkId: f.id })));
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedPage(state.value, active.value.bookmarkId) : undefined);
   const overlay = computed(
     () =>
       commandOpen.value ||
       deskOpen.value ||
       settingsOpen.value ||
-      favoritesOpen.value ||
       dragging.value,
   );
   function send(c: Command) {
@@ -319,8 +316,6 @@ export const useBrowser = defineStore("browser", () => {
     commandMode,
     deskOpen,
     settingsOpen,
-    favoritesOpen,
-    favoriteEditId,
     dragging,
     overlay,
     send,
