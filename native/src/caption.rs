@@ -258,7 +258,30 @@ impl Caption {
             }
             return Err(Error::from_thread());
         }
-        Ok(Self { root, ui, state })
+        let caption = Self { root, ui, state };
+        unsafe {
+            // winit keeps WS_CAPTION even with decorations(false), extending the
+            // client area over it via WM_NCCALCSIZE. USER32 can still draw that
+            // hidden caption directly on activation/title/style changes, without
+            // sending WM_NCPAINT. Remove the source of those legacy buttons while
+            // retaining WS_THICKFRAME, WS_SYSMENU and the minimize/maximize bits.
+            let style = GetWindowLongPtrW(root, GWL_STYLE);
+            if style & WS_CAPTION.0 as isize != 0 {
+                if SetWindowLongPtrW(root, GWL_STYLE, style & !(WS_CAPTION.0 as isize)) == 0 {
+                    return Err(Error::from_thread());
+                }
+                SetWindowPos(
+                    root,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                )?;
+            }
+        }
+        Ok(caption)
     }
     pub fn update(
         &self,
@@ -397,6 +420,17 @@ unsafe extern "system" fn procedure(
     // SAFETY: this pointer comes from Caption::new and is removed before Box drop.
     let s = &*(data as *const State);
     match msg {
+        WM_STYLECHANGING if hwnd != s.surface.get() && wparam.0 as i32 == GWL_STYLE.0 => {
+            let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+            if lparam.0 != 0 {
+                // Showing, maximizing and changing resize/button availability
+                // rebuild the style from winit's cached flags, including
+                // WS_CAPTION. Filter every such update before Windows applies it.
+                let styles = &mut *(lparam.0 as *mut STYLESTRUCT);
+                styles.styleNew &= !WS_CAPTION.0;
+            }
+            return result;
+        }
         WM_NCHITTEST => {
             if hwnd == s.surface.get() {
                 return LRESULT(HTTRANSPARENT as isize);
@@ -432,14 +466,13 @@ unsafe extern "system" fn procedure(
                 dwHoverTime: 0,
             };
             let _ = TrackMouseEvent(&mut track);
-            // Do not pass caption-button tracking to USER32: it can paint the
-            // legacy themed buttons over our custom caption surface. Snap
-            // Layouts still see HTMAXBUTTON from WM_NCHITTEST.
-            return LRESULT(0);
+            // Keep the system's Snap tracking. The root has no WS_CAPTION, so
+            // default processing cannot draw system buttons over our surface.
+            return DefSubclassProc(hwnd, msg, wparam, lparam);
         }
         WM_NCMOUSELEAVE if hwnd != s.surface.get() => {
             set_hot(s, None);
-            return LRESULT(0);
+            return DefSubclassProc(hwnd, msg, wparam, lparam);
         }
         WM_NCPAINT | WM_NCUAHDRAWCAPTION | WM_NCUAHDRAWFRAME if hwnd != s.surface.get() => {
             return LRESULT(0);
@@ -632,6 +665,80 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[allow(deprecated)]
+    fn winit_state_changes_do_not_restore_the_system_caption() {
+        use winit::{
+            dpi::PhysicalPosition,
+            event_loop::EventLoop,
+            platform::windows::EventLoopBuilderExtWindows,
+            raw_window_handle::{HasWindowHandle, RawWindowHandle},
+            window::{Window, WindowButtons},
+        };
+
+        let event_loop = EventLoop::builder().with_any_thread(true).build().unwrap();
+        let window = event_loop
+            .create_window(
+                Window::default_attributes()
+                    .with_decorations(false)
+                    .with_visible(false)
+                    .with_position(PhysicalPosition::new(-10000, -10000)),
+            )
+            .unwrap();
+        let RawWindowHandle::Win32(handle) = window.window_handle().unwrap().as_raw() else {
+            panic!("expected a Windows HWND");
+        };
+        let root = HWND(handle.hwnd.get() as *mut _);
+        unsafe {
+            let ui = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!("UI"),
+                WS_CHILD,
+                0,
+                0,
+                800,
+                600,
+                Some(root),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let _caption = Caption::new(root, ui).unwrap();
+            let assert_custom_frame = || {
+                let style = GetWindowLongPtrW(root, GWL_STYLE) as u32;
+                assert_eq!(style & WS_CAPTION.0, 0, "system caption must stay disabled");
+                assert_ne!(style & WS_SYSMENU.0, 0, "keep the system window menu");
+            };
+            assert_custom_frame();
+            for _ in 0..3 {
+                // These APIs rebuild GWL_STYLE from winit's cached window flags.
+                window.set_visible(true);
+                window.set_title("Updated caption");
+                assert_custom_frame();
+                window.set_resizable(false);
+                assert_custom_frame();
+                window.set_resizable(true);
+                window.set_enabled_buttons(WindowButtons::CLOSE | WindowButtons::MAXIMIZE);
+                assert_custom_frame();
+                window.set_enabled_buttons(WindowButtons::all());
+                window.set_maximized(true);
+                assert_custom_frame();
+                window.set_maximized(false);
+                assert_custom_frame();
+                window.set_minimized(true);
+                assert_custom_frame();
+                window.set_minimized(false);
+                window.set_visible(false);
+                assert_custom_frame();
+                let style = GetWindowLongPtrW(root, GWL_STYLE) as u32;
+                for flag in [WS_THICKFRAME, WS_MINIMIZEBOX, WS_MAXIMIZEBOX] {
+                    assert_ne!(style & flag.0, 0, "keep native resize/minimize/maximize");
+                }
+            }
+        }
+    }
     #[test]
     fn hit_region_excludes_adjacent_caption_controls() {
         let r = RECT {
