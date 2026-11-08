@@ -1,11 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
-import type { BrowserState, Layout } from "../../src/lib/types";
+import type { BrowserState, Layout, Rect } from "../../src/lib/types";
 
 declare global {
   interface Window {
     __windowTest: {
       layout?: Layout;
+      chrome?: { maximize: Rect; viewportWidth: number };
       presented?: { theme?: string; width: number; fonts: string };
       samples: { expected: number; reported: number }[];
       observer?: ResizeObserver;
@@ -22,6 +23,7 @@ async function nativeShell(page: import("@playwright/test").Page, state: Browser
       postMessage(message) {
         const command = JSON.parse(message);
         if (command.type === "layout") window.__windowTest.layout = command;
+        if (command.type === "windowChrome") window.__windowTest.chrome = command;
         if (command.type === "presented") {
           window.__windowTest.presented = {
             theme: document.documentElement.dataset.theme,
@@ -46,6 +48,24 @@ test("first render restores the native theme and collapsed sidebar before showin
   });
   expect(await page.evaluate(() => window.__windowTest.layout?.primary.x))
     .toBe((await page.locator(".page-pane > .webview-slot").first().boundingBox())!.x);
+});
+
+test("native caption geometry keeps three equal buttons flush with the window edge", async ({ page }) => {
+  await nativeShell(page, initialState());
+  for (const width of [1280, 480, 960]) {
+    await page.setViewportSize({ width, height: 820 });
+    await expect.poll(() => page.evaluate(() => window.__windowTest.chrome?.viewportWidth)).toBe(width);
+    const buttons = await page.locator('.window-controls button').evaluateAll(buttons =>
+      buttons.map(button => {
+        const { x, y, width, height } = button.getBoundingClientRect();
+        return { x, y, width, height };
+      }),
+    );
+    expect(buttons).toEqual([0, 1, 2].map(index => ({
+      x: width - 138 + index * 46, y: 0, width: 46, height: 32,
+    })));
+    expect(await page.evaluate(() => window.__windowTest.chrome?.maximize)).toEqual(buttons[1]);
+  }
 });
 
 test("restores the full-width titlebar and framed page even for a saved borderless session", async ({ page }) => {

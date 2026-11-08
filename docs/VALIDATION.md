@@ -190,3 +190,19 @@ computer-use 在独立测试窗口中核对了深色预览覆盖真实分屏的�
 更新后的原生脚本9项检查通过：真实后台页面捕获和按秒刷新、临时站点现场加载、正式标签数及选中项不变、历史查询为空、控制器关闭与缓存再次命中、分屏组合、深色主题，以及160/120ms动画的可控中间帧和背景解码/回收。computer-use观察了透明度约0.398的真实离场中间帧，卡片与下方网页正确混合，没有白底或周围页面隐藏，Rove仍位于左上角。最终结果在 `.local/preview-motion-review/final/native-tab-preview-smoke.json`，测试进程已退出。
 
 最终可执行文件为 `native/target/debug/rove.exe`，包含旧版基本布局、悬停动效与现场渲染。`rove-layout-restored.exe` 为上一轮构建，`rove-preview-motion.exe` 为本轮中间核对构建；两个临时二进制目标均未保留在Cargo配置中。
+
+## 标题栏按钮边缘空隙（Issue #6，2026-11-08）
+
+[Issue #6](https://github.com/haitang000/RoveBrowser/issues/6) 截图中的顶部、右侧空隙来自原生6px缩放边缘：UI WebView在这一圈被裁掉，但最小化/关闭按钮的悬停背景仍由DOM绘制。现在三个等宽按钮统一在原生绘制层完整填充，窗口圆角继续由根窗口裁切；原生命中测试仍优先处理缩放边缘，最大化按钮继续返回 `HTMAXBUTTON`。按钮按下后移出或失去鼠标捕获会取消操作。
+
+`npm run build`、43项前端单测、29项Rust测试、Clippy（`-D warnings`）及4项窗口布局端到端测试通过。Rust检查使用真实HWND/GDI区域，覆盖100%、125%、150%、200%缩放、负屏幕坐标、四边四角的缩放命中、三个按钮的独立命中和捕获取消；像素断言核对最上方/最右侧被裁区域的悬停颜色及移出后清除。新增界面回归在480/960/1280px窗口验证DOM按钮等宽相邻、贴右对齐及原生几何上报。
+
+computer-use实机核对浅色、深色关闭按钮的红色背景贴齐顶部和右侧，最小化按钮背景完整；实际点击最小化、最大化、还原和关闭均生效，Windows原生Snap布局菜单正常显示。没有把WebView的CDP截图作为原生合成的证明。多屏混合DPI和其他Windows版本未实机覆盖。
+
+测试使用 `.local/issue-6/profile` 和19866调试端口。已有 `native/target/debug/rove.exe` 正在运行，因此从 `.local/issue-6/build` 源码快照构建独立的 `native/target/debug/rove-issue6.exe`，未中断原有窗口或修改正式Cargo目标；测试窗口已关闭。
+
+用户随后反馈悬停闪动：首版在每次非客户区鼠标移动后强制同步重画，会与系统默认按钮绘制竞争；直接GDI绘制还会露出背景清除与图标绘制之间的中间状态。后续修复拦截系统的 `WM_NCPAINT` 和UxTheme标题栏绘制消息，激活事件保留winit焦点处理，并使用 [`WM_NCACTIVATE` 的 `lParam=-1`](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-ncactivate) 阻止默认重画。悬停只在目标变化时使旧/新按钮区域失效；通过 [`BeginBufferedPaint` / `EndBufferedPaint`](https://learn.microsoft.com/en-us/windows/win32/api/uxtheme/nf-uxtheme-beginbufferedpaint) 一次呈现背景及图标，不逐次覆盖系统绘制。UxTheme绘制消息的处理也参考了 [Chromium自定义窗口框架](https://github.com/chromium/chromium/blob/main/ui/views/win/hwnd_message_handler.cc)。
+
+补充真实可见HWND的绘制计数检查：三个按钮各连续接收100次相同悬停消息后，绘制次数及无效区域均不增加；离开仅重画一次清除悬停，再次离开保持空闲。DPI像素检查改走真实缓冲绘制路径。29项Rust测试、Clippy（`-D warnings`）及Debug构建重新通过；前端未改动。实机核对关闭按钮内部移动、切换最大化按钮、Snap菜单、最大化及还原，未出现系统旧式按钮覆盖。此检查不是逐帧桌面录像。
+
+后续验证使用独立的 `.local/issue-6/hover-profile` 和19876调试端口，测试窗口已关闭。最新可执行文件为 `native/target/debug/rove.exe`；之前的 `rove-issue6.exe` 不包含悬停闪动修复。
