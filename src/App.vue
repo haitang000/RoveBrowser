@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useBrowser } from "./stores/browser";
 import Sidebar from "./components/browser/Sidebar.vue";
 import WindowControls from "./components/browser/WindowControls.vue";
@@ -10,8 +10,19 @@ import SettingsPanel from "./components/browser/SettingsPanel.vue";
 import FavoritesPanel from "./components/browser/FavoritesPanel.vue";
 import Icon from "./components/common/Icon.vue";
 import { SPACE_SWIPE } from "./lib/space-swipe";
+import { coverage, isSeeThrough, splitGap, usesClearGlass } from "./lib/page-frame";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
+const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
+const transparencyReduced = ref(reducedTransparency.matches);
+const glassAllowed = computed(() => !transparencyReduced.value && !b.glassBlocked);
+const glassActive = computed(() => isSeeThrough(b.space?.translucency) && glassAllowed.value);
+const shellStyle = computed(() => ({
+  "--split-gap": `${splitGap({ sidebarVisible: !b.state.sidebarCollapsed, borderless: b.state.borderless !== false })}px`,
+  ...(glassActive.value
+    ? { "--frame-coverage": String(coverage(b.space?.translucency, usesClearGlass(b.space?.clearGlass, true))) }
+    : {}),
+}));
 let frameAnimation: Animation | undefined;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 function finishFrameAnimation() { frameAnimation?.cancel(); frameAnimation = undefined; }
@@ -24,7 +35,7 @@ watch(
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.color = color;
     finishFrameAnimation();
-    if (!shell.value || !from || reducedMotion.matches) return;
+    if (!shell.value || !from || reducedMotion.matches || glassActive.value) return;
     const to = getComputedStyle(document.documentElement).getPropertyValue("--frame").trim();
     frameAnimation = shell.value.animate([{ backgroundColor: from }, { backgroundColor: to }], {
       duration: SPACE_SWIPE.backgroundDuration, easing: "ease",
@@ -36,6 +47,10 @@ watch(
   [() => b.overlay, () => b.commandOpen],
   ([visible, command]) => b.send({ type: "overlay", visible, command }),
 );
+watch(glassActive, (enabled) => {
+  if (b.native) b.send({ type: "glass", enabled });
+}, { immediate: true });
+function syncTransparency() { transparencyReduced.value = reducedTransparency.matches; }
 function key(e: KeyboardEvent) {
   const k = e.key.toLowerCase();
   if (e.ctrlKey && !e.altKey) {
@@ -84,6 +99,8 @@ function key(e: KeyboardEvent) {
 onMounted(async () => {
   window.addEventListener("keydown", key);
   reducedMotion.addEventListener("change", finishFrameAnimation);
+  reducedTransparency.addEventListener("change", syncTransparency);
+  if (b.native) document.documentElement.dataset.native = "true";
   if (b.native) {
     // Wait for the mounted shell, fonts and a paint opportunity before revealing
     // the native window. Its session and theme are already present on first render.
@@ -96,11 +113,22 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", key);
   reducedMotion.removeEventListener("change", finishFrameAnimation);
+  reducedTransparency.removeEventListener("change", syncTransparency);
   finishFrameAnimation();
 });
 </script>
 <template>
-  <div ref="shell" class="browser-shell" :class="{ collapsed: b.state.sidebarCollapsed }">
+  <div
+    ref="shell"
+    class="browser-shell"
+    :class="{
+      collapsed: b.state.sidebarCollapsed,
+      borderless: b.state.borderless !== false,
+      glass: glassActive,
+      'glass-neutral': glassActive && b.space?.color === 'graphite',
+    }"
+    :style="shellStyle"
+  >
     <WindowControls />
     <div class="browser-body">
       <div

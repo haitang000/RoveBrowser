@@ -169,6 +169,7 @@ struct App {
     ready: bool,
     last_error: Option<String>,
     ui_data: PathBuf,
+    glass: bool,
 }
 struct CommandBackdrop {
     ticket: u64,
@@ -211,6 +212,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ready: false,
         last_error: None,
         ui_data: data.join("UI"),
+        glass: false,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -237,6 +239,31 @@ impl App {
                     "document.documentElement.style.setProperty('--radius-window', '{radius}px')"
                 ))?;
             }
+        }
+        Ok(())
+    }
+
+    /// Acrylic under a see-through frame. A failed backdrop leaves the frame solid.
+    fn apply_glass(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(window) = &self.window else {
+            return Ok(());
+        };
+        let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
+            return Ok(());
+        };
+        let wanted = self.glass;
+        let shown = crate::glass::apply(HWND(handle.hwnd.get() as *mut _), wanted) && wanted;
+        if wanted && !shown {
+            self.glass = false;
+            self.emit(json!({"type":"glassUnavailable"}));
+        }
+        if let Some(ui) = &self.ui {
+            let color = if shown {
+                (0, 0, 0, 0)
+            } else {
+                surface_color(self.state.theme == "dark")
+            };
+            ui.set_background_color(color)?;
         }
         Ok(())
     }
@@ -916,6 +943,13 @@ impl App {
                 }
                 return;
             }
+            Command::Glass { enabled } => {
+                self.glass = enabled;
+                if let Err(e) = self.apply_glass() {
+                    self.error(e);
+                }
+                return;
+            }
             Command::PeekOpen { url, origin } => {
                 if let Err(e) = self.open_peek(&url, origin) {
                     self.error(e)
@@ -1214,7 +1248,7 @@ impl ApplicationHandler<Event> for App {
             let proxy = self.proxy.clone();
             let dark = self.state.theme == "dark";
             let initialization = format!(
-                "window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};",
+                "document.documentElement.dataset.native='true';window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};",
                 serde_json::to_string(&self.state)?
             );
             let mut ui_context = WebContext::new(Some(self.ui_data.clone()));
@@ -1230,6 +1264,7 @@ impl ApplicationHandler<Event> for App {
                 }).with_https_scheme(true).with_url("era://ui/index.html")
                 .with_additional_browser_args(browser_args(true))
                 .with_background_color(surface_color(dark))
+                .with_transparent(true)
                 .with_theme(if dark { wry::Theme::Dark } else { wry::Theme::Light })
                 .with_hotkeys_zoom(false)
                 .with_initialization_script(&initialization)

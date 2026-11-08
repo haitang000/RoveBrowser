@@ -33,7 +33,8 @@ export const useBrowser = defineStore("browser", () => {
     settingsOpen = ref(false),
     favoritesOpen = ref(false),
     favoriteEditId = ref<string>(),
-    dragging = ref(false);
+    dragging = ref(false),
+    glassBlocked = ref(false);
   const active = computed(() =>
     state.value.tabs.find((t) => t.id === state.value.activeTab),
   );
@@ -243,6 +244,7 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "history" && e.entries) history.value = e.entries;
     if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions) suggestions.value = e.suggestions;
     if (e.type === "error") error.value = e.message || "操作失败";
+    if (e.type === "glassUnavailable") glassBlocked.value = true;
     if (e.type === "shortcut") {
       if (e.action === "address") openCommand("edit");
       if (e.action === "new") openCommand();
@@ -277,6 +279,7 @@ export const useBrowser = defineStore("browser", () => {
     suggestions,
     recent,
     error,
+    glassBlocked,
     active,
     space,
     tabs,

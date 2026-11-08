@@ -94,6 +94,12 @@ body,
   margin: 0;
   overflow: hidden;
 }
+html:not([data-native]) {
+  background:
+    radial-gradient(900px 520px at 12% 8%, #9ec9ff, transparent 60%),
+    radial-gradient(760px 520px at 88% 86%, #f0b9c4, transparent 55%),
+    #b7c4b4;
+}
 body {
   color: var(--ink);
   background: transparent;
@@ -160,6 +166,15 @@ kbd {
   clip-path: inset(0 round var(--radius-window));
   background: var(--frame);
 }
+.browser-shell.glass {
+  background: color-mix(in srgb, var(--frame) calc(var(--frame-coverage) * 100%), transparent);
+}
+.browser-shell.glass.glass-neutral {
+  --frame: #fff;
+}
+:root[data-theme="dark"] .browser-shell.glass.glass-neutral {
+  --frame: #000;
+}
 .titlebar {
   app-region: drag;
   height: var(--titlebar-height);
@@ -205,6 +220,34 @@ kbd {
 .browser-body {
   height: calc(100% - var(--titlebar-height));
   display: flex;
+}
+.browser-shell.borderless .browser-body {
+  height: 100%;
+}
+.browser-shell.borderless .titlebar {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  left: var(--sidebar-width);
+  background: transparent;
+  transition: left var(--motion-slide) var(--ease-out);
+}
+.browser-shell.borderless.collapsed .titlebar {
+  left: 0;
+}
+.browser-shell.borderless .sidebar-toolbar {
+  app-region: drag;
+}
+.browser-shell.borderless .sidebar-toolbar button {
+  app-region: no-drag;
+}
+.browser-shell.borderless.collapsed .reveal-sidebar {
+  position: absolute;
+  z-index: 6;
+  top: 40px;
+  left: 8px;
+  margin: 0;
 }
 .sidebar-track {
   width: var(--sidebar-width);
@@ -497,12 +540,35 @@ kbd {
   display: flex;
   gap: 0;
   position: relative;
-  margin: 0 8px 8px 0;
+  margin: 8px 8px 8px 0;
   border-radius: 8px;
-  background: var(--surface);
+  background: transparent;
   overflow: hidden;
   border: 1px solid var(--separator);
   box-shadow: 0 1px 2px var(--shadow);
+}
+.browser-shell.collapsed:not(.borderless) .page-area {
+  margin: 8px;
+}
+.browser-shell.borderless .page-area {
+  margin: 0;
+  padding-top: var(--titlebar-height);
+  border: 0;
+  border-radius: var(--radius-window) 0 0 var(--radius-window);
+  box-shadow: -1px 0 0 color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.browser-shell.borderless .page-area::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--titlebar-height);
+  background: var(--surface);
+}
+.browser-shell.borderless.collapsed .page-area {
+  border-radius: 0;
+  box-shadow: none;
 }
 .page-pane {
   flex: 1;
@@ -510,9 +576,10 @@ kbd {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--surface);
 }
 .split .page-pane:first-child {
-  flex: 0 0 calc((100% - 8px) * var(--split-ratio));
+  flex: 0 0 calc((100% - var(--split-gap, 8px)) * var(--split-ratio));
 }
 .webview-slot {
   flex: 1;
@@ -540,8 +607,8 @@ kbd {
   max-width: 75%;
 }
 .split-divider {
-  width: 8px;
-  background: var(--frame);
+  width: var(--split-gap, 8px);
+  background: transparent;
   cursor: col-resize;
   flex-shrink: 0;
   touch-action: none;
@@ -903,6 +970,27 @@ hr {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.glass-control input {
+  height: 18px;
+  padding: 0;
+  accent-color: var(--ink);
+}
+.glass-switch {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+.glass-switch button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--edge);
+  background: var(--control);
+}
+.glass-switch button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--surface);
 }
 .settings-note {
   font-size: 11px;

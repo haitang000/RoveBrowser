@@ -4,6 +4,10 @@ export interface Space {
   id: string;
   name: string;
   color: SpaceColor;
+  /** 0 is solid. Absent means solid. */
+  translucency?: number;
+  /** False is frosted. Absent or true is clear. */
+  clearGlass?: boolean;
 }
 export interface Tab {
   id: string;
@@ -35,6 +39,8 @@ export interface BrowserState {
   closed: Tab[];
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
+  /** The page meets the window edges. Older sessions arrive without it and stay on. */
+  borderless?: boolean;
 }
 export interface HistoryEntry {
   title: string;
