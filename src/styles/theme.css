@@ -528,6 +528,10 @@ kbd {
   overflow: hidden;
   background: var(--surface);
 }
+.page-area.resizing {
+  border-radius: 0;
+  box-shadow: none;
+}
 .split .page-pane:first-child {
   flex: 0 0 calc((100% - var(--split-gap, 8px)) * var(--split-ratio));
 }

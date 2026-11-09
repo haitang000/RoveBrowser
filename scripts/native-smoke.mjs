@@ -1,4 +1,5 @@
 import { checkCommand as verifyCommand, checkCommandHandoff as verifyCommandHandoff } from './native-command-checks.mjs';
+import { checkSplitResize } from './native-split-checks.mjs';
 // Deterministic browser-core integration tests. Debug CDP is enabled only by a debug-build env flag.
 import { chromium } from '@playwright/test'
 import { spawn, execFile } from 'node:child_process'
@@ -292,6 +293,7 @@ try{
   await send(ui,{type:'new',url:base+'/first'});await waitFor(async()=>await ui.getByRole('tab',{name:'First fixture'}).count(),'second tab title')
   await ui.getByRole('tab',{name:'Second fixture'}).click({button:'right'});await popup.getByRole('menuitem',{name:'在当前网页旁分屏'}).click();await ui.waitForSelector('.split-divider');assert.equal(await ui.locator('.page-pane').count(),2);checks.push('独立实例左右分屏')
   const first=await waitFor(async()=>pageBrowser.contexts().flatMap(c=>c.pages()).find(p=>p.url()===base+'/first'),'split primary page');
+  await checkSplitResize(ui,[first,web],{waitFor});checks.push('拖动分隔条期间两侧真实网页连续调整宽度，保持可见且不重载，不触发浮层');
   await checkSidebar(ui,[first,web]);checks.push('分屏两侧的原生网页宽度跟随侧栏过渡同步更新');
   // Closing a command returns focus to the active primary pane.
   await checkCommand(ui,[web,first],'split');checks.push('分屏命令栏保留两侧网页画面与DOM，关闭后恢复当前主页面焦点');

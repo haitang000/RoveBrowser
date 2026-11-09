@@ -24,13 +24,13 @@ use webview2_com::{
 use windows::{
     core::{Interface, BOOL, PWSTR, HSTRING},
     Win32::{
-        Foundation::{HWND, POINT},
+        Foundation::{HWND, POINT, RECT},
         Graphics::Gdi::ScreenToClient,
         UI::{
             Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
             WindowsAndMessaging::{
                 GetCursorPos, SetWindowPos, HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE,
-                SWP_NOSIZE,
+                SWP_NOSIZE, SWP_NOZORDER,
             },
         },
     },
@@ -84,6 +84,8 @@ fn browser_args(ui: bool) -> String {
 }
 #[derive(Debug)]
 enum Event {
+    Layout,
+    SplitResize,
     DataCleared(String, bool),
     Command(Command),
     Title(String, String),
@@ -104,11 +106,13 @@ enum Event {
 struct Page {
     view: WebView,
     url: String,
-    clip: WindowClip,
+    clip: Rc<WindowClip>,
     thumbnail_version: u64,
     thumbnail_attempt: Option<u64>,
     thumbnail_pending: bool,
     visible: Cell<bool>,
+    bounds: Rc<Cell<Option<[i32; 4]>>>,
+    viewport: Rc<Cell<Option<[i32; 2]>>>,
     dark: Cell<bool>,
     navigation: Rc<NavigationPolicy>,
 }
@@ -118,6 +122,36 @@ struct NavigationPolicy {
     host_navigation: Cell<bool>,
 }
 impl Page {
+    fn split_pane(&self) -> crate::split::Pane {
+        crate::split::Pane { hwnd: self.view.hwnd(), controller: self.view.controller(),
+            clip: self.clip.clone(), bounds: self.bounds.clone(), viewport: self.viewport.clone() }
+    }
+    fn set_window_bounds(&self, bounds: wry::Rect, scale: f64) -> wry::Result<()> {
+        let position = bounds.position.to_physical::<i32>(scale);
+        let size = bounds.size.to_physical::<i32>(scale);
+        let next = [position.x, position.y, size.width, size.height];
+        if self.bounds.get() != Some(next) {
+            // Move the HWND before asking Chromium to reflow. Wry does these in
+            // the opposite order, making visible edges wait on renderer work.
+            unsafe { SetWindowPos(self.view.hwnd(), None, position.x, position.y,
+                size.width, size.height, SWP_NOACTIVATE | SWP_NOZORDER)?; }
+            self.bounds.set(Some(next));
+        }
+        Ok(())
+    }
+    fn sync_viewport(&self) -> wry::Result<()> {
+        if let Some([_, _, width, height]) = self.bounds.get() {
+            if self.viewport.get() != Some([width, height]) {
+                // SAFETY: controller belongs to this live Page and runs on the
+                // same UI thread. Coordinates are validated physical pixels.
+                unsafe { self.view.controller().SetBounds(RECT {
+                    left: 0, top: 0, right: width, bottom: height,
+                })?; }
+                self.viewport.set(Some([width, height]));
+            }
+        }
+        Ok(())
+    }
     fn set_visible(&self, visible: bool) -> wry::Result<()> {
         if self.visible.get() != visible {
             self.view.set_visible(visible)?;
@@ -151,8 +185,15 @@ struct Peek {
     opening_capture: bool,
     moving: bool,
 }
+#[derive(Clone, Copy)]
+struct PageLayout {
+    primary: Rect,
+    secondary: Option<Rect>,
+    live_resize: bool,
+}
 struct App {
     // Drop child controllers before their parent HWND and shared context.
+    split_handle: Option<crate::split::SplitHandle>,
     pages: HashMap<String, Page>,
     data_clear_view: Option<WebView>,
     live_settings: Rc<RefCell<crate::settings::Settings>>,
@@ -174,6 +215,8 @@ struct App {
     proxy: EventLoopProxy<Event>,
     primary: Rect,
     secondary: Option<Rect>,
+    pending_layout: Rc<Cell<Option<PageLayout>>>,
+    live_resize: bool,
     overlay: bool,
     ready: bool,
     last_error: Option<String>,
@@ -203,6 +246,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let mut app = App {
+        split_handle: None,
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
         pages: HashMap::new(),
@@ -224,6 +268,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         proxy,
         primary: Rect::default(),
         secondary: None,
+        pending_layout: Rc::new(Cell::new(None)),
+        live_resize: false,
         overlay: false,
         ready: false,
         last_error: None,
@@ -371,11 +417,13 @@ impl App {
         Ok(Page {
             view,
             url: tab.url.clone(),
-            clip: WindowClip::default(),
+            clip: Rc::new(WindowClip::default()),
             thumbnail_version: 0,
             thumbnail_attempt: None,
             thumbnail_pending: false,
             visible: Cell::new(false),
+            bounds: Rc::new(Cell::new(None)),
+            viewport: Rc::new(Cell::new(None)),
             dark: Cell::new(self.state.theme == "dark"),
             navigation,
         })
@@ -758,6 +806,12 @@ impl App {
         if self.window.is_none() {
             return Ok(());
         }
+        // Release native mouse capture and controller references before a tab
+        // switch or close can destroy the pages the handle was resizing.
+        self.finish_split_resize();
+        if let Some(handle) = &self.split_handle {
+            handle.configure(None)?;
+        }
         if self
             .tab_preview
             .as_ref()
@@ -823,10 +877,16 @@ impl App {
     }
     // Layout messages arrive every frame during sidebar motion. They must not
     // create/navigate pages, touch profile settings, or repeat ShowWindow calls.
-    fn sync_layout(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn sync_page_bounds(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.split_handle.as_ref().is_some_and(|handle| handle.dragging()) {
+            return Ok(false);
+        }
         let Some(window) = &self.window else {
-            return Ok(());
+            return Ok(false);
         };
+        let mut visibility_changed = false;
+        let mut visibility = Vec::new();
+        let mut focus_peek = false;
         let second = self.state.active().and_then(|t| t.split_with.as_ref());
         let watched = self
             .tab_preview
@@ -842,13 +902,19 @@ impl App {
                 None
             };
             if let Some(r) = r.filter(|r| r.width > 0. && r.height > 0.) {
-                page.view.set_bounds(self.bounds(r))?;
-                page.clip.apply(page.view.hwnd(), r.corners, window.scale_factor())?;
-                page.set_visible(true)?;
+                if self.live_resize { page.clip.clear(page.view.hwnd())?; }
+                page.set_window_bounds(self.bounds(r), window.scale_factor())?;
+                if !self.live_resize {
+                    page.clip.apply(page.view.hwnd(), r.corners, window.scale_factor())?;
+                }
+                visibility_changed |= !page.visible.get();
+                visibility.push((page, true));
             } else {
                 // WebView2 stops painting IsVisible=false controllers. Let only the
                 // watched pages render behind the trusted UI while their card is up.
-                page.set_visible(watched.contains(id))?;
+                let visible = watched.contains(id);
+                visibility_changed |= page.visible.get() != visible;
+                visibility.push((page, visible));
             }
         }
         if let Some(peek) = &self.peek {
@@ -856,19 +922,73 @@ impl App {
                 let visible = peek.phase == PeekPhase::Open
                         || (peek.phase == PeekPhase::Closing && !peek.moving && peek.shown.get());
                 let was_visible = peek.shown.replace(visible);
-                peek.page.view.set_bounds(self.bounds(r))?;
+                visibility_changed |= was_visible != visible;
+                peek.page.set_window_bounds(self.bounds(r), window.scale_factor())?;
                 peek.page
                     .clip
                     .apply(peek.page.view.hwnd(), r.corners, window.scale_factor())?;
-                peek.page.set_visible(visible)?;
-                if !was_visible && visible {
-                    peek.page.view.focus()?;
-                }
+                visibility.push((&peek.page, visible));
+                focus_peek = !was_visible && visible;
             } else {
+                visibility_changed |= peek.shown.get();
                 peek.shown.set(false);
-                peek.page.set_visible(false)?;
+                visibility.push((&peek.page, false));
             }
         }
+        // Both live edges move together before either renderer reflows.
+        for page in self.pages.values().chain(self.peek.iter().map(|p| &p.page)) {
+            page.sync_viewport()?;
+        }
+        // Newly shown pages need their first viewport before becoming visible.
+        for (page, visible) in visibility { page.set_visible(visible)?; }
+        if focus_peek {
+            if let Some(peek) = &self.peek { peek.page.view.focus()?; }
+        }
+        if let Some(handle) = &self.split_handle {
+            let config = self.secondary.filter(|r| r.width > 0. && r.height > 0.)
+                .filter(|_| second.is_some() && !self.overlay && self.peek.is_none())
+                .map(|secondary| crate::split::Config {
+                    id: self.state.active_tab.clone(),
+                    other: second.unwrap().clone(),
+                    layout: crate::split::Layout { primary: self.primary, secondary },
+                    scale: window.scale_factor(),
+                    left: self.pages.get(&self.state.active_tab).map(Page::split_pane),
+                    right: second.and_then(|id| self.pages.get(id)).map(Page::split_pane),
+                });
+            handle.configure(config)?;
+        }
+        Ok(visibility_changed)
+    }
+    fn receive_split_resize(&mut self) {
+        let Some(update) = self.split_handle.as_ref().and_then(|handle| handle.take_update()) else { return; };
+        // A tab switch, close or a new split can invalidate a queued update.
+        // Never apply the previous pair's dimensions to the new page.
+        if update.id != self.state.active_tab || self.state.active().and_then(|t| t.split_with.as_ref()) != Some(&update.other) {
+            self.live_resize = false;
+            return;
+        }
+        self.primary = update.layout.primary;
+        self.secondary = Some(update.layout.secondary);
+        self.live_resize = update.resizing;
+        // The mouse callback already resized the pages. This only updates the
+        // shell headers and drag decoration, without another renderer round trip.
+        if let Some(ui) = &self.ui {
+            let event = json!({ "type": "splitResize", "ratio": update.layout.ratio(), "resizing": update.resizing });
+            let _ = ui.evaluate_script(&format!("window.__ERA_RECEIVE__?.({event})"));
+        }
+        if let Some(error) = update.error { self.error(error); }
+    }
+    fn finish_split_resize(&mut self) {
+        if let Some(handle) = &self.split_handle { handle.cancel(); }
+        // Consume the final dimensions before any ordinary layout can reapply
+        // an older frame during a navigation or overlay transition.
+        self.receive_split_resize();
+    }
+    fn sync_layout(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.sync_page_bounds()?;
+        // Stacking changes on page/overlay transitions, not on every drag frame.
+        let watched = self.tab_preview.as_ref()
+            .and_then(|(id, _)| self.preview_tabs(id)).unwrap_or_default();
         if let Some(ui) = &self.ui {
             unsafe {
                 SetWindowPos(
@@ -1206,27 +1326,34 @@ impl App {
                 }
                 return;
             }
-            Command::Layout { primary, secondary } => {
+            Command::Layout { primary, secondary, live_resize } => {
+                if self.split_handle.as_ref().is_some_and(|handle| handle.dragging()) { return; }
                 if primary.valid() && secondary.is_none_or(|r| r.valid()) {
                     self.primary = primary;
                     self.secondary = secondary;
+                    self.live_resize = live_resize && secondary.is_some();
                 } else {
                     return;
                 }
-                if let Err(e) = self.sync_layout() {
+                let result = self.sync_page_bounds().and_then(|changed| {
+                    // Showing a newly created controller can change its z-order.
+                    if changed { self.sync_layout() } else { Ok(()) }
+                });
+                if let Err(e) = result {
                     self.error(e);
                 }
                 return;
             }
             Command::Overlay { visible, command } => {
                 if visible {
+                    self.finish_split_resize();
                     self.dismiss_tab_preview();
                 }
                 if visible && !self.overlay && !command { self.refresh_visible_thumbnails(); }
                 self.overlay = visible;
                 if let Err(e) = self.sync_layout() { self.error(e); }
                 // PopupLayer requests focus once its input region is installed.
-                // Dragging/split resizing also use Overlay and keep shell capture.
+                // Tab dragging also uses Overlay and keeps shell capture.
                 if !visible {
                     if let Some(page) = self.page() {
                         let _ = page.focus();
@@ -1379,6 +1506,7 @@ impl ApplicationHandler<Event> for App {
                     .with_min_inner_size(LogicalSize::new(480, 400)),
             )?;
             let proxy = self.proxy.clone();
+            let pending_layout = self.pending_layout.clone();
             let dark = self.state.theme == "dark";
             let initialization = format!(
                 // Document-created scripts may run before documentElement exists.
@@ -1406,7 +1534,14 @@ impl ApplicationHandler<Event> for App {
                 .with_navigation_handler(|url|url=="https://era.ui/index.html"||url=="era://ui/index.html")
                 .with_ipc_handler(move|req|{
                     if req.uri().scheme_str()!=Some("https")||req.uri().host()!=Some("era.ui")||req.uri().path()!="/index.html"||req.body().len()>16384{return}
-                    if let Ok(c)=serde_json::from_str::<Command>(req.body()){let _=proxy.send_event(Event::Command(c));}
+                    if let Ok(c)=serde_json::from_str::<Command>(req.body()){
+                        if let Command::Layout { primary, secondary, live_resize } = c {
+                            if primary.valid() && secondary.is_none_or(|r| r.valid())
+                                && pending_layout.replace(Some(PageLayout { primary, secondary, live_resize })).is_none() {
+                                let _ = proxy.send_event(Event::Layout);
+                            }
+                        } else { let _=proxy.send_event(Event::Command(c)); }
+                    }
                 }).build_as_child(&window)?;
             let proxy = self.proxy.clone();
             let popup=WebViewBuilder::new_with_web_context(&mut ui_context)
@@ -1446,6 +1581,16 @@ impl ApplicationHandler<Event> for App {
             )?;
             caption.refresh(window.scale_factor())?;
             self.caption = Some(caption);
+            let proxy = self.proxy.clone();
+            let pending_layout = self.pending_layout.clone();
+            self.split_handle = Some(crate::split::SplitHandle::new(
+                HWND(handle.hwnd.get() as *mut _),
+                self.popup.as_ref().unwrap().hwnd(),
+                move || {
+                    pending_layout.take();
+                    let _ = proxy.send_event(Event::SplitResize);
+                },
+            )?);
             self.ui = Some(ui);
             self.window = Some(window);
             self.update_window_frame()?;
@@ -1458,6 +1603,14 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::SplitResize => {
+                self.receive_split_resize();
+            }
+            Event::Layout => {
+                if let Some(layout) = self.pending_layout.take() {
+                    self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, live_resize: layout.live_resize }, Some(event_loop));
+                }
+            }
             Event::DataCleared(kind, ok) => {
                 self.data_clear_view = None;
                 self.emit(json!({"type":"dataCleared","action":kind,"message":if ok { "已清除浏览数据" } else { "清除失败，请重试" }}));
@@ -1644,6 +1797,7 @@ impl ApplicationHandler<Event> for App {
                 event_loop.exit()
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.finish_split_resize();
                 self.dismiss_tab_preview();
                 if let Err(e) = self.update_window_frame() {
                     self.error(e);

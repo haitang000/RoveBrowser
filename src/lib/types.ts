@@ -74,6 +74,8 @@ declare global {
     __ERA_INITIAL_STATE__?: BrowserState;
     __ERA_RECEIVE__?: (event: {
       type: string;
+      ratio?: number;
+      resizing?: boolean;
       state?: BrowserState;
       entries?: HistoryEntry[];
       suggestions?: string[];

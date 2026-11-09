@@ -18,6 +18,7 @@ export const useBrowser = defineStore("browser", () => {
   const popupWindow = Boolean(window.__ERA_POPUP__);
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
+  const splitResize = ref<{ ratio: number; resizing: boolean }>();
   const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
   const previewAnimationDone = ref(0);
   const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || initialState())),
@@ -208,6 +209,8 @@ export const useBrowser = defineStore("browser", () => {
     if (t) send({ type: "activate", id: t.id });
   }
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
+      splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
     if (e.type === "tabPreviewPresented" && e.ticket !== undefined) previewPresentedTicket.value = e.ticket;
     if (e.type === "tabPreviewUnavailable" && e.id) previewFailures.value[e.id] = true;
     if (e.type === "tabPreviewHidden" && e.ticket !== undefined) previewHiddenTicket.value = e.ticket;
@@ -323,6 +326,7 @@ export const useBrowser = defineStore("browser", () => {
     popupWindow,
     contextMenu,
     popupArea,
+    splitResize,
     hoverPreview,
     previewAnimationDone,
     thumbnails,

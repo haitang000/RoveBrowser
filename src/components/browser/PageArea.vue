@@ -18,16 +18,31 @@ const b = useBrowser(),
   secondary = ref<HTMLElement>(),
   container = ref<HTMLElement>(),
   ratio = ref(0.5),
+  resizing = ref(false),
   drop = ref(false);
 const other = computed(() =>
   b.state.tabs.find((t) => t.id === b.active?.splitWith),
 );
 let ro: ResizeObserver;
+let finishResize: (() => void) | undefined;
+// Zigzag's native ResizeHandle owns the real frames while dragging. This event
+// only keeps the shell headers and fallback content in step with native input.
+watch(() => b.splitResize, (update) => {
+  if (!update) return;
+  resizing.value = update.resizing;
+  ratio.value = update.ratio;
+});
+watch([() => b.active?.id, () => b.active?.splitWith], () => {
+  finishResize?.();
+  resizing.value = false;
+});
 function layout() {
   if (!primary.value || !container.value) return;
   const card = container.value.getBoundingClientRect();
   const style = getComputedStyle(container.value);
-  b.popupArea = { x: card.x + container.value.clientLeft, y: card.y + container.value.clientTop, width: container.value.clientWidth, height: container.value.clientHeight };
+  const popup = { x: card.x + container.value.clientLeft, y: card.y + container.value.clientTop, width: container.value.clientWidth, height: container.value.clientHeight };
+  if (popup.x !== b.popupArea.x || popup.y !== b.popupArea.y || popup.width !== b.popupArea.width || popup.height !== b.popupArea.height)
+    b.popupArea = popup;
   const rect = (e: HTMLElement) => {
     const r = e.getBoundingClientRect();
     return pageClip(r, card, style);
@@ -38,6 +53,7 @@ function layout() {
     type: "layout",
     primary: rect(primary.value),
     secondary: secondary.value ? rect(secondary.value) : null,
+    liveResize: resizing.value,
   });
 }
 watch(
@@ -46,8 +62,9 @@ watch(
     () => b.active?.splitWith,
     () => b.state.sidebarCollapsed,
     ratio,
+    resizing,
   ],
-  layout,
+  () => { if (!resizing.value) layout(); },
   { flush: "post" },
 );
 onMounted(() => {
@@ -57,26 +74,56 @@ onMounted(() => {
   window.addEventListener("resize", layout);
 });
 onBeforeUnmount(() => {
+  finishResize?.();
   ro?.disconnect();
   window.removeEventListener("resize", layout);
 });
 function resize(e: PointerEvent) {
+  if (e.button !== 0) return;
+  e.preventDefault();
   const handle = e.currentTarget as HTMLElement;
+  finishResize?.();
+  const grabOffset = e.clientX - handle.getBoundingClientRect().x;
+  const area = container.value!;
+  const card = area.getBoundingClientRect();
+  const primaryRect = primary.value!.getBoundingClientRect();
+  const secondaryRect = secondary.value!.getBoundingClientRect();
+  const gap = handle.offsetWidth;
+  const width = area.clientWidth - gap;
+  const rect = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height, corners: [0, 0, 0, 0] });
   handle.setPointerCapture(e.pointerId);
-  b.send({ type: "overlay", visible: true });
+  resizing.value = true;
+  layout();
+  // Pointer capture keeps dragging over native pages without covering them.
+  // Only the live viewport bounds change; no overlay or thumbnail is needed.
   handle.onpointermove = (ev) => {
-    const r = container.value!.getBoundingClientRect();
-    ratio.value = Math.max(0.2, Math.min(0.8, (ev.clientX - r.x) / r.width));
+    if (width <= 0) return;
+    const floor = Math.max(0.2, 260 / width), ceiling = Math.min(0.8, 1 - floor);
+    const next = (ev.clientX - card.x - area.clientLeft - grabOffset) / width;
+    // Match Zigzag's minimumPaneWidth and floor the shared edge once.
+    ratio.value = Math.floor(width * (floor < ceiling ? Math.max(floor, Math.min(ceiling, next)) : 0.5)) / width;
+    area.style.setProperty('--split-ratio', String(ratio.value));
+    const leftWidth = width * ratio.value;
+    // Resize real controllers in the input event, before waiting for Vue/layout
+    // or a paint callback. Native keeps only the latest pending dimensions.
+    b.send({ type: 'layout', liveResize: true,
+      primary: { ...rect(primaryRect), width: leftWidth },
+      secondary: { ...rect(secondaryRect), x: primaryRect.x + leftWidth + gap, width: width - leftWidth },
+    });
   };
-  handle.onpointerup = () => {
+  const finish = () => {
+    finishResize = undefined;
+    resizing.value = false;
     handle.onpointermove = null;
-    layout();
-    b.send({ type: "overlay", visible: b.overlay });
+    handle.onpointerup = null;
+    handle.onpointercancel = null;
+    handle.onlostpointercapture = null;
+    if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
   };
-  handle.onlostpointercapture = () => {
-    handle.onpointermove = null;
-    b.send({ type: "overlay", visible: b.overlay });
-  };
+  finishResize = finish;
+  handle.onpointerup = finish;
+  handle.onpointercancel = finish;
+  handle.onlostpointercapture = finish;
 }
 function split(e: DragEvent) {
   drop.value = false;
@@ -89,7 +136,7 @@ function split(e: DragEvent) {
   <main
     ref="container"
     class="page-area"
-    :class="{ split: other, dropping: drop }"
+    :class="{ split: other, dropping: drop, resizing }"
     :style="{ '--split-ratio': ratio }"
     @dragover.prevent="drop = true"
     @dragleave.self="drop = false"

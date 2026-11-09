@@ -119,6 +119,19 @@ pub struct WindowClip {
     last: Cell<Option<Shape>>,
 }
 impl WindowClip {
+    /// During a live resize, let the rectangular HWND follow its bounds without
+    /// allocating a new GDI region and invalidating the whole WebView each frame.
+    pub fn clear(&self, hwnd: HWND) -> Result<()> {
+        if self.last.get().is_some() {
+            // SAFETY: USER32 releases the installed region. The following bounds
+            // update supplies the redraw; clearing the region must not erase it.
+            if unsafe { SetWindowRgn(hwnd, None, false) } == 0 {
+                return Err(Error::from_thread());
+            }
+            self.last.set(None);
+        }
+        Ok(())
+    }
     /// Limit the transparent popup HWND to its actual surfaces. Empty regions
     /// pass input to the browser shell and live pages without hiding controllers.
     pub fn popup(
@@ -345,6 +358,14 @@ mod tests {
             let actual = Region::new(unsafe { CreateRectRgn(0, 0, 0, 0) }).unwrap();
             assert_ne!(unsafe { GetWindowRgn(window.0, actual.handle()) }.0, 0);
             let expected = Shape::new(width, height, corners, scale).region().unwrap();
+            assert!(unsafe { EqualRgn(actual.handle(), expected.handle()) }.as_bool());
+            // Live resize removes the old width-dependent region once. Restoring
+            // at the same dimensions must recreate it instead of hitting a cache.
+            clip.clear(window.0).unwrap();
+            clip.clear(window.0).unwrap();
+            assert_eq!(unsafe { GetWindowRgn(window.0, actual.handle()) }.0, 0);
+            clip.apply(window.0, corners, scale).unwrap();
+            assert_ne!(unsafe { GetWindowRgn(window.0, actual.handle()) }.0, 0);
             assert!(unsafe { EqualRgn(actual.handle(), expected.handle()) }.as_bool());
         }
         // Showing and hiding a preview on unchanged bounds must invalidate the cache.

@@ -18,6 +18,8 @@ The hover-preview delay, dismissal rules, grouped captions and snapshot-refresh 
 
 The settings page, searchable form grouping, responsive navigation, internal settings addresses, search engine definitions and shortcut customization are translated from `Settings/SettingsView.swift`, `Settings/SettingsPage.swift`, `Settings/Shortcuts.swift`, `App/Library.swift` and `Design/Tokens.swift` at upstream commit `12183cbaf5acf68ac4a23a1d5003b1b10d587e03`. Copyright 2026 Zigao Wang; Apache-2.0. The implementation uses Vue controls, Rust validation and SQLite session storage, with new Windows/WebView2 adapters for preferences, download destinations, data clearing and exit confirmation. See `docs/SETTINGS_PORT.md` for the supported behavior and platform differences.
 
+The split resize input, minimum pane sizes, shared split boundary and immediate page layout in `native/src/split.rs` and `src/components/browser/PageArea.vue` are adapted from `Zigzag/Window/BrowserRootView.swift`, `Zigzag/Window/PageCardView.swift` and `Zigzag/Window/BrowserWindowController.swift` at commit `0f99cac833a9f23e379f617ae99800b5d6e2f19c`. Copyright 2026 Zigao Wang; Apache-2.0. The Win32 input window, mouse capture, WebView2 bounds updates and temporary removal of GDI clipping are Windows adaptations. See `docs/SPLIT_RESIZE_PORT.md` for the mapping and validation limits.
+
 ## Direct implementation dependencies
 
 Versions are fixed in package-lock.json and native/Cargo.lock. This list distinguishes direct dependencies from upstream features that Rove does not use.

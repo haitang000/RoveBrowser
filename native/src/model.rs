@@ -253,6 +253,8 @@ pub enum Command {
     Layout {
         primary: Rect,
         secondary: Option<Rect>,
+        #[serde(default, rename = "liveResize")]
+        live_resize: bool,
     },
     #[serde(rename = "overlay")]
     Overlay {

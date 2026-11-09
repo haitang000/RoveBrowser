@@ -11,6 +11,7 @@ mod preview;
 mod shadow;
 mod settings;
 mod storage;
+mod split;
 mod suggestions;
 mod thumbnails;
 mod web_settings;
