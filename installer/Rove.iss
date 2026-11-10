@@ -1,9 +1,7 @@
 ; Compile through scripts/installer.ps1 so versions, payload and dependencies agree.
+; The wizard intentionally uses the stock Inno Setup modern style.
 #ifndef AppVersion
   #error Run scripts/installer.ps1 to build the installer.
-#endif
-#if VER < EncodeVer(6, 7, 3) || VER >= EncodeVer(7, 0, 0)
-  #error Use Inno Setup 6.7.3 or a newer 6.x compiler for the native theme.
 #endif
 
 [Setup]
@@ -38,17 +36,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 
 [CustomMessages]
-english.DesktopShortcut=Create a &desktop shortcut
-english.LaunchRove=Launch Rove
 english.InstallWebView2=Installing Microsoft Edge WebView2 Runtime...
 english.WebView2Failed=WebView2 Runtime could not be installed (exit code %1). Connect to the internet and retry, or install the runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and run Setup again.
-chinesesimplified.DesktopShortcut=创建桌面快捷方式(&D)
-chinesesimplified.LaunchRove=启动 Rove
 chinesesimplified.InstallWebView2=正在安装 Microsoft Edge WebView2 运行时……
 chinesesimplified.WebView2Failed=无法安装 WebView2 运行时（退出代码 %1）。请连接网络后重试，或从 https://developer.microsoft.com/microsoft-edge/webview2/ 安装运行时后重新运行安装程序。
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
 Source: "{#PayloadDir}\Rove.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -58,16 +52,13 @@ Source: "{#PayloadDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PayloadDir}\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#BootstrapperPath}"; Flags: dontcopy
-Source: "..\native\assets\icon.png"; Flags: dontcopy
-Source: "assets\Outfit.ttf"; Flags: dontcopy
-Source: "assets\Outfit-LICENSE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Rove"; Filename: "{app}\Rove.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\Rove"; Filename: "{app}\Rove.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\Rove.exe"; Description: "{cm:LaunchRove}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Rove.exe"; Description: "{cm:LaunchProgram,Rove}"; Flags: nowait postinstall skipifsilent
 
 ; Intentionally no UninstallDelete: the existing EraBrowser profile belongs to the user.
 [Code]
@@ -81,8 +72,6 @@ begin
   Result := RegQueryStringValue(RootKey, WebView2Key, 'pv', Version) and
     (Version <> '') and (Version <> '0.0.0.0');
 end;
-
-#include "Design.iss"
 
 function HasWebView2: Boolean;
 begin

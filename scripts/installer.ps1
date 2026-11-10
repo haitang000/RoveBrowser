@@ -20,7 +20,7 @@ if (-not $CompilerPath) {
     $CompilerPath = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 if (-not $CompilerPath -or -not (Test-Path -LiteralPath $CompilerPath -PathType Leaf)) {
-    throw 'Install Inno Setup 6.7.3 (https://jrsoftware.org/isinfo.php), or set INNO_SETUP_COMPILER to ISCC.exe.'
+    throw 'Install Inno Setup 6 (https://jrsoftware.org/isinfo.php), or set INNO_SETUP_COMPILER to ISCC.exe.'
 }
 $CompilerPath = (Resolve-Path -LiteralPath $CompilerPath).Path
 
