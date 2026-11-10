@@ -12,7 +12,7 @@ export interface LayerRect {
 }
 
 /** Surfaces whose shadow needs room around their layout box. */
-const SHADOWED_SURFACES = ["tab-hover-preview", "error-toast", "find-bar"];
+const SHADOWED_SURFACES = ["tab-hover-preview", "error-toast", "find-bar", "status-toast"];
 
 /** How far a surface's region extends beyond its box for a soft shadow. */
 export const SHADOW_BLEED = 20;

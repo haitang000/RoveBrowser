@@ -14,6 +14,23 @@ watch(menu, async (value) => {
   if (value) { await nextTick(); panel.value?.querySelector<HTMLButtonElement>("button")?.focus(); }
 });
 function bookmark() { return menu.value?.tab.bookmarkId ? savedPage(b.state, menu.value.tab.bookmarkId) : undefined; }
+/** The live controller record, so mute/zoom labels follow host state updates. */
+const liveTab = computed(() => {
+  const current = menu.value?.tab;
+  if (!current) return undefined;
+  return b.state.tabs.find((tab) =>
+    tab.id === current.id ||
+    (current.bookmarkId && tab.bookmarkId === current.bookmarkId),
+  );
+});
+const isWeb = computed(() => /^https?:/i.test(menu.value?.tab.url || ""));
+const isActive = computed(() =>
+  menu.value?.tab.id === b.state.activeTab && !b.peek,
+);
+const muted = computed(() => Boolean(liveTab.value?.muted ?? menu.value?.tab.muted));
+const zoomLabel = computed(() => `${Math.round(b.pageZoom * 100)}%`);
+function zoom(action: "in" | "out" | "reset") { b.zoom(action); }
+function mute() { b.toggleMute(liveTab.value || menu.value?.tab); }
 function beginEdit() { const f = bookmark(); if (f) { editTitle.value = f.title; editUrl.value = f.url; edit.value = true; nextTick(() => document.querySelector<HTMLInputElement>(".bookmark-menu-form input")?.focus()); } }
 function closeMenu() {
   b.contextMenu = undefined;
@@ -72,6 +89,39 @@ function act(type: string, extra = {}) {
           >
             <Icon name="split" />在当前网页旁分屏
           </button>
+          <template v-if="isWeb && !menu.tab.unloaded">
+            <button role="menuitem" @click="mute">
+              <Icon :name="muted ? 'speakerMuted' : 'speaker'" />{{
+                muted ? "取消静音标签页" : "静音标签页"
+              }}
+            </button>
+          </template>
+          <template v-if="isActive && isWeb">
+            <div class="menu-label">网页缩放 {{ zoomLabel }}</div>
+            <div class="menu-zoom">
+              <button
+                role="menuitem"
+                :disabled="b.pageZoom <= 0.5"
+                @click="zoom('out')"
+              >
+                <Icon name="minus" />缩小
+              </button>
+              <button
+                role="menuitem"
+                :disabled="Math.abs(b.pageZoom - 1) < 0.001"
+                @click="zoom('reset')"
+              >
+                100%
+              </button>
+              <button
+                role="menuitem"
+                :disabled="b.pageZoom >= 3"
+                @click="zoom('in')"
+              >
+                <Icon name="plus" />放大
+              </button>
+            </div>
+          </template>
           <template v-if="bookmark()">
             <button role="menuitem" @click="beginEdit">编辑固定标签</button>
             <button v-if="!menu.tab.unloaded && !samePinnedUrl(menu.tab.url, bookmark()!.url)" role="menuitem" @click="b.send({ type: 'bookmarkReset', id: bookmark()!.id }); closeMenu()">返回固定网址</button>

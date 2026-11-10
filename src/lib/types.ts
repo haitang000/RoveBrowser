@@ -20,6 +20,8 @@ export interface Tab {
   loading?: boolean;
   favicon?: string;
   splitWith?: string;
+  /** The tab's sound is muted (persisted with the session). */
+  muted?: boolean;
 }
 export interface Favorite {
   id: string;
@@ -41,6 +43,8 @@ export interface BrowserState {
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
   settings?: import("./settings").Settings;
+  /** Per-site zoom by normalized host; 100% is stored as absence. */
+  siteZoom?: Record<string, number>;
   /** Legacy session preference; the restored framed layout ignores this flag. */
   borderless?: boolean;
 }
@@ -97,6 +101,9 @@ declare global {
       popup?: Record<string, unknown>;
       count?: number;
       active?: number;
+      /** Page zoom factor, and whether a page is playing sound. */
+      factor?: number;
+      playing?: boolean;
     }) => void;
   }
 }

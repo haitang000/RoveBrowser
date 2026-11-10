@@ -37,9 +37,10 @@ test("find bar opens, focuses, types, steps and closes", async ({ page }) => {
   await expect(field).toBeFocused();
   await field.fill("wiki");
   // The standalone preview has no real page to search; the field and its
-  // controls still have to stay usable and the counter has to stay quiet.
+  // controls still have to stay usable, and the counter settles at no results
+  // rather than pretending WebView2 matched something.
   await expect(field).toHaveValue("wiki");
-  await expect(page.locator(".find-count")).toHaveCount(0);
+  await expect(page.locator(".find-count")).toHaveText("无结果");
   await page.keyboard.press("Escape");
   await expect(bar).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Wikipedia" })).toHaveAttribute(

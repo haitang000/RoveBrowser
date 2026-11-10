@@ -14,6 +14,7 @@ use std::{
 };
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, DownloadStartingEventHandler, FaviconChangedEventHandler,
+    IsDocumentPlayingAudioChangedEventHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2NavigationStartingEventArgs3, ICoreWebView2NewWindowRequestedEventArgs2,
         ICoreWebView2_15, ICoreWebView2_4, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
@@ -103,6 +104,10 @@ enum Event {
     PreviewThumbnail(String, u64, u64, Option<String>),
     PreviewCapture,
     FindMatches(i32, i32),
+    /// A page's controller reported a new zoom factor.
+    Zoom(String, f64),
+    /// A page started or stopped playing sound.
+    Audio(String, bool),
 }
 struct Page {
     view: WebView,
@@ -470,6 +475,36 @@ impl App {
             }
         }
     }
+    /// The zoom this site was last left at, from `ZoomLevels`-style storage.
+    fn site_zoom_for(&self, url: &str) -> f64 {
+        model::site_key(url)
+            .and_then(|site| self.state.site_zoom.get(&site).copied())
+            .filter(|factor| model::valid_zoom(*factor))
+            .unwrap_or(1.0)
+    }
+    /// Applies the tab's mute state and its site's zoom to a fresh controller.
+    fn apply_site_controls(&self, view: &WebView, url: &str, muted: bool) {
+        let _ = crate::site::set_muted(view, muted);
+        crate::site::ensure_zoom(view, self.site_zoom_for(url));
+    }
+    /// Tells the UI the shown page's zoom, so its site menu and toast start in
+    /// the right place after a tab, space or split switch.
+    fn emit_active_zoom(&self) {
+        let target = self
+            .peek
+            .as_ref()
+            .map(|peek| (peek.tab.id.clone(), &peek.page.view))
+            .or_else(|| {
+                let tab = self.state.active()?;
+                let page = self.pages.get(&tab.id)?;
+                Some((tab.id.clone(), &page.view))
+            });
+        if let Some((id, view)) = target {
+            if let Ok(factor) = crate::site::zoom_factor(view) {
+                self.emit(json!({"type":"zoom","id":id,"factor":factor}));
+            }
+        }
+    }
     fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {
         let navigation = Rc::new(NavigationPolicy {
             bookmarked: Cell::new(tab.bookmark_id.is_some()),
@@ -493,6 +528,9 @@ impl App {
             })
             .with_navigation_handler(|url| model::is_web(&url) || url == "about:blank")
             .with_initialization_script(include_str!("peek-links.js"))
+            // Zigzag's SwipeNavigation: WebView2 performs the macOS-style
+            // two-finger back/forward swipe itself, including its own animation.
+            .with_back_forward_navigation_gestures(true)
             .with_document_title_changed_handler(move |title| {
                 let _ = p.send_event(Event::Title(id.clone(), title));
             })
@@ -515,6 +553,7 @@ impl App {
             navigation.clone(),
             self.live_settings.clone(),
         )?;
+        self.apply_site_controls(&view, &tab.url, tab.muted);
         Ok(Page {
             view,
             url: tab.url.clone(),
@@ -739,6 +778,7 @@ impl App {
             loading: true,
             favicon: None,
             split_with: None,
+            muted: false,
         };
         let page = self.build_page(&tab)?;
         // Replacing a Peek drops its controller, without stacking temporary tabs.
@@ -1181,6 +1221,9 @@ impl App {
             "reload" => self.command(Command::Reload, None),
             "back" => self.command(Command::Back, None),
             "forward" => self.command(Command::Forward, None),
+            "zoomIn" => self.command(Command::Zoom { action: "in".into() }, None),
+            "zoomOut" => self.command(Command::Zoom { action: "out".into() }, None),
+            "zoomReset" => self.command(Command::Zoom { action: "reset".into() }, None),
             "find" => self.command(Command::FindOpen, None),
             "findEscape" => self.command(Command::FindClose, None),
             "escape" => self.request_peek_close(),
@@ -1215,6 +1258,21 @@ impl App {
             self.close_find(true);
         }
         if matches!(c, Command::OpenSettings { .. }) { self.close_peek(); }
+        // The page behind a switch may already exist with its site's zoom; the
+        // UI only learns a factor from an event, so send the shown page's zoom.
+        let zoom_after_transition = matches!(
+            c,
+            Command::Activate { .. }
+                | Command::New { .. }
+                | Command::OpenBookmark { .. }
+                | Command::Restore
+                | Command::SwitchSpace { .. }
+                | Command::Close { .. }
+                | Command::CloseOthers
+                | Command::CloseBelow
+                | Command::Split { .. }
+                | Command::Unsplit
+        );
         let focus_after_transition = self.peek.is_some()
             && matches!(
                 c,
@@ -1573,6 +1631,67 @@ impl App {
                 }
                 return;
             }
+            Command::Zoom { action } => {
+                let Some(url) = self
+                    .peek
+                    .as_ref()
+                    .map(|peek| peek.tab.url.clone())
+                    .or_else(|| self.state.active().map(|tab| tab.url.clone()))
+                    .filter(|url| model::is_web(url))
+                else {
+                    return;
+                };
+                let factor = match self.page() {
+                    Some(view) => {
+                        let current = crate::site::zoom_factor(view).unwrap_or(1.0);
+                        let next = match action.as_str() {
+                            "reset" => 1.0,
+                            "out" => model::next_zoom(current, -1),
+                            _ => model::next_zoom(current, 1),
+                        };
+                        if crate::site::set_zoom_factor(view, next).is_err() {
+                            return;
+                        }
+                        next
+                    }
+                    None => return,
+                };
+                // Zigzag's ZoomLevels: remembered per host; 100% is the absence
+                // of an entry, so a forgotten site stays clean.
+                if let Some(site) = model::site_key(&url) {
+                    if (factor - 1.0).abs() <= 0.001 {
+                        self.state.site_zoom.remove(&site);
+                    } else {
+                        self.state.site_zoom.insert(site, factor);
+                    }
+                    self.save();
+                }
+                self.emit(json!({"type":"zoomNotice","factor":factor}));
+                return;
+            }
+            Command::Mute { id, muted } => {
+                let target = id.or_else(|| Some(self.state.active_tab.clone()));
+                let mut changed = None;
+                if let Some(target) = target {
+                    if let Some(tab) = self.state.tabs.iter_mut().find(|tab| {
+                        tab.id == target || tab.bookmark_id.as_deref() == Some(target.as_str())
+                    }) {
+                        let next = muted.unwrap_or(!tab.muted);
+                        if tab.muted != next {
+                            tab.muted = next;
+                            changed = Some((tab.id.clone(), next));
+                        }
+                    }
+                }
+                if let Some((tab_id, next)) = changed {
+                    if let Some(page) = self.pages.get(&tab_id) {
+                        let _ = crate::site::set_muted(&page.view, next);
+                    }
+                    self.save();
+                    self.publish();
+                }
+                return;
+            }
             Command::Back | Command::Forward | Command::Reload => {
                 if let Some(p) = self.page() {
                     let r = match c {
@@ -1637,6 +1756,9 @@ impl App {
             } else if let Some(ui) = &self.ui {
                 let _ = ui.focus();
             }
+        }
+        if zoom_after_transition {
+            self.emit_active_zoom();
         }
     }
 }
@@ -1817,6 +1939,37 @@ impl ApplicationHandler<Event> for App {
                     self.emit(json!({"type":"findMatches","count":count,"active":active}));
                 }
             }
+            Event::Zoom(id, factor) => {
+                if !model::valid_zoom(factor) {
+                    return;
+                }
+                // Remember what the page settled on, whoever changed it: our
+                // zoom ladder, WebView2's own Ctrl+wheel/pinch, or a reset.
+                if let Some(site) = self
+                    .peek
+                    .as_ref()
+                    .filter(|peek| peek.tab.id == id)
+                    .map(|peek| peek.tab.url.clone())
+                    .or_else(|| self.state.tabs.iter().find(|tab| tab.id == id).map(|tab| tab.url.clone()))
+                    .and_then(|url| model::site_key(&url))
+                {
+                    let changed = if (factor - 1.0).abs() <= 0.001 {
+                        self.state.site_zoom.remove(&site).is_some()
+                    } else {
+                        self.state
+                            .site_zoom
+                            .insert(site, factor)
+                            .is_none_or(|previous| (previous - factor).abs() > 0.001)
+                    };
+                    if changed {
+                        self.save();
+                    }
+                }
+                self.emit(json!({"type":"zoom","id":id,"factor":factor}));
+            }
+            Event::Audio(id, playing) => {
+                self.emit(json!({"type":"audio","id":id,"playing":playing}));
+            }
             Event::Command(c) => self.command(c, Some(event_loop)),
             Event::PeekRequest(source, url, point) => {
                 let eligible = self
@@ -1884,11 +2037,15 @@ impl ApplicationHandler<Event> for App {
                 {
                     self.close_find(true);
                 }
+                let desired_zoom = self.site_zoom_for(&url);
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
                     p.tab.loading = loading;
                     if model::is_web(&url) {
                         p.tab.url = url.clone();
                         p.page.url = url;
+                        if loading {
+                            crate::site::ensure_zoom(&p.page.view, desired_zoom);
+                        }
                     }
                     self.publish_peek();
                     self.capture_opening_surface();
@@ -1903,6 +2060,9 @@ impl ApplicationHandler<Event> for App {
                         t.url = url.clone();
                         if let Some(p) = self.pages.get_mut(&id) {
                             p.url = url;
+                            if loading {
+                                crate::site::ensure_zoom(&p.view, desired_zoom);
+                            }
                         }
                     }
                     if !loading && self.state.settings.remember_history {
@@ -1911,6 +2071,13 @@ impl ApplicationHandler<Event> for App {
                 }
                 self.publish();
                 if !loading {
+                    // The page may have started or stopped sound while loading,
+                    // before the audio change handler was registered for it.
+                    if let Some(page) = self.pages.get(&id) {
+                        if let Ok(playing) = crate::site::is_playing_audio(&page.view) {
+                            self.emit(json!({"type":"audio","id":id,"playing":playing}));
+                        }
+                    }
                     self.save();
                     let proxy = self.proxy.clone();
                     std::thread::spawn(move || {
@@ -2023,6 +2190,11 @@ fn register_page_events(
                     else if peek_visible.get() { Some("escape".into()) }
                     else { None }
                 }
+                    // Browser-standard page zoom: Ctrl+plus/minus/0, also from
+                    // the OEM keys, the numpad and Ctrl+Shift+plus.
+                    else if ctrl && !alt && (key == 187 || key == 107) { Some("zoomIn".into()) }
+                    else if ctrl && !alt && (key == 189 || key == 109) { Some("zoomOut".into()) }
+                    else if ctrl && !alt && !shift && (key == 48 || key == 96) { Some("zoomReset".into()) }
                     else if ctrl && !alt && !shift && (49..=57).contains(&key) { Some(format!("space:{}", key - 49)) }
                     else { shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift}) };
                 if let Some(action) = action {
@@ -2152,6 +2324,10 @@ fn register_page_events(
         view.webview()
             .add_NavigationStarting(&starting, &mut token)?;
     }
+    let zoom_id = id.clone();
+    let audio_id = id.clone();
+    let zoom_proxy = proxy.clone();
+    let audio_proxy = proxy.clone();
     if let Ok(core) = view.webview().cast::<ICoreWebView2_15>() {
         let icon = FaviconChangedEventHandler::create(Box::new(move |sender, _| {
             if let Some(sender) = sender {
@@ -2172,6 +2348,33 @@ fn register_page_events(
         unsafe {
             core.add_FaviconChanged(&icon, &mut token)?;
         }
+    }
+    // Per-page zoom, whether changed by our ladder, WebView2's own Ctrl+wheel
+    // or a pinch: the host remembers it for the site and the UI shows it.
+    let zoom = ZoomFactorChangedEventHandler::create(Box::new(move |sender, _| {
+        if let Some(sender) = sender {
+            if let Ok(factor) = crate::site::zoom_factor_controller(&sender) {
+                let _ = zoom_proxy.send_event(Event::Zoom(zoom_id.clone(), factor));
+            }
+        }
+        Ok(())
+    }));
+    unsafe {
+        view.controller().add_ZoomFactorChanged(&zoom, &mut token)?;
+    }
+    // Sound: drives the tab row's speaker indicator and the mute label.
+    let audio = IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
+        if let Some(sender) = sender {
+            if let Ok(playing) = crate::site::is_playing_audio_core(&sender) {
+                let _ = audio_proxy.send_event(Event::Audio(audio_id.clone(), playing));
+            }
+        }
+        Ok(())
+    }));
+    unsafe {
+        view.webview()
+            .cast::<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8>()?
+            .add_IsDocumentPlayingAudioChanged(&audio, &mut token)?;
     }
     Ok(())
 }

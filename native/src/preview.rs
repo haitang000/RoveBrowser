@@ -34,6 +34,7 @@ pub fn targets(state: &State, id: &str) -> Option<Vec<Tab>> {
                         loading: false,
                         favicon: f.favicon.clone(),
                         split_with: None,
+                        muted: false,
                     })
             })
             .collect::<Vec<_>>()

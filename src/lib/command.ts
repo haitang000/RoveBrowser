@@ -49,6 +49,7 @@ export interface CommandContext {
   hasOtherTabs: boolean;
   hasTabsBelow: boolean;
   canReopen: boolean;
+  muted: boolean;
   spaces: { id: string; name: string }[];
   currentSpaceId?: string;
 }
@@ -158,6 +159,14 @@ export function contextActions(c: CommandContext): Action[] {
   }
   if (c.inSplit) list.push({ id: "separate", title: "Separate Tabs", keywords: ["separate", "tabs", "split", "unsplit", "view", "close"], icon: "split" });
   else if (c.splitPartner) list.push({ id: "split", title: "Open in Split View", keywords: ["open", "split", "view", "side", "two"], icon: "split" });
+  if (c.hasPage) {
+    list.push(c.muted
+      ? { id: "unmute", title: "Unmute Tab", keywords: ["unmute", "mute", "sound", "audio", "tab"], icon: "speaker" }
+      : { id: "mute", title: "Mute Tab", keywords: ["mute", "sound", "audio", "tab"], icon: "speaker" });
+    list.push({ id: "zoom-in", title: "Zoom In", keywords: ["zoom", "in", "larger", "bigger"], icon: "plus" });
+    list.push({ id: "zoom-out", title: "Zoom Out", keywords: ["zoom", "out", "smaller"], icon: "minus" });
+    list.push({ id: "zoom-reset", title: "Actual Size", keywords: ["zoom", "reset", "actual", "size", "100"], icon: "search" });
+  }
   if (c.hasOtherTabs) list.push({ id: "close-others", title: "Close Other Tabs", keywords: ["close", "other", "tabs", "clean", "tidy"], icon: "close" });
   if (c.hasTabsBelow) list.push({ id: "close-below", title: "Close Tabs Below", keywords: ["close", "tabs", "below", "under"], icon: "close" });
   if (c.canReopen) list.push({ id: "reopen", title: "Reopen Closed Tab", keywords: ["reopen", "closed", "tab", "undo", "restore", "back"], icon: "history" });
@@ -216,6 +225,7 @@ export function commandContext(state: BrowserState, recent: string[]): CommandCo
     hasOtherTabs: active?.bookmarkId ? pages.length > 0 : pages.some((id) => id !== active?.id && id !== partner),
     hasTabsBelow: active?.bookmarkId ? pages.length > 0 : last >= 0 && pages.length > last + 1,
     canReopen: state.closed.length > 0,
+    muted: Boolean(active?.muted),
     spaces: state.spaces.map((space) => ({ id: space.id, name: space.name })),
     currentSpaceId: state.activeSpace,
   };

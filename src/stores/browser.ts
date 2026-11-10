@@ -52,7 +52,12 @@ export const useBrowser = defineStore("browser", () => {
     findCount = ref(0),
     findActive = ref(0),
     findTicket = ref(0),
-    findFocusTicket = ref(0);
+    findFocusTicket = ref(0),
+    pageZoom = ref(1),
+    audio = ref<Record<string, boolean>>({}),
+    zoomNotice = ref<{ ticket: number; factor: number } | null>(null);
+  let zoomNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  let zoomNoticeTicket = 0;
   const active = computed(() =>
     state.value.tabs.find((t) => t.id === state.value.activeTab),
   );
@@ -246,6 +251,27 @@ export const useBrowser = defineStore("browser", () => {
   function findStep(backwards = false) {
     if (native) send({ type: "findNext", backwards });
   }
+  /** Zigzag's View › Zoom In / Zoom Out / Actual Size, on the current page. */
+  function zoom(action: "in" | "out" | "reset") {
+    if (native) send({ type: "zoom", action });
+  }
+  /** Mute or unmute a tab's sound; the host owns the WebView2 controller. */
+  function toggleMute(tab?: Tab | null) {
+    if (!tab) return;
+    if (native) {
+      send({ type: "mute", id: tab.bookmarkId || tab.id, muted: !tab.muted });
+    } else {
+      const live = state.value.tabs.find((item) => item.id === tab.id);
+      if (live) live.muted = !live.muted;
+    }
+  }
+  function showZoomNotice(factor: number) {
+    zoomNotice.value = { ticket: ++zoomNoticeTicket, factor };
+    clearTimeout(zoomNoticeTimer);
+    zoomNoticeTimer = setTimeout(() => {
+      zoomNotice.value = null;
+    }, 1200);
+  }
   window.__ERA_RECEIVE__ = (e) => {
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
       splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
@@ -311,6 +337,11 @@ export const useBrowser = defineStore("browser", () => {
       thumbnails.value = Object.fromEntries(
         Object.entries(thumbnails.value).filter(([id]) => current.has(id) && current.get(id) === previous.get(id)),
       );
+      // Sound is runtime state; a closed tab must not leave a stale speaker.
+      const live = new Set(state.value.tabs.map((tab) => tab.id));
+      audio.value = Object.fromEntries(
+        Object.entries(audio.value).filter(([id, playing]) => playing && live.has(id)),
+      );
     }
     if (e.type === "history" && e.entries) history.value = e.entries;
     if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions && settings.value.searchSuggestions) suggestions.value = e.suggestions;
@@ -328,6 +359,14 @@ export const useBrowser = defineStore("browser", () => {
       findCount.value = typeof e.count === "number" ? e.count : 0;
       findActive.value = typeof e.active === "number" ? e.active : 0;
     }
+    if (e.type === "zoom" && typeof e.factor === "number" && Number.isFinite(e.factor))
+      pageZoom.value = e.factor;
+    if (e.type === "zoomNotice" && typeof e.factor === "number" && Number.isFinite(e.factor)) {
+      pageZoom.value = e.factor;
+      showZoomNotice(e.factor);
+    }
+    if (e.type === "audio" && e.id && typeof e.playing === "boolean")
+      audio.value = { ...audio.value, [e.id]: e.playing };
     if (e.type === "shortcut") {
       if (e.action === "address") openCommand("edit");
       if (e.action === "new") openCommand();
@@ -420,6 +459,11 @@ export const useBrowser = defineStore("browser", () => {
     closeFind,
     setFindQuery,
     findStep,
+    pageZoom,
+    audio,
+    zoomNotice,
+    zoom,
+    toggleMute,
     active,
     space,
     tabs,

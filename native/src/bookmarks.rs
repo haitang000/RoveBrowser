@@ -249,6 +249,7 @@ impl State {
                     loading: false,
                     favicon: f.favicon,
                     split_with: None,
+                    muted: false,
                 });
                 live.push(tab_id);
             }

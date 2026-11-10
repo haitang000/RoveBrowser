@@ -5,6 +5,7 @@ import {
   commandContext,
   completionAllowed,
   completionFor,
+  contextActions,
   matchSite,
   parseSuggestions,
   rankCommands,
@@ -90,8 +91,30 @@ describe("inline completion", () => {
   });
 });
 
-describe("closing groups of tabs", () => {
-  it("closes other and lower regular tabs while keeping pins and the split partner", () => {
+describe("site controls", () => {
+  it("offers mute and the zoom ladder for the page and remembers mute state", () => {
+    const state = initialState();
+    state.tabs.push({
+      id: "alpha",
+      spaceId: "personal",
+      title: "Alpha",
+      url: "https://alpha.example/",
+      pinned: false,
+    });
+    state.activeTab = "alpha";
+    const actions = contextActions(commandContext(state, []));
+    expect(actions.some((action) => action.id === "mute")).toBe(true);
+    expect(actions.some((action) => action.id === "zoom-in")).toBe(true);
+    expect(actions.some((action) => action.id === "zoom-out")).toBe(true);
+    expect(actions.some((action) => action.id === "zoom-reset")).toBe(true);
+    expect(commandContext(state, []).muted).toBe(false);
+    state.tabs[state.tabs.length - 1]!.muted = true;
+    expect(contextActions(commandContext(state, [])).some((action) => action.id === "unmute")).toBe(true);
+    expect(commandContext(state, []).muted).toBe(true);
+  });
+});
+
+describe("closing groups of tabs", () => {  it("closes other and lower regular tabs while keeping pins and the split partner", () => {
     let state = initialState();
     state.tabs.push(
       { id: "alpha", spaceId: "personal", title: "Alpha", url: "https://alpha.example/", pinned: false },

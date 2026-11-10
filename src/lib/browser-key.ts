@@ -7,6 +7,26 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
     b.closeFind();
     return;
   }
+  // Browser-standard page zoom. Kept outside the shortcut table because the
+  // same action comes from Ctrl+= / Ctrl+Shift+= and the numpad, as in Chrome,
+  // and Zigzag keeps Zoom in its View menu rather than a user binding.
+  if (e.ctrlKey && !e.altKey && !e.metaKey) {
+    if (e.key === "=" || e.key === "+") {
+      e.preventDefault();
+      b.zoom("in");
+      return;
+    }
+    if (e.key === "-") {
+      e.preventDefault();
+      b.zoom("out");
+      return;
+    }
+    if (e.key === "0") {
+      e.preventDefault();
+      b.zoom("reset");
+      return;
+    }
+  }
   if (e.ctrlKey && !e.altKey && /^[1-9]$/.test(e.key)) {
     const space = b.state.spaces[Number(e.key) - 1];
     if (space) { e.preventDefault(); b.send({ type: "space", id: space.id }); }

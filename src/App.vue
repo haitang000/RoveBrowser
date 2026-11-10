@@ -9,6 +9,7 @@ import Desk from "./components/browser/Desk.vue";
 import SettingsPanel from "./components/browser/SettingsPanel.vue";
 import TabPreview from "./components/browser/TabPreview.vue";
 import FindBar from "./components/browser/FindBar.vue";
+import StatusToast from "./components/browser/StatusToast.vue";
 import ErrorToast from "./components/browser/ErrorToast.vue";
 import Icon from "./components/common/Icon.vue";
 import { browserKey } from "./lib/browser-key";
@@ -108,7 +109,7 @@ onBeforeUnmount(() => {
         @click="b.send({ type: 'sidebar' })"
       >
         <Icon name="sidebar" /></button
-      ><PageArea><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /></PageArea>
+      ><PageArea><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /></PageArea>
     </div>
     <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><TabPreview />
     <ErrorToast v-if="!b.native" />

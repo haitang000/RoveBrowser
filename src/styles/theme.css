@@ -421,6 +421,23 @@ kbd {
 .tab-row:focus-within .tab-close {
   visibility: visible;
 }
+/* Zigzag's speaker on a tab that is playing sound or muted (SidebarRows.audio). */
+.tab-audio {
+  height: 20px;
+  width: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  flex-shrink: 0;
+  color: var(--quiet);
+}
+.tab-audio:hover {
+  background: var(--pressed);
+  color: var(--ink);
+}
+.tab-audio.muted {
+  color: var(--tertiary);
+}
 .section-label {
   height: 28px;
   display: flex;
@@ -929,6 +946,43 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
   font-size: 11px;
   color: var(--tertiary);
   padding: 8px 8px 4px;
+}
+/* Zigzag site panel's zoom row: three quiet buttons under one label. */
+.menu-zoom {
+  display: flex;
+  gap: 2px;
+  padding: 0 4px;
+}
+.menu-zoom button {
+  width: auto;
+  flex: 1;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+.menu-zoom button:disabled {
+  opacity: 0.4;
+}
+/* Zigzag's zoom Toast: a small capsule near the page's top. */
+.status-toast {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 92;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 16px;
+  box-shadow: 0 2px 12px var(--panel-shadow);
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 hr {
   border: 0;

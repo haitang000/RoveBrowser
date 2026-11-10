@@ -3,11 +3,17 @@ import { useBrowser } from "../../stores/browser";
 import type { Tab } from "../../lib/types";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
+import { computed } from "vue";
 import { savedPage, samePinnedUrl } from "../../lib/bookmarks";
 import { isSettingsUrl } from "../../lib/settings";
 const props = defineProps<{ tab: Tab }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser();
+const playing = computed(() => Boolean(b.audio[props.tab.id]));
+const muted = computed(() => Boolean(props.tab.muted));
+function toggleMute() {
+  b.toggleMute(props.tab);
+}
 function away() {
   const f = props.tab.bookmarkId && savedPage(b.state, props.tab.bookmarkId);
   return f && !props.tab.unloaded && !samePinnedUrl(f.url, props.tab.url);
@@ -59,6 +65,15 @@ function drop(e: DragEvent) {
         :favicon="tab.favicon" /></span
     ><span class="tab-title">{{ tab.title }}</span
     ><button
+      v-if="playing || muted"
+      class="tab-audio"
+      :class="{ muted }"
+      :aria-label="muted ? `取消静音 ${tab.title}` : `静音 ${tab.title}`"
+      :title="muted ? '取消静音标签页' : '静音标签页'"
+      @click.stop="toggleMute"
+    >
+      <Icon :name="muted ? 'speakerMuted' : 'speaker'" :size="12" />
+    </button><button
       class="tab-close"
       :aria-label="`${away() ? '返回固定网址' : tab.pinned ? '卸载' : '关闭'} ${tab.title}`"
       :title="away() ? '返回固定网址' : tab.pinned ? '卸载网页（保留固定项）' : '关闭标签页'"

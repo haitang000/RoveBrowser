@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub const MAX_FAVORITES: usize = 8;
+/// Same ladder as Zigzag's `BrowserActions.zoomSteps`.
+pub const ZOOM_STEPS: [f64; 13] = [
+    0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
+];
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +24,9 @@ pub struct Tab {
     pub favicon: Option<String>,
     #[serde(default)]
     pub split_with: Option<String>,
+    /// The tab's sound is muted, as Chrome and Zigzag's `setMuted`.
+    #[serde(default)]
+    pub muted: bool,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Space {
@@ -69,6 +77,9 @@ pub struct State {
     /// The page meets the window edges. Absent in an older session means on.
     #[serde(default = "default_borderless")]
     pub borderless: bool,
+    /// Per-site page zoom, keyed by `site_key`. Absent in an older session.
+    #[serde(default)]
+    pub site_zoom: HashMap<String, f64>,
 }
 fn default_borderless() -> bool {
     true
@@ -286,6 +297,15 @@ pub enum Command {
     FindStart { query: String },
     #[serde(rename = "findNext")]
     FindNext { backwards: bool },
+    /// Page zoom on the current page: "in", "out", or "reset".
+    #[serde(rename = "zoom")]
+    Zoom { action: String },
+    /// Mute or unmute a tab (`id` is a tab id or a pinned page's bookmark id).
+    #[serde(rename = "mute")]
+    Mute {
+        id: Option<String>,
+        muted: Option<bool>,
+    },
     #[serde(rename = "peekOpen")]
     PeekOpen { url: String, origin: Option<Point> },
     #[serde(rename = "peekClose")]
@@ -336,6 +356,38 @@ pub fn normalize_with(input: &str, settings: &crate::settings::Settings) -> Resu
 pub fn is_web(url: &str) -> bool {
     url::Url::parse(url)
         .is_ok_and(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some())
+}
+/// The site a page belongs to for per-site settings: the lowercased host with
+/// a leading `www.` dropped, as Zigzag's `HistoryStore.normalizedHost`. IP
+/// hosts and other non-domain hosts stay as they are.
+pub fn site_key(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = parsed.host_str()?.to_lowercase();
+    let site = host.strip_prefix("www.").unwrap_or(&host);
+    (!site.is_empty() && site.len() <= 253).then(|| site.to_string())
+}
+pub fn valid_zoom(factor: f64) -> bool {
+    factor.is_finite() && (0.25..=5.0).contains(&factor)
+}
+/// Zigzag's zoom ladder: one step up or down, or back to 100%.
+pub fn next_zoom(current: f64, direction: i8) -> f64 {
+    match direction {
+        0 => 1.0,
+        d if d > 0 => ZOOM_STEPS
+            .iter()
+            .find(|step| **step > current + 0.001)
+            .copied()
+            .unwrap_or(*ZOOM_STEPS.last().unwrap()),
+        _ => ZOOM_STEPS
+            .iter()
+            .rev()
+            .find(|step| **step < current - 0.001)
+            .copied()
+            .unwrap_or(ZOOM_STEPS[0]),
+    }
 }
 pub(crate) fn favorite_url(input: &str) -> Result<String, String> {
     let text = input.trim();
@@ -412,6 +464,7 @@ impl Default for State {
             sidebar_collapsed: false,
             settings: crate::settings::Settings::default(),
             borderless: true,
+            site_zoom: HashMap::new(),
         };
         for (title, url) in [
             ("GitHub", "https://github.com"),
@@ -469,6 +522,7 @@ impl State {
             loading: false,
             favicon: None,
             split_with: None,
+            muted: false,
         });
         self.active_tab = id;
         Ok(())
@@ -553,6 +607,11 @@ impl State {
     pub fn repair(&mut self) {
         // A missing removable download folder must not reset unrelated preferences.
         self.settings.repair();
+        // Zoom is only meaningful inside WebView2's range; a session written by
+        // an older build or a damaged file must not wedge the page at 0 or 99x.
+        self.site_zoom.retain(|site, zoom| {
+            !site.is_empty() && site.len() <= 253 && valid_zoom(*zoom) && (*zoom - 1.0).abs() > 0.001
+        });
         for tab in self.tabs.iter_mut().chain(self.closed.iter_mut()) {
             if let Some(url) = crate::settings::normalize_settings_url(&tab.url) {
                 tab.url = url;
@@ -995,6 +1054,50 @@ mod tests {
         s.apply(&Command::CloseOthers).unwrap();
         assert_eq!(s.active_tab, alpha);
         assert!(s.tabs.iter().filter(|tab| tab.bookmark_id.is_none()).all(|tab| tab.id == alpha));
+    }
+    #[test]
+    fn zoom_sites_are_normalized_and_use_zigzags_ladder() {
+        assert_eq!(site_key("https://www.Example.COM/a?b=1").as_deref(), Some("example.com"));
+        assert_eq!(site_key("http://example.com:8080/").as_deref(), Some("example.com"));
+        assert_eq!(site_key("http://127.0.0.1:8080/").as_deref(), Some("127.0.0.1"));
+        assert_eq!(site_key("https://sub.example.com/").as_deref(), Some("sub.example.com"));
+        assert_eq!(site_key("era://newtab"), None);
+        assert_eq!(site_key("not a url"), None);
+        assert_eq!(next_zoom(1.0, 1), 1.1);
+        assert_eq!(next_zoom(1.0, -1), 0.9);
+        assert_eq!(next_zoom(1.1, -1), 1.0);
+        assert_eq!(next_zoom(0.67, 1), 0.75);
+        assert_eq!(next_zoom(3.0, 1), 3.0);
+        assert_eq!(next_zoom(0.5, -1), 0.5);
+        assert_eq!(next_zoom(2.5, 0), 1.0);
+        assert!(valid_zoom(3.0) && !valid_zoom(0.2) && !valid_zoom(f64::NAN));
+    }
+    #[test]
+    fn repaired_sessions_drop_invalid_zooms_and_keep_mute_state() {
+        let mut state = State::default();
+        state.site_zoom.insert("example.com".into(), 1.25);
+        state.site_zoom.insert("one.example".into(), 1.0);
+        state.site_zoom.insert("huge.example".into(), 9.0);
+        state.site_zoom.insert("tiny.example".into(), 0.01);
+        state.site_zoom.insert("".into(), 1.5);
+        state.site_zoom.insert("nan.example".into(), f64::NAN);
+        state.tabs[0].muted = true;
+        state.repair();
+        assert_eq!(state.site_zoom.len(), 1);
+        assert_eq!(state.site_zoom.get("example.com"), Some(&1.25));
+        assert!(state.tabs[0].muted);
+        let mut restored: State =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        restored.repair();
+        assert_eq!(restored.site_zoom.len(), 1);
+        assert!(restored.tabs[0].muted);
+        // A session written before mute and zoom existed still opens.
+        let mut value: serde_json::Value = serde_json::to_value(&restored).unwrap();
+        value["tabs"][0].as_object_mut().unwrap().remove("muted");
+        value.as_object_mut().unwrap().remove("siteZoom");
+        let old: State = serde_json::from_value(value).unwrap();
+        assert!(!old.tabs[0].muted);
+        assert!(old.site_zoom.is_empty());
     }
     #[test]
     fn borderless_defaults_on_and_glass_survives_a_session() {

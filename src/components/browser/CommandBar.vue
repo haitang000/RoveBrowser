@@ -116,6 +116,10 @@ function runAction(id: string) {
     return;
   }
   if (id === "pin" || id === "unpin") b.send({ type: "pin", id: active?.id });
+  else if (id === "mute" || id === "unmute") b.toggleMute(active);
+  else if (id === "zoom-in") b.zoom("in");
+  else if (id === "zoom-out") b.zoom("out");
+  else if (id === "zoom-reset") b.zoom("reset");
   else if (id === "favorite" && active) b.send({ type: "favoriteTab", id: active.id });
   else if (id === "separate") b.send({ type: "unsplit" });
   else if (id === "split") {

@@ -33,6 +33,10 @@ const paths: Record<string, string> = {
   chevron: "m5 6 3 3 3-3",
   chevronUp: "m4 10 4-4 4 4",
   chevronDown: "m4 6 4 4 4-4",
+  minus: "M3 8h10",
+  speaker:
+    "M2 6h3l4-3v10l-4-3H2zM11 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9",
+  speakerMuted: "M2 6h3l4-3v10l-4-3H2zM10.5 6l4 4M14.5 6l-4 4",
 };
 </script>
 <template>
