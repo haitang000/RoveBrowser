@@ -278,6 +278,14 @@ pub enum Command {
     CloseOthers,
     #[serde(rename = "closeBelow")]
     CloseBelow,
+    #[serde(rename = "findOpen")]
+    FindOpen,
+    #[serde(rename = "findClose")]
+    FindClose,
+    #[serde(rename = "findStart")]
+    FindStart { query: String },
+    #[serde(rename = "findNext")]
+    FindNext { backwards: bool },
     #[serde(rename = "peekOpen")]
     PeekOpen { url: String, origin: Option<Point> },
     #[serde(rename = "peekClose")]

@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useBrowser } from "../../stores/browser";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
-import { searchUrl } from "../../lib/settings";
+import { isSettingsUrl, searchUrl } from "../../lib/settings";
 import {
   commandContext,
   completionAllowed,
@@ -105,6 +105,16 @@ function step(delta: number) {
 function runAction(id: string) {
   const active = b.peek ?? b.active;
   if (id === "settings") { b.openSettings(); return; }
+  if (id === "find") {
+    if (!active || active.url === "era://newtab" || isSettingsUrl(active.url)) {
+      b.error = "此页面不支持页内查找";
+      b.commandOpen = false;
+      return;
+    }
+    b.commandOpen = false;
+    b.openFind();
+    return;
+  }
   if (id === "pin" || id === "unpin") b.send({ type: "pin", id: active?.id });
   else if (id === "favorite" && active) b.send({ type: "favoriteTab", id: active.id });
   else if (id === "separate") b.send({ type: "unsplit" });

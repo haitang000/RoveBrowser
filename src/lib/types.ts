@@ -95,6 +95,8 @@ declare global {
       image?: string | null;
       kept?: string[];
       popup?: Record<string, unknown>;
+      count?: number;
+      active?: number;
     }) => void;
   }
 }

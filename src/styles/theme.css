@@ -661,6 +661,105 @@ kbd {
 }
 html[data-popup], html[data-popup] body, html[data-popup] #app { background: transparent; }
 .popup-page-area { position: fixed; overflow: hidden; border-radius: 7px; }
+/* Zigzag FindBar: a 320 x 40 capsule over the page's top right. The outer box
+ * keeps the layout rect the native opacity layer is clipped to; the pill inside
+ * carries the surface and animates, so a shadow is never cut into a square halo. */
+.find-bar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 90;
+  width: min(320px, calc(100% - 24px));
+  height: 40px;
+}
+.find-bar-surface {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 20px;
+  box-shadow: 0 2px 12px var(--panel-shadow);
+  color: var(--ink);
+  transform-origin: top right;
+}
+.find-icon {
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: var(--tertiary);
+}
+.find-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.find-bar input::placeholder { color: var(--tertiary); }
+.find-count {
+  flex-shrink: 0;
+  padding: 0 4px;
+  color: var(--tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.find-button {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--quiet);
+  padding: 0;
+}
+.find-button:hover:not(:disabled) { background: var(--field-hover); color: var(--ink); }
+.find-button:active:not(:disabled) { background: var(--field); }
+.find-button:disabled { opacity: 0.35; }
+.find-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.find-done { color: var(--tertiary); }
+/* Entrance and exit: the pill settles in from its top-right corner and leaves
+ * the same way. The outer box only fades, so the clipped native region and the
+ * element's layout rect stay put for the whole transition. */
+.find-enter-active { animation: find-fade-in 160ms var(--ease-out) both; }
+.find-leave-active { animation: find-fade-out 120ms ease both; }
+.find-enter-active .find-bar-surface {
+  animation: find-settle-in 160ms var(--ease-out) both;
+}
+.find-leave-active .find-bar-surface {
+  animation: find-settle-out 120ms ease both;
+}
+@keyframes find-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes find-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes find-settle-in {
+  from { opacity: 0.7; transform: scale(0.96) translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes find-settle-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.98) translateY(-3px); }
+}
+/* Reduce Motion: the bar simply fades, at the quick duration used elsewhere. */
+@media (prefers-reduced-motion: reduce) {
+  .find-enter-active { animation-duration: 80ms; }
+  .find-leave-active { animation-duration: 80ms; }
+  .find-enter-active .find-bar-surface,
+  .find-leave-active .find-bar-surface { animation: none; }
+}
+html[data-reduce-motion="true"] .find-enter-active { animation-duration: 80ms; }
+html[data-reduce-motion="true"] .find-leave-active { animation-duration: 80ms; }
+html[data-reduce-motion="true"] .find-enter-active .find-bar-surface,
+html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation: none; }
 .command-scrim {
   position: absolute;
   inset: 0;

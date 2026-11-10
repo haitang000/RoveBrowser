@@ -9,7 +9,9 @@ import TabMenu from "./TabMenu.vue";
 import FavoriteMenu from "./FavoriteMenu.vue";
 import TabPreviewCard from "./TabPreviewCard.vue";
 import ErrorToast from "./ErrorToast.vue";
+import FindBar from "./FindBar.vue";
 import { browserKey } from "../../lib/browser-key";
+import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
 const b = useBrowser();
 watch(() => b.settings.reduceMotion, (value) => document.documentElement.dataset.reduceMotion = String(value), { immediate: true });
 const area = computed(() => ({ left: b.popupArea.x + "px", top: b.popupArea.y + "px", width: b.popupArea.width + "px", height: b.popupArea.height + "px" }));
@@ -23,7 +25,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast");
+  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar");
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -34,11 +36,12 @@ function report() {
   const cutout = !modal && b.peek && b.peekPhase === "open" && content ? { ...rect(content), corners: [12, 12, 12, 12] } : null;
   const regions = Array.from(surfaces, (element) => {
     const bounds = rect(element);
-    const shadow = element.matches(".tab-hover-preview, .error-toast") ? 20 : 0;
-    return { x: Math.max(0, bounds.x - shadow), y: Math.max(0, bounds.y - shadow), width: bounds.width + shadow * 2, height: bounds.height + shadow * 2 };
+    // The native opacity layer is clipped to these regions; a shadow must have
+    // room or the clip cuts it into a square-cornered halo.
+    return surfaceRegion(bounds, shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout });
-  const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : "";
+  const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.findOpen ? "find" : "";
   const focus = Boolean(active && active !== focusKey);
   focusKey = active;
   if (next !== last || focus) {
@@ -46,7 +49,7 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus });
   }
   if (focus) {
-    const selector = active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : ".context-menu input, .context-menu button";
+    const selector = active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : ".context-menu input, .context-menu button";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }
@@ -73,6 +76,6 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div class="popup-page-area" :style="area"><Peek /><CommandBar /></div>
+  <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /></div>
   <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><TabPreviewCard /><ErrorToast />
 </template>

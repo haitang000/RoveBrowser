@@ -4,6 +4,7 @@ mod caption;
 mod capture;
 mod clip;
 mod favicon;
+mod find;
 mod glass;
 mod host;
 mod model;

@@ -11,6 +11,7 @@ import type {
   PeekPhase,
 } from "../lib/types";
 import { address, host } from "../lib/address";
+import { normalizeFindQuery } from "../lib/find";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 export const useBrowser = defineStore("browser", () => {
@@ -45,7 +46,13 @@ export const useBrowser = defineStore("browser", () => {
     deskOpen = ref(false),
     settingsOpen = ref(false),
     dragging = ref(false),
-    glassBlocked = ref(false);
+    glassBlocked = ref(false),
+    findOpen = ref(false),
+    findQuery = ref(""),
+    findCount = ref(0),
+    findActive = ref(0),
+    findTicket = ref(0),
+    findFocusTicket = ref(0);
   const active = computed(() =>
     state.value.tabs.find((t) => t.id === state.value.activeTab),
   );
@@ -208,6 +215,37 @@ export const useBrowser = defineStore("browser", () => {
     const t = list[(i + (reverse ? -1 : 1) + list.length) % list.length];
     if (t) send({ type: "activate", id: t.id });
   }
+  function resetFind() {
+    findOpen.value = false;
+    findQuery.value = "";
+    findCount.value = 0;
+    findActive.value = 0;
+  }
+  /** ⌘F/Ctrl+F. The host owns the WebView2 find session; in the standalone
+   * preview there is no page, so the bar only demonstrates its own layout. */
+  function openFind() {
+    if (native) send({ type: "findOpen" });
+    else {
+      resetFind();
+      findOpen.value = true;
+      findTicket.value++;
+    }
+  }
+  function closeFind() {
+    resetFind();
+    if (native) send({ type: "findClose" });
+  }
+  function setFindQuery(value: string) {
+    findQuery.value = normalizeFindQuery(value);
+    if (native) send({ type: "findStart", query: findQuery.value });
+    else {
+      findCount.value = 0;
+      findActive.value = 0;
+    }
+  }
+  function findStep(backwards = false) {
+    if (native) send({ type: "findNext", backwards });
+  }
   window.__ERA_RECEIVE__ = (e) => {
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
       splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
@@ -279,6 +317,17 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "dataCleared") { dataStatus.value = e.message || "已清除"; if (e.action === "history") history.value = []; }
     if (e.type === "error") error.value = e.message || "操作失败";
     if (e.type === "glassUnavailable") glassBlocked.value = true;
+    if (e.type === "findOpen") {
+      resetFind();
+      findOpen.value = true;
+      findTicket.value++;
+    }
+    if (e.type === "findFocus") findFocusTicket.value++;
+    if (e.type === "findClosed") resetFind();
+    if (e.type === "findMatches") {
+      findCount.value = typeof e.count === "number" ? e.count : 0;
+      findActive.value = typeof e.active === "number" ? e.active : 0;
+    }
     if (e.type === "shortcut") {
       if (e.action === "address") openCommand("edit");
       if (e.action === "new") openCommand();
@@ -292,6 +341,13 @@ export const useBrowser = defineStore("browser", () => {
     if (!id) return;
     recent.value = [id, ...recent.value.filter((item) => item !== id)].slice(0, 24);
   }, { immediate: true });
+  // The host ends the find session on any tab/space transition as well; the UI
+  // half hides the bar here so the floating layer and the page agree at once.
+  watch(() => state.value.activeTab, () => {
+    if (!findOpen.value) return;
+    if (!native || popupWindow) closeFind();
+    else resetFind();
+  });
   function suggest(query: string) {
     suggestions.value = [];
     const ticket = ++suggestTicket;
@@ -354,6 +410,16 @@ export const useBrowser = defineStore("browser", () => {
     recent,
     error,
     glassBlocked,
+    findOpen,
+    findQuery,
+    findCount,
+    findActive,
+    findTicket,
+    findFocusTicket,
+    openFind,
+    closeFind,
+    setFindQuery,
+    findStep,
     active,
     space,
     tabs,

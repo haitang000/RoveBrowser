@@ -102,6 +102,7 @@ enum Event {
     PreviewLoad(String, u64, String, bool),
     PreviewThumbnail(String, u64, u64, Option<String>),
     PreviewCapture,
+    FindMatches(i32, i32),
 }
 struct Page {
     view: WebView,
@@ -204,6 +205,8 @@ struct App {
     tab_preview: Option<(String, Rect)>,
     preview_renders: HashMap<String, PreviewRender>,
     preview_epoch: u64,
+    find: Option<crate::find::Session>,
+    find_open: Rc<Cell<bool>>,
     popup: Option<WebView>,
     popup_state: serde_json::Map<String, serde_json::Value>,
     ui: Option<WebView>,
@@ -257,6 +260,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         tab_preview: None,
         preview_renders: HashMap::new(),
         preview_epoch: 0,
+        find: None,
+        find_open: Rc::new(Cell::new(false)),
         popup: None,
         popup_state: serde_json::Map::new(),
         ui: None,
@@ -370,6 +375,101 @@ impl App {
             .map(|p| &p.page.view)
             .or_else(|| self.pages.get(&self.state.active_tab).map(|p| &p.view))
     }
+    /// Closes the find session and (unless another page takes over silently)
+    /// tells the trusted UI, so both the shell and the floating layer hide the
+    /// bar. Zigzag's `FindBar.hide` also clears the page's highlights, which
+    /// `ICoreWebView2Find::Stop` does for us.
+    fn close_find(&mut self, notify: bool) {
+        if let Some(session) = self.find.take() {
+            session.close();
+        }
+        let was_open = self.find_open.replace(false);
+        if notify && was_open {
+            self.emit(json!({"type":"findClosed"}));
+        }
+    }
+    /// ⌘F: opens the bar, or puts the caret back in it when it is already up.
+    /// Internal pages (`era://settings`, the new-tab surface) have no WebView
+    /// to search, so they are left alone, as Zigzag does for its own pages.
+    fn find_target_is_web(&self) -> bool {
+        match &self.peek {
+            Some(peek) => model::is_web(&peek.tab.url),
+            None => self
+                .state
+                .active()
+                .is_some_and(|tab| model::is_web(&tab.url)),
+        }
+    }
+    fn open_find(&mut self) {
+        if !self.find_target_is_web() {
+            return;
+        }
+        if let Some(popup) = &self.popup {
+            let _ = popup.focus();
+        }
+        if self.find_open.get() {
+            self.emit(json!({"type":"findFocus"}));
+        } else {
+            self.find_open.set(true);
+            self.emit(json!({"type":"findOpen"}));
+        }
+    }
+    /// Runs the search in the page the bar is over. Every keystroke arrives as
+    /// a fresh session: WebView2 has no "set the term" call, and `FindNext`
+    /// without a prior `Start` would search an empty term.
+    fn start_find(&mut self, query: &str) {
+        let query: String = query.trim().chars().take(crate::find::MAX_QUERY_CHARS).collect();
+        if query.is_empty() {
+            if let Some(session) = self.find.take() {
+                session.close();
+            }
+            self.emit(json!({"type":"findMatches","count":0,"active":0}));
+            return;
+        }
+        if !self.find_target_is_web() {
+            self.close_find(true);
+            return;
+        }
+        // The document this search belongs to. `Page::url` follows in-page
+        // navigations (Source events) sooner than the shared tab state does.
+        let Some((target_id, target_url)) = self
+            .peek
+            .as_ref()
+            .map(|peek| (peek.tab.id.clone(), peek.page.url.clone()))
+            .or_else(|| {
+                let tab = self.state.active()?;
+                let page_url = self
+                    .pages
+                    .get(&tab.id)
+                    .map(|page| page.url.clone())
+                    .unwrap_or_else(|| tab.url.clone());
+                Some((tab.id.clone(), page_url))
+            })
+        else {
+            self.close_find(true);
+            return;
+        };
+        let proxy = self.proxy.clone();
+        let report: crate::find::Report = Rc::new(move |count, active| {
+            let _ = proxy.send_event(Event::FindMatches(count, active));
+        });
+        let started = match self.page() {
+            Some(page) => crate::find::start(page, &query, target_id, target_url, report),
+            None => Err("当前页面不支持页内查找".into()),
+        };
+        match started {
+            Ok(session) => {
+                if let Some(previous) = self.find.replace(session) {
+                    previous.close();
+                }
+                self.find_open.set(true);
+            }
+            Err(message) => {
+                self.error(message);
+                self.close_find(true);
+            }
+        }
+    }
     fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {
         let navigation = Rc::new(NavigationPolicy {
             bookmarked: Cell::new(tab.bookmark_id.is_some()),
@@ -411,6 +511,7 @@ impl App {
             tab.id.clone(),
             self.proxy.clone(),
             self.peek_visible.clone(),
+            self.find_open.clone(),
             navigation.clone(),
             self.live_settings.clone(),
         )?;
@@ -1080,11 +1181,39 @@ impl App {
             "reload" => self.command(Command::Reload, None),
             "back" => self.command(Command::Back, None),
             "forward" => self.command(Command::Forward, None),
+            "find" => self.command(Command::FindOpen, None),
+            "findEscape" => self.command(Command::FindClose, None),
             "escape" => self.request_peek_close(),
             _ => {}
         }
     }
     fn command(&mut self, c: Command, event_loop: Option<&ActiveEventLoop>) {
+        // A find session lives on one page. Switching, closing, splitting or
+        // opening a new tab ends it, so the bar never highlights a hidden page.
+        if (self.find.is_some() || self.find_open.get())
+            && matches!(
+                c,
+                Command::New { .. }
+                    | Command::Activate { .. }
+                    | Command::OpenBookmark { .. }
+                    | Command::Navigate { .. }
+                    | Command::Close { .. }
+                    | Command::CloseOthers
+                    | Command::CloseBelow
+                    | Command::SwitchSpace { .. }
+                    | Command::CreateSpace { .. }
+                    | Command::Restore
+                    | Command::Move { .. }
+                    | Command::OpenSettings { .. }
+                    | Command::Split { .. }
+                    | Command::Unsplit
+                    | Command::PeekOpen { .. }
+                    | Command::PeekClose
+                    | Command::PeekPromote
+            )
+        {
+            self.close_find(true);
+        }
         if matches!(c, Command::OpenSettings { .. }) { self.close_peek(); }
         let focus_after_transition = self.peek.is_some()
             && matches!(
@@ -1422,6 +1551,28 @@ impl App {
                 }
                 return;
             }
+            Command::FindOpen => {
+                self.open_find();
+                return;
+            }
+            Command::FindClose => {
+                self.close_find(true);
+                return;
+            }
+            Command::FindStart { query } => {
+                self.start_find(&query);
+                return;
+            }
+            Command::FindNext { backwards } => {
+                let result = self
+                    .find
+                    .as_ref()
+                    .map(|session| session.next(backwards));
+                if let Some(Err(e)) = result {
+                    self.error(e);
+                }
+                return;
+            }
             Command::Back | Command::Forward | Command::Reload => {
                 if let Some(p) = self.page() {
                     let r = match c {
@@ -1661,6 +1812,11 @@ impl ApplicationHandler<Event> for App {
             Event::Suggestions(ticket, items) => {
                 self.emit(json!({"type":"suggestions","ticket":ticket,"suggestions":items}));
             }
+            Event::FindMatches(count, active) => {
+                if self.find_open.get() {
+                    self.emit(json!({"type":"findMatches","count":count,"active":active}));
+                }
+            }
             Event::Command(c) => self.command(c, Some(event_loop)),
             Event::PeekRequest(source, url, point) => {
                 let eligible = self
@@ -1718,6 +1874,16 @@ impl ApplicationHandler<Event> for App {
                 self.save();
             }
             Event::Load(id, url, loading) => {
+                // A different document in the page the bar searched ends the
+                // session. The same page's own first load does not: the bar may
+                // open while that document is still arriving.
+                if loading
+                    && self.find.as_ref().is_some_and(|session| {
+                        session.target_id == id && session.target_url != url
+                    })
+                {
+                    self.close_find(true);
+                }
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
                     p.tab.loading = loading;
                     if model::is_web(&url) {
@@ -1830,6 +1996,7 @@ fn register_page_events(
     id: String,
     proxy: EventLoopProxy<Event>,
     peek_visible: Rc<Cell<bool>>,
+    find_open: Rc<Cell<bool>>,
     navigation: Rc<NavigationPolicy>,
     settings: Rc<RefCell<crate::settings::Settings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1850,7 +2017,12 @@ fn register_page_events(
                 let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
                 let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
                 let alt = GetKeyState(VK_MENU.0 as i32) < 0;
-                let action = if key == 27 && !ctrl && !alt && !shift && peek_visible.get() { Some("escape".into()) }
+                let action = if key == 27 && !ctrl && !alt && !shift {
+                    // Esc belongs to an open find bar first, then to Peek.
+                    if find_open.get() { Some("findEscape".into()) }
+                    else if peek_visible.get() { Some("escape".into()) }
+                    else { None }
+                }
                     else if ctrl && !alt && !shift && (49..=57).contains(&key) { Some(format!("space:{}", key - 49)) }
                     else { shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift}) };
                 if let Some(action) = action {

@@ -73,6 +73,7 @@ const combo = (
 ): Shortcut => ({ key, ctrl, shift, alt });
 export const SHORTCUTS = [
   { id: "address", title: "编辑地址", group: "浏览", value: combo(76) },
+  { id: "find", title: "页内查找", group: "浏览", value: combo(70) },
   { id: "new", title: "新建标签页", group: "标签页", value: combo(84) },
   { id: "close", title: "关闭标签页", group: "标签页", value: combo(87) },
   {

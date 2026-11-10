@@ -31,6 +31,8 @@ const paths: Record<string, string> = {
   restore: "M5 2h9v9M2 5h9v9H2z",
   arrow: "M3 8h10M9 4l4 4-4 4",
   chevron: "m5 6 3 3 3-3",
+  chevronUp: "m4 10 4-4 4 4",
+  chevronDown: "m4 6 4 4 4-4",
 };
 </script>
 <template>

@@ -25,6 +25,7 @@ pub fn default_shortcuts() -> Vec<(&'static str, Shortcut)> {
         ("reload", 82, true, false, false),
         ("back", 37, false, true, false),
         ("forward", 39, false, true, false),
+        ("find", 70, true, false, false),
     ]
     .into_iter()
     .map(|(id, key, ctrl, alt, shift)| {
@@ -332,6 +333,36 @@ mod tests {
         assert_eq!(next.action(&combo).as_deref(), Some("new"));
         next.shortcuts.insert("new".into(), None);
         assert!(next.action(&combo).is_none());
+    }
+    #[test]
+    fn find_shortcut_defaults_to_ctrl_f_and_keeps_the_table_valid() {
+        let settings = Settings::default();
+        let ctrl_f = Shortcut {
+            key: 70,
+            ctrl: true,
+            alt: false,
+            shift: false,
+        };
+        assert_eq!(settings.action(&ctrl_f).as_deref(), Some("find"));
+        // The defaults must stay a valid, duplicate-free binding set that the
+        // settings page can render and the page accelerator can dispatch.
+        let mut validated = Settings::default();
+        validated.validate().unwrap();
+        // A user may unbind it, like any other shortcut.
+        let mut unbound = Settings::default();
+        unbound.shortcuts.insert("find".into(), None);
+        assert!(unbound.action(&ctrl_f).is_none());
+        assert_eq!(
+            unbound
+                .action(&Shortcut {
+                    key: 76,
+                    ctrl: true,
+                    alt: false,
+                    shift: false
+                })
+                .as_deref(),
+            Some("address")
+        );
     }
     #[test]
     fn deleting_space_keeps_shared_favorites_and_breaks_stale_splits() {
