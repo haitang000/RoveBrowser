@@ -1,5 +1,15 @@
 # 实际验证记录
 
+## 0.1.0-beta5：安装程序回退原版向导
+
+2026-11-10：安装程序改回 Inno Setup 原版向导外观，移除 beta4 的自定义 Rove 官网风格界面（自绘侧栏、标题、按钮、进度条，安装进程临时加载的 Outfit 字体及其许可证）；安装目录、开始菜单／可选桌面快捷方式、覆盖升级、卸载、静默安装与 WebView2 运行时补装行为保持不变。`installer/` 只保留 `Rove.iss`、中文语言文件与版本定义。安装包体积由 beta4 的约 6.03 MB 减至约 6.0 MB。
+
+验证：`npm run build`（vue-tsc + Vite 生产构建）通过；59 项前端单元测试、43 项 Rust 测试（`--test-threads=1`）与 Clippy（`-D warnings`）通过。`npm run installer` 使用 Inno Setup 6.7.3 完成前端、x64 MSVC Release（静态链接 CRT）和安装器编译。实机截图核对英文与简体中文向导均为 Inno Setup 标准现代向导外观，未使用自绘控件；语言文件均能编译并按系统语言显示。
+
+静默安装冒烟：使用独立临时安装路径与临时用户目录，注册显示名 `Rove 0.1.0-beta5`、版本 `0.1.0-beta5`；安装的 `Rove.exe` 与 x64 Release 构建 SHA-256 一致；创建开始菜单快捷方式，静默安装不创建桌面快捷方式；已有 WebView2 时跳过引导程序。安装版以隔离用户目录启动并创建 `era.sqlite`。卸载移除应用、注册信息与开始菜单快捷方式，同时保留临时数据库。另验证 beta4 → beta5 覆盖升级后注册版本与二进制更新到 beta5，卸载同样保留数据。结果保存在 `.local/beta5-installer-smoke*/`、`.local/beta5-upgrade-smoke/`、`.local/installer-stock-wizard-*.png` 与安装日志中。
+
+本轮未重跑界面 E2E 与原生 WebView2 功能集成（本次改动仅涉及安装程序与版本文档）；未在缺少 WebView2 的干净系统上重复运行时补装，也未实机覆盖 ARM64、多屏混合 DPI 或系统高对比度模式。安装程序尚未代码签名。
+
 ## 0.1.0-beta4：Windows 安装器
 
 2026-11-08：新增当前用户安装器及 GitHub Release 自动打包，默认安装到 `%LOCALAPPDATA%\Programs\Rove`，支持开始菜单／可选桌面快捷方式、覆盖升级、卸载与静默安装。安装器沿用 Rove 官网的白底、深灰标题、Outfit 字体和深色渐变主按钮；字体仅为当前安装进程临时加载，高对比度模式保留系统向导。发布应用静态链接 VC++ 运行库，安装器校验微软 WebView2 Evergreen 引导程序的数字签名，仅在运行时缺失时调用它。

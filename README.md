@@ -35,7 +35,7 @@ cargo test --manifest-path native/Cargo.toml
 
 ## Windows 安装版
 
-运行 `release\Rove-0.1.0-beta4-windows-x64-setup.exe`，支持 Windows 10/11 x64 及可运行 x64 应用的 Windows ARM64。默认安装到 `%LOCALAPPDATA%\Programs\Rove`，无需管理员权限；创建开始菜单快捷方式，可选桌面快捷方式，并可通过 Windows 设置中的应用列表卸载。同一用户重新运行安装程序即可覆盖升级，安装及卸载均保留原有 EraBrowser 用户数据、会话和登录状态。安装程序尚未代码签名。
+运行 `release\Rove-0.1.0-beta5-windows-x64-setup.exe`，支持 Windows 10/11 x64 及可运行 x64 应用的 Windows ARM64。默认安装到 `%LOCALAPPDATA%\Programs\Rove`，无需管理员权限；创建开始菜单快捷方式，可选桌面快捷方式，并可通过 Windows 设置中的应用列表卸载。同一用户重新运行安装程序即可覆盖升级，安装及卸载均保留原有 EraBrowser 用户数据、会话和登录状态。安装程序尚未代码签名。
 
 已安装 Microsoft Edge WebView2 Evergreen Runtime 时可离线安装；缺少时安装程序会使用内置的微软引导程序联网安装运行时，失败会提示重试。安装版应用静态链接 VC++ 运行库，无需额外安装 VC++ Redistributable，也不需要 Node.js 或 Rust。
 
