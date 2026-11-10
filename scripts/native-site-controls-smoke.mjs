@@ -127,6 +127,24 @@ async function launch() {
     ),
   );
   popup = await waitFor(() => ui.context().pages().find((page) => page.url().endsWith('?popup')), 'popup renderer');
+  // Record the zoom capsule's CSS entrance/exit animations from the trusted
+  // floating layer, where the real popup WebView renders them.
+  await popup.evaluate(() => {
+    window.__toastAnimations = [];
+    document.addEventListener(
+      'animationstart',
+      (event) => {
+        const target = event.target;
+        if (
+          target instanceof Element &&
+          (target.classList.contains('status-toast') ||
+            target.classList.contains('status-toast-surface'))
+        )
+          window.__toastAnimations.push(event.animationName);
+      },
+      true,
+    );
+  });
   await ui.evaluate(() => {
     window.__events = [];
     window.__lastState = window.__ERA_INITIAL_STATE__;
@@ -239,6 +257,23 @@ try {
   }, 'audio stopped event');
   await expectCount('.tab-row.selected .tab-audio', 0, 'speaker hides when sound stops');
   checks.push('声音停止后喇叭消失');
+
+  // The zoom percentage capsule: drops in from above and slides up on exit.
+  await popup.evaluate(() => {
+    window.__toastAnimations = [];
+  });
+  await send({ type: 'zoom', action: 'reset' });
+  await waitFor(async () => (await popup.locator('.status-toast').count()) === 1, 'zoom toast appears');
+  assert.match(await popup.locator('.status-toast').innerText(), /100%/);
+  await waitFor(
+    async () => popup.evaluate(() => window.__toastAnimations.includes('zoom-toast-drop-in')),
+    'toast drop-in animation',
+  );
+  await waitFor(async () => (await popup.locator('.status-toast').count()) === 0, 'zoom toast hides after 1.2s');
+  const toastAnimations = await popup.evaluate(() => window.__toastAnimations);
+  assert.ok(toastAnimations.includes('zoom-toast-fade-in'), 'toast fades in');
+  assert.ok(toastAnimations.includes('zoom-toast-slide-out'), 'toast slides out');
+  checks.push('缩放胶囊入场下拉、退场上滑，并在 1.2 秒后自动收起');
 
   // Internal pages have no controller to zoom or mute.
   await events('zoomNotice');

@@ -964,17 +964,22 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
 .menu-zoom button:disabled {
   opacity: 0.4;
 }
-/* Zigzag's zoom Toast: a small capsule near the page's top. */
+/* Zigzag's zoom Toast: a small capsule near the page's top. The wrapper keeps
+ * the layout box (and so the native popup region) still; the capsule inside
+ * drops in from above and slides back up on the way out. */
 .status-toast {
   position: absolute;
   top: 12px;
   left: 50%;
   z-index: 92;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.status-toast-surface {
   height: 32px;
   display: flex;
   align-items: center;
   padding: 0 14px;
-  transform: translateX(-50%);
   background: var(--panel);
   border: 1px solid var(--panel-edge);
   border-radius: 16px;
@@ -982,7 +987,38 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
   color: var(--ink);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  pointer-events: none;
+  white-space: nowrap;
+}
+.zoom-toast-enter-active { animation: zoom-toast-fade-in 160ms var(--ease-out) both; }
+.zoom-toast-leave-active { animation: zoom-toast-fade-out 120ms ease both; }
+.zoom-toast-enter-active .status-toast-surface {
+  animation: zoom-toast-drop-in 160ms var(--ease-out) both;
+}
+.zoom-toast-leave-active .status-toast-surface {
+  animation: zoom-toast-slide-out 120ms ease both;
+}
+@keyframes zoom-toast-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zoom-toast-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes zoom-toast-drop-in {
+  from { opacity: 0.6; transform: translateY(-10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes zoom-toast-slide-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-10px); }
+}
+/* Reduce Motion: the capsule only fades, at the quick duration used elsewhere. */
+@media (prefers-reduced-motion: reduce) {
+  .zoom-toast-enter-active,
+  .zoom-toast-leave-active { animation-duration: 80ms; }
+  .zoom-toast-enter-active .status-toast-surface,
+  .zoom-toast-leave-active .status-toast-surface { animation: none; }
+}
+html[data-reduce-motion="true"] .zoom-toast-enter-active,
+html[data-reduce-motion="true"] .zoom-toast-leave-active { animation-duration: 80ms; }
+html[data-reduce-motion="true"] .zoom-toast-enter-active .status-toast-surface,
+html[data-reduce-motion="true"] .zoom-toast-leave-active .status-toast-surface {
+  animation: none;
 }
 hr {
   border: 0;
