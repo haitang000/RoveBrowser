@@ -139,6 +139,7 @@ export function parseSuggestions(data: string): string[] {
 const GLOBAL_ACTIONS: Action[] = [
   { id: "settings", title: "Settings", keywords: ["settings", "preferences", "options"], icon: "settings" },
   { id: "find", title: "Find in Page", keywords: ["find", "search", "page", "text"], icon: "search" },
+  { id: "downloads", title: "Downloads", keywords: ["download", "downloads", "files", "下载"], icon: "download" },
 ];
 function wordsOf(text: string): string[] {
   return text.toLowerCase().split(" ").filter(Boolean);

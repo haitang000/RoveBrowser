@@ -4,6 +4,7 @@ mod caption;
 mod capture;
 mod clipboard;
 mod clip;
+mod downloads;
 mod favicon;
 mod find;
 mod glass;

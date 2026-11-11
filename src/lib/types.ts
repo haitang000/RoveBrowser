@@ -27,6 +27,27 @@ export interface Tab {
   /** Unix seconds the tab was last shown, for fading and the Clear button. */
   lastActivated?: number;
 }
+export type DownloadState =
+  | "inProgress"
+  | "paused"
+  | "finished"
+  | "failed"
+  | "cancelled";
+/** One row of the downloads panel, persisted by the native host. */
+export interface DownloadItem {
+  id: string;
+  url: string;
+  path: string;
+  filename: string;
+  received: number;
+  total: number;
+  state: DownloadState;
+  failure?: string;
+  started: number;
+  finished?: number;
+  /** The host refreshes this from disk: a finished file may be moved already. */
+  exists?: boolean;
+}
 export interface Favorite {
   id: string;
   title: string;
@@ -108,6 +129,8 @@ declare global {
       /** Page zoom factor, and whether a page is playing sound. */
       factor?: number;
       playing?: boolean;
+      /** The full downloads list, and the row a just-started download created. */
+      items?: DownloadItem[];
     }) => void;
   }
 }

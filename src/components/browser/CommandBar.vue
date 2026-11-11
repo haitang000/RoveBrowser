@@ -105,6 +105,11 @@ function step(delta: number) {
 function runAction(id: string) {
   const active = b.peek ?? b.active;
   if (id === "settings") { b.openSettings(); return; }
+  if (id === "downloads") {
+    b.commandOpen = false;
+    b.toggleDownloads(true);
+    return;
+  }
   if (id === "find") {
     if (!active || active.url === "era://newtab" || isSettingsUrl(active.url)) {
       b.error = "此页面不支持页内查找";

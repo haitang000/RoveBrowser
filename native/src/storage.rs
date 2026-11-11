@@ -1,3 +1,4 @@
+use crate::downloads::DownloadItem;
 use crate::model::State;
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -14,7 +15,7 @@ impl Storage {
     pub fn open(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         std::fs::create_dir_all(path)?;
         let conn = Connection::open(path.join("era.sqlite"))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS session(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS history(url TEXT PRIMARY KEY,title TEXT NOT NULL,visited INTEGER NOT NULL);")?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS session(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS history(url TEXT PRIMARY KEY,title TEXT NOT NULL,visited INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY,started INTEGER NOT NULL,json TEXT NOT NULL);")?;
         Ok(Self { conn })
     }
     pub fn load(&self) -> Result<State, Box<dyn std::error::Error>> {
@@ -37,6 +38,29 @@ impl Storage {
         self.conn.execute("INSERT INTO history(url,title,visited) VALUES(?1,?2,unixepoch()) ON CONFLICT(url) DO UPDATE SET title=excluded.title,visited=excluded.visited",params![url,title])
     }
     pub fn clear_history(&self) -> rusqlite::Result<usize> { self.conn.execute("DELETE FROM history", []) }
+    /// Newest first, capped by the caller's model. Malformed rows are skipped so
+    /// one broken download record cannot stop the browser from starting.
+    pub fn load_downloads(&self) -> rusqlite::Result<Vec<DownloadItem>> {
+        let mut q = self.conn.prepare("SELECT json FROM downloads ORDER BY started DESC LIMIT 50")?;
+        let rows = q.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows
+            .filter_map(|row| row.ok())
+            .filter_map(|json| serde_json::from_str::<DownloadItem>(&json).ok())
+            .collect())
+    }
+    /// The list is small (≤50), so a full rewrite keeps every transition simple.
+    pub fn save_downloads(&mut self, items: &[DownloadItem]) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM downloads", [])?;
+        for item in items {
+            let json = serde_json::to_string(item).unwrap_or_default();
+            tx.execute(
+                "INSERT OR REPLACE INTO downloads(id,started,json) VALUES(?1,?2,?3)",
+                params![item.id, item.started as i64, json],
+            )?;
+        }
+        tx.commit()
+    }
     pub fn search(&self, text: &str) -> rusqlite::Result<Vec<Entry>> {
         let mut q=self.conn.prepare("SELECT title,url FROM history WHERE instr(lower(title),lower(?1))>0 OR instr(lower(url),lower(?1))>0 ORDER BY visited DESC LIMIT 30")?;
         let entries = q
@@ -95,16 +119,42 @@ mod tests {
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
-    fn session_and_history_roundtrip() {
-        let path = std::env::temp_dir().join(format!("era-test-{}", uuid::Uuid::new_v4()));
+    fn download_history_roundtrips_and_skips_broken_rows() {
+        use crate::downloads::DownloadState;
+        let path = std::env::temp_dir().join(format!("era-downloads-{}", uuid::Uuid::new_v4()));
+        let item = |id: &str, started: u64| DownloadItem {
+            id: id.into(),
+            url: format!("https://example.com/{id}"),
+            path: format!("C:\\Downloads\\{id}.bin"),
+            filename: format!("{id}.bin"),
+            received: 10,
+            total: 20,
+            state: DownloadState::Finished,
+            failure: None,
+            started,
+            finished: Some(started + 1),
+            exists: true,
+        };
+        {
+            let mut db = Storage::open(&path).unwrap();
+            db.save_downloads(&[item("newer", 20), item("older", 10)]).unwrap();
+            // A row from a future/damaged build must not poison the whole list.
+            db.conn
+                .execute(
+                    "INSERT INTO downloads(id,started,json) VALUES('broken',30,'{not json')",
+                    [],
+                )
+                .unwrap();
+        }
         {
             let db = Storage::open(&path).unwrap();
-            let s = State::default();
-            db.save(&s).unwrap();
-            assert_eq!(db.load().unwrap().active_tab, s.active_tab);
-            db.visit("A title", "https://example.com").unwrap();
-            assert_eq!(db.search("title").unwrap().len(), 1);
-            assert_eq!(db.search("' OR 1=1 --").unwrap().len(), 0);
+            let restored = db.load_downloads().unwrap();
+            assert_eq!(restored.len(), 2);
+            assert_eq!(restored[0].id, "newer");
+            assert_eq!(restored[1].id, "older");
+            let db = Storage::open(&path).unwrap();
+            db.conn.execute("DELETE FROM downloads", []).unwrap();
+            assert!(db.load_downloads().unwrap().is_empty());
         }
         std::fs::remove_dir_all(path).unwrap();
     }

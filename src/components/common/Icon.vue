@@ -40,6 +40,10 @@ const paths: Record<string, string> = {
   edit: "M2 14l1-3 8-8 2 2-8 8-3 1M9 5l2 2",
   copy: "M5 5h8v8H5zM3 3h8v2M3 3v8h2",
   duplicate: "M2 2h6v6H2zM8 8h6v6H8zM10 2h4v4",
+  download: "M8 2v9M4.5 7.5 8 11l3.5-3.5M2 14h12",
+  folder: "M2 4h4l1.5 2H14v8H2z",
+  pause: "M5 3v10M11 3v10",
+  play: "M5 3v10l8-5z",
 };
 </script>
 <template>

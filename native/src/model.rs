@@ -332,6 +332,18 @@ pub enum Command {
     /// Restore the batch the last Clear/Close Others/Close Below removed.
     #[serde(rename = "undoBatch")]
     UndoBatch,
+    /// Downloads panel row action: pause, resume, cancel, open, reveal, remove,
+    /// clearFinished or openFolder.
+    #[serde(rename = "downloadAction")]
+    DownloadAction {
+        #[serde(default)]
+        id: Option<String>,
+        action: String,
+    },
+    /// The trusted UI tells the host whether the downloads panel is open so the
+    /// page accelerator can route Esc to it.
+    #[serde(rename = "downloadsPanel")]
+    DownloadsPanel { open: bool },
     #[serde(rename = "findOpen")]
     FindOpen,
     #[serde(rename = "findClose")]

@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { initialState, reduce } from "../lib/preview";
 import type {
   Command,
+  DownloadItem,
   HistoryEntry,
   Tab,
   Rect,
@@ -13,6 +14,7 @@ import type {
 import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
 import { nowSeconds } from "../lib/tab-meta";
+import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 export const useBrowser = defineStore("browser", () => {
@@ -60,6 +62,9 @@ export const useBrowser = defineStore("browser", () => {
     actionToast = ref<{ ticket: number; message: string; action?: string } | null>(null),
     /** Whether an undoable close batch is recent enough for the sidebar Undo. */
     undoAvailable = ref(false),
+    downloads = ref<DownloadItem[]>([]),
+    downloadsOpen = ref(false),
+    downloadsFocus = ref<string | undefined>(undefined),
     /** Clock for tab fading and the Clear button's stale check. */
     now = ref(nowSeconds());
   let zoomNoticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -87,6 +92,7 @@ export const useBrowser = defineStore("browser", () => {
     .filter((f) => f.spaceId === state.value.activeSpace)
     .map((f) => ({ ...(liveTab(state.value, f.id) || { id: f.id, spaceId: f.spaceId!, url: f.url, unloaded: true }), title: f.title, favicon: liveTab(state.value, f.id)?.favicon || f.favicon, pinned: true, bookmarkId: f.id })));
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedPage(state.value, active.value.bookmarkId) : undefined);
+  const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
   function shortcutLabel(id: string) {
     const binding = shortcutFor(id, settings.value);
@@ -356,6 +362,44 @@ export const useBrowser = defineStore("browser", () => {
       error.value = String(e);
     }
   }
+  function toggleDownloads(open?: boolean) {
+    const next = open ?? !downloadsOpen.value;
+    // The panel lives in the sidebar lane; opening it with the sidebar
+    // collapsed would otherwise reveal nothing.
+    if (next && state.value.sidebarCollapsed) send({ type: "sidebar" });
+    downloadsOpen.value = next;
+  }
+  function closeDownloads() {
+    downloadsOpen.value = false;
+  }
+  /** Runs a panel action; the standalone preview mutates its own list so the
+   * panel stays usable without the native host. */
+  function downloadAction(action: string, id?: string) {
+    if (native) {
+      send({ type: "downloadAction", id, action });
+      return;
+    }
+    const items = downloads.value;
+    if (action === "clearFinished") {
+      downloads.value = items.filter(isActiveDownload);
+      return;
+    }
+    if (action === "openFolder") return;
+    if (!id || !items.some((item) => item.id === id)) return;
+    const change = (patch: Partial<DownloadItem>) => {
+      downloads.value = items.map((item) => (item.id === id ? { ...item, ...patch } : item));
+    };
+    const now = Math.floor(Date.now() / 1000);
+    if (action === "pause") change({ state: "paused" });
+    else if (action === "resume") change({ state: "inProgress" });
+    else if (action === "cancel") change({ state: "cancelled", finished: now, exists: false });
+    else if (action === "remove") downloads.value = items.filter((item) => item.id !== id);
+  }
+  // The page accelerator needs to know whether Esc belongs to the panel. The
+  // popup layer never renders it, so only the main UI reports.
+  watch(downloadsOpen, (open) => {
+    if (native && !popupWindow) send({ type: "downloadsPanel", open });
+  });
   window.__ERA_RECEIVE__ = (e) => {
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
       splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
@@ -451,6 +495,12 @@ export const useBrowser = defineStore("browser", () => {
     }
     if (e.type === "audio" && e.id && typeof e.playing === "boolean")
       audio.value = { ...audio.value, [e.id]: e.playing };
+    if (e.type === "downloads" && e.items) downloads.value = e.items;
+    if (e.type === "downloadStarted" && e.id) {
+      if (state.value.sidebarCollapsed) send({ type: "sidebar" });
+      downloadsOpen.value = true;
+      downloadsFocus.value = e.id;
+    }
     if (e.type === "toast" && e.message) {
       notify(e.message, e.action, e.action === "undoBatch" ? 4000 : 2400);
       if (e.action === "undoBatch") armUndoWindow();
@@ -460,6 +510,8 @@ export const useBrowser = defineStore("browser", () => {
       if (e.action === "new") openCommand();
       if (e.action === "desk") deskOpen.value = !deskOpen.value;
       if (e.action === "settings") openSettings();
+      if (e.action === "downloads") toggleDownloads();
+      if (e.action === "downloadsEscape") closeDownloads();
     }
   };
   let suggestTicket = 0;
@@ -557,6 +609,13 @@ export const useBrowser = defineStore("browser", () => {
     dismissToast,
     undoAvailable,
     undoBatch,
+    downloads,
+    downloadsOpen,
+    downloadsFocus,
+    activeDownloads,
+    toggleDownloads,
+    closeDownloads,
+    downloadAction,
     now,
     active,
     space,

@@ -1,5 +1,6 @@
 use crate::{
     clip::WindowClip,
+    downloads::{DownloadItem, DownloadState, Downloads},
     model::{self, Command, PeekPhase, Point, Rect, State, Tab},
     storage::Storage,
 };
@@ -9,16 +10,24 @@ use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
     collections::HashMap,
-    path::PathBuf,
+    path::{Path as FilePath, PathBuf},
     rc::Rc,
+    time::{Duration, Instant},
 };
 use webview2_com::{
-    take_pwstr, AcceleratorKeyPressedEventHandler, DownloadStartingEventHandler, FaviconChangedEventHandler,
-    IsDocumentPlayingAudioChangedEventHandler, ZoomFactorChangedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler,
+    DownloadStartingEventHandler, FaviconChangedEventHandler,
+    IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
+    ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2NavigationStartingEventArgs3, ICoreWebView2NewWindowRequestedEventArgs2,
-        ICoreWebView2_15, ICoreWebView2_4, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
-        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT,
+        ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
+        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_4,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED,
+        COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED,
+        COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+        COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT,
     },
     NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
 };
@@ -29,9 +38,10 @@ use windows::{
         Graphics::Gdi::ScreenToClient,
         UI::{
             Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
+            Shell::ShellExecuteW,
             WindowsAndMessaging::{
                 GetCursorPos, SetWindowPos, HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE,
-                SWP_NOSIZE, SWP_NOZORDER,
+                SWP_NOSIZE, SWP_NOZORDER, SW_SHOWNORMAL,
             },
         },
     },
@@ -108,6 +118,13 @@ enum Event {
     Zoom(String, f64),
     /// A page started or stopped playing sound.
     Audio(String, bool),
+    /// The download list changed; persist only for starts and state changes,
+    /// not for every bytes tick.
+    DownloadsChanged {
+        persist: bool,
+    },
+    /// A new download joined the list: the UI reveals the panel on it.
+    DownloadStarted(String),
 }
 struct Page {
     view: WebView,
@@ -197,6 +214,16 @@ struct PageLayout {
     secondary: Option<Rect>,
     live_resize: bool,
 }
+/// The runtime state every page's events share. Bundled so registering a page
+/// stays a short argument list as more event families move onto it.
+#[derive(Clone)]
+struct PageShared {
+    peek_visible: Rc<Cell<bool>>,
+    find_open: Rc<Cell<bool>>,
+    downloads_open: Rc<Cell<bool>>,
+    downloads: Rc<RefCell<Downloads>>,
+    download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+}
 /// Tabs removed together by Clear or Close Others/Below, with the active tab
 /// before the batch so the Undo toast can put everything back as it was.
 struct UndoBatch {
@@ -223,6 +250,10 @@ struct App {
     /// Tabs currently playing sound; Zigzag never treats those as stale.
     playing: std::collections::HashSet<String>,
     undo_batch: Option<UndoBatch>,
+    downloads: Rc<RefCell<Downloads>>,
+    /// Live WebView2 operations for pause/resume/cancel; dropped on completion.
+    download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+    downloads_open: Rc<Cell<bool>>,
     popup: Option<WebView>,
     popup_state: serde_json::Map<String, serde_json::Value>,
     ui: Option<WebView>,
@@ -259,9 +290,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|d| d.data_local_dir().to_path_buf())
         })
         .ok_or("无法定位用户数据目录")?;
-    let storage = Storage::open(&data)?;
+    let mut storage = Storage::open(&data)?;
     // A malformed session is retained, and startup stops instead of overwriting it.
     let state = storage.load()?;
+    // Downloads that were running when the app quit become interruptions; the
+    // repaired list is written back so a second launch shows the same thing.
+    let downloads = Rc::new(RefCell::new(Downloads::load(
+        storage.load_downloads().unwrap_or_default(),
+    )));
+    if let Err(e) = storage.save_downloads(&downloads.borrow().items) {
+        eprintln!("Rove downloads: {e}");
+    }
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let mut app = App {
@@ -280,6 +319,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         find_open: Rc::new(Cell::new(false)),
         playing: std::collections::HashSet::new(),
         undo_batch: None,
+        downloads,
+        download_ops: Rc::new(RefCell::new(HashMap::new())),
+        downloads_open: Rc::new(Cell::new(false)),
         popup: None,
         popup_state: serde_json::Map::new(),
         ui: None,
@@ -386,6 +428,10 @@ impl App {
         if let Err(e) = self.storage.save(&self.state) {
             self.error(format!("保存会话失败：{e}"))
         }
+        // The downloads list is small; writing it on every state change already,
+        // and once more on exit keeps the final byte count of a quit download.
+        let items = self.downloads.borrow().items.clone();
+        let _ = self.storage.save_downloads(&items);
     }
     fn page(&self) -> Option<&WebView> {
         self.peek
@@ -625,7 +671,146 @@ impl App {
         self.focus_page_or_ui();
         self.toast(&format!("已恢复 {count} 个标签"), None);
     }
-    fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {        let navigation = Rc::new(NavigationPolicy {
+    fn publish_downloads(&self) {
+        let items = self.downloads.borrow_mut().publish_items();
+        self.emit(json!({"type":"downloads","items":items}));
+    }
+    fn save_downloads(&mut self) {
+        let items = self.downloads.borrow().items.clone();
+        if let Err(error) = self.storage.save_downloads(&items) {
+            self.error(error);
+        }
+    }
+    /// A cancelled or failed download leaves a partial file; Zigzag discards it
+    /// when the row goes, so Clear never leaves hidden debris behind.
+    fn discard_partial(&self, item: &DownloadItem) {
+        if matches!(item.state, DownloadState::Failed | DownloadState::Cancelled) {
+            let path = std::path::Path::new(&item.path);
+            if path.is_file() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    fn open_path(&self, path: &std::path::Path) {
+        use windows::core::w;
+        let file = HSTRING::from(path.as_os_str());
+        unsafe { ShellExecuteW(None, w!("open"), &file, None, None, SW_SHOWNORMAL) };
+    }
+    fn reveal_path(&self, path: &std::path::Path) {
+        use windows::core::w;
+        let explorer = HSTRING::from("explorer.exe");
+        let arguments = HSTRING::from(format!("/select,\"{}\"", path.display()));
+        unsafe { ShellExecuteW(None, w!("open"), &explorer, &arguments, None, SW_SHOWNORMAL) };
+    }
+    fn download_folder(&self) -> PathBuf {
+        if !self.state.settings.download_folder.is_empty() {
+            return PathBuf::from(&self.state.settings.download_folder);
+        }
+        directories::UserDirs::new()
+            .and_then(|dirs| dirs.download_dir().map(|path| path.to_path_buf()))
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+    fn download_action(&mut self, id: Option<String>, action: &str) {
+        if action == "openFolder" {
+            let folder = self.download_folder();
+            if !folder.is_dir() {
+                self.error("下载文件夹不存在");
+                return;
+            }
+            self.open_path(&folder);
+            return;
+        }
+        if action == "clearFinished" {
+            let removed = self.downloads.borrow_mut().clear_clearable();
+            for item in &removed {
+                self.discard_partial(item);
+            }
+            self.download_ops
+                .borrow_mut()
+                .retain(|id, _| self.downloads.borrow().get(id).is_some());
+            self.save_downloads();
+            self.publish_downloads();
+            return;
+        }
+        let Some(id) = id else { return };
+        let operation = self.download_ops.borrow().get(&id).cloned();
+        match action {
+            "pause" => {
+                if let Some(operation) = &operation {
+                    if let Err(error) = unsafe { operation.Pause() } {
+                        self.error(format!("无法暂停下载：{error}"));
+                        return;
+                    }
+                }
+                if let Some(item) = self.downloads.borrow_mut().get_mut(&id) {
+                    item.state = DownloadState::Paused;
+                }
+                self.save_downloads();
+                self.publish_downloads();
+            }
+            "resume" => {
+                let Some(operation) = operation else {
+                    self.error("这个下载已经无法继续");
+                    return;
+                };
+                let mut can_resume = BOOL::default();
+                let resumable = unsafe { operation.CanResume(&mut can_resume) }.is_ok()
+                    && can_resume.as_bool();
+                if !resumable {
+                    self.error("这个下载已经无法继续");
+                    return;
+                }
+                if let Err(error) = unsafe { operation.Resume() } {
+                    self.error(format!("无法继续下载：{error}"));
+                    return;
+                }
+                if let Some(item) = self.downloads.borrow_mut().get_mut(&id) {
+                    item.state = DownloadState::InProgress;
+                }
+                self.save_downloads();
+                self.publish_downloads();
+            }
+            "cancel" => {
+                if let Some(operation) = &operation {
+                    let _ = unsafe { operation.Cancel() };
+                }
+                if self.downloads.borrow_mut().get(&id).is_some() {
+                    self.downloads
+                        .borrow_mut()
+                        .finish(&id, DownloadState::Cancelled, None);
+                }
+                self.download_ops.borrow_mut().remove(&id);
+                self.save_downloads();
+                self.publish_downloads();
+            }
+            "remove" => {
+                if let Some(item) = self.downloads.borrow_mut().remove(&id) {
+                    self.discard_partial(&item);
+                }
+                self.download_ops.borrow_mut().remove(&id);
+                self.save_downloads();
+                self.publish_downloads();
+            }
+            "open" | "reveal" => {
+                let Some(item) = self.downloads.borrow().get(&id).cloned() else {
+                    return;
+                };
+                let path = PathBuf::from(&item.path);
+                if !path.is_file() {
+                    self.error("文件已被移动或删除");
+                    return;
+                }
+                if action == "open" {
+                    self.open_path(&path);
+                } else {
+                    self.reveal_path(&path);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {
+        let navigation = Rc::new(NavigationPolicy {
             bookmarked: Cell::new(tab.bookmark_id.is_some()),
             current: RefCell::new(tab.url.clone()),
             host_navigation: Cell::new(false),
@@ -663,12 +848,18 @@ impl App {
             // The script only adapts standard link opening. There is still no IPC/host API on websites.
             .build_as_child(self.window.as_ref().unwrap())?;
         crate::web_settings::apply(&view, &self.state.settings)?;
+        let shared = PageShared {
+            peek_visible: self.peek_visible.clone(),
+            find_open: self.find_open.clone(),
+            downloads_open: self.downloads_open.clone(),
+            downloads: self.downloads.clone(),
+            download_ops: self.download_ops.clone(),
+        };
         register_page_events(
             &view,
             tab.id.clone(),
             self.proxy.clone(),
-            self.peek_visible.clone(),
-            self.find_open.clone(),
+            shared,
             navigation.clone(),
             self.live_settings.clone(),
         )?;
@@ -1310,7 +1501,7 @@ impl App {
             return;
         }
         match key.as_str() {
-            "address" | "new" | "desk" | "settings" => {
+            "address" | "new" | "desk" | "settings" | "downloads" | "downloadsEscape" => {
                 if let Some(ui) = &self.ui {
                     let _ = ui.focus();
                 }
@@ -1616,6 +1807,7 @@ impl App {
                     self.error(e);
                 }
                 self.publish();
+                self.publish_downloads();
                 if let Err(e) = self.sync() {
                     self.error(e);
                 }
@@ -1834,6 +2026,16 @@ impl App {
             }
             Command::UndoBatch => {
                 self.undo_batch();
+                return;
+            }
+            Command::DownloadAction { id, action } => {
+                self.download_action(id, &action);
+                return;
+            }
+            Command::DownloadsPanel { open } => {
+                // Only used so the page accelerator knows whether Esc belongs to
+                // the panel; the UI owns its visibility.
+                self.downloads_open.set(open);
                 return;
             }
             Command::CopyText { text } => {
@@ -2131,6 +2333,17 @@ impl ApplicationHandler<Event> for App {
                 }
                 self.emit(json!({"type":"audio","id":id,"playing":playing}));
             }
+            Event::DownloadsChanged { persist } => {
+                if persist {
+                    self.save_downloads();
+                }
+                self.publish_downloads();
+            }
+            Event::DownloadStarted(id) => {
+                self.save_downloads();
+                self.publish_downloads();
+                self.emit(json!({"type":"downloadStarted","id":id}));
+            }
             Event::Command(c) => self.command(c, Some(event_loop)),
             Event::PeekRequest(source, url, point) => {
                 let eligible = self
@@ -2323,13 +2536,15 @@ fn register_page_events(
     view: &WebView,
     id: String,
     proxy: EventLoopProxy<Event>,
-    peek_visible: Rc<Cell<bool>>,
-    find_open: Rc<Cell<bool>>,
+    shared: PageShared,
     navigation: Rc<NavigationPolicy>,
     settings: Rc<RefCell<crate::settings::Settings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let p = proxy.clone();
     let shortcut_settings = settings.clone();
+    let find_open = shared.find_open.clone();
+    let peek_visible = shared.peek_visible.clone();
+    let downloads_open = shared.downloads_open.clone();
     let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
             unsafe {
@@ -2346,11 +2561,15 @@ fn register_page_events(
                 let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
                 let alt = GetKeyState(VK_MENU.0 as i32) < 0;
                 let action = if key == 27 && !ctrl && !alt && !shift {
-                    // Esc belongs to an open find bar first, then to Peek.
-                    if find_open.get() { Some("findEscape".into()) }
+                    // Esc closes the downloads panel first, then the find bar,
+                    // then Peek.
+                    if downloads_open.get() { Some("downloadsEscape".into()) }
+                    else if find_open.get() { Some("findEscape".into()) }
                     else if peek_visible.get() { Some("escape".into()) }
                     else { None }
                 }
+                    // Ctrl+J opens the downloads panel, like Chrome.
+                    else if ctrl && !alt && !shift && key == 74 { Some("downloads".into()) }
                     // Browser-standard page zoom: Ctrl+plus/minus/0, also from
                     // the OEM keys, the numpad and Ctrl+Shift+plus.
                     else if ctrl && !alt && (key == 187 || key == 107) { Some("zoomIn".into()) }
@@ -2371,11 +2590,14 @@ fn register_page_events(
         view.controller()
             .add_AcceleratorKeyPressed(&handler, &mut token)?;
     }
+    let download_downloads = shared.downloads.clone();
+    let download_ops = shared.download_ops.clone();
+    let download_proxy = proxy.clone();
     let download = DownloadStartingEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
-            let folder = settings.borrow().download_folder.clone();
-            if !folder.is_empty() {
-                unsafe {
+            unsafe {
+                let folder = settings.borrow().download_folder.clone();
+                if !folder.is_empty() {
                     let mut suggested = PWSTR::null();
                     args.ResultFilePath(&mut suggested)?;
                     let suggested = PathBuf::from(take_pwstr(suggested));
@@ -2388,6 +2610,46 @@ fn register_page_events(
                     while destination.exists() { destination = PathBuf::from(&folder).join(format!("{stem} ({index}){ext}")); index += 1; }
                     args.SetResultFilePath(&HSTRING::from(destination.as_os_str()))?;
                 }
+                // Track every download Zigzag-style: a row appears at once and
+                // the panel is revealed; progress and state arrive by events.
+                let mut path_pointer = PWSTR::null();
+                args.ResultFilePath(&mut path_pointer)?;
+                let path = PathBuf::from(take_pwstr(path_pointer));
+                let operation = args.DownloadOperation()?;
+                let mut uri = PWSTR::null();
+                operation.Uri(&mut uri)?;
+                let url = take_pwstr(uri);
+                let mut total = 0i64;
+                let _ = operation.TotalBytesToReceive(&mut total);
+                let mut received = 0i64;
+                let _ = operation.BytesReceived(&mut received);
+                let id = uuid::Uuid::new_v4().to_string();
+                let filename = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "download".into());
+                download_downloads.borrow_mut().insert(DownloadItem {
+                    id: id.clone(),
+                    url,
+                    path: path.to_string_lossy().into_owned(),
+                    filename,
+                    received: received.max(0) as u64,
+                    total: total.max(0) as u64,
+                    state: DownloadState::InProgress,
+                    failure: None,
+                    started: model::now_secs(),
+                    finished: None,
+                    exists: false,
+                });
+                download_ops.borrow_mut().insert(id.clone(), operation.clone());
+                track_download(
+                    &operation,
+                    id.clone(),
+                    download_downloads.clone(),
+                    download_ops.clone(),
+                    download_proxy.clone(),
+                )?;
+                let _ = download_proxy.send_event(Event::DownloadStarted(id));
             }
         }
         Ok(())
@@ -2537,6 +2799,112 @@ fn register_page_events(
             .cast::<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8>()?
             .add_IsDocumentPlayingAudioChanged(&audio, &mut token)?;
     }
+    Ok(())
+}
+/// Attaches Zigzag's state machine to one WebView2 download: progress ticks are
+/// coalesced for the UI, and the operation is forgotten once it can no longer
+/// be paused or resumed.
+fn track_download(
+    operation: &ICoreWebView2DownloadOperation,
+    id: String,
+    downloads: Rc<RefCell<Downloads>>,
+    ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+    proxy: EventLoopProxy<Event>,
+) -> windows::core::Result<()> {
+    let state_downloads = downloads.clone();
+    let state_ops = ops.clone();
+    let state_proxy = proxy.clone();
+    let state_id = id.clone();
+    let state = StateChangedEventHandler::create(Box::new(move |sender, _| {
+        unsafe {
+        let Some(sender) = sender else { return Ok(()) };
+        let mut code = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+        sender.State(&mut code)?;
+        let mut received = 0i64;
+        let _ = sender.BytesReceived(&mut received);
+        let mut total = 0i64;
+        let _ = sender.TotalBytesToReceive(&mut total);
+        if let Some(item) = state_downloads.borrow_mut().get_mut(&state_id) {
+            item.received = received.max(0) as u64;
+            if total > 0 {
+                item.total = total as u64;
+            }
+        }
+        if code == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+            let mut path_pointer = PWSTR::null();
+            if sender.ResultFilePath(&mut path_pointer).is_ok() {
+                let path = take_pwstr(path_pointer);
+                if let Some(item) = state_downloads.borrow_mut().get_mut(&state_id) {
+                    if !path.is_empty() {
+                        item.path = path;
+                        if let Some(name) = FilePath::new(&item.path).file_name() {
+                            item.filename = name.to_string_lossy().into_owned();
+                        }
+                    }
+                }
+            }
+            state_downloads
+                .borrow_mut()
+                .finish(&state_id, DownloadState::Finished, None);
+            state_ops.borrow_mut().remove(&state_id);
+            let _ = state_proxy.send_event(Event::DownloadsChanged { persist: true });
+        } else if code == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
+            let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
+            let _ = sender.InterruptReason(&mut reason);
+            let current = state_downloads.borrow().get(&state_id).map(|item| item.state);
+            if current == Some(DownloadState::Cancelled) || reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED {
+                state_downloads
+                    .borrow_mut()
+                    .finish(&state_id, DownloadState::Cancelled, None);
+                state_ops.borrow_mut().remove(&state_id);
+            } else if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED
+                || current == Some(DownloadState::Paused)
+            {
+                // Pausing interrupts the operation underneath; the row keeps its
+                // bytes and turns into "paused" until Resume.
+                if let Some(item) = state_downloads.borrow_mut().get_mut(&state_id) {
+                    item.state = DownloadState::Paused;
+                }
+            } else {
+                let failure = crate::downloads::interrupt_reason_text(reason);
+                state_downloads
+                    .borrow_mut()
+                    .finish(&state_id, DownloadState::Failed, Some(failure));
+                state_ops.borrow_mut().remove(&state_id);
+            }
+            let _ = state_proxy.send_event(Event::DownloadsChanged { persist: true });
+        } else {
+            let _ = state_proxy.send_event(Event::DownloadsChanged { persist: false });
+        }
+        Ok(())
+        }
+    }));
+    let mut token = 0;
+    unsafe { operation.add_StateChanged(&state, &mut token)?; }
+    let bytes_downloads = downloads;
+    let bytes_proxy = proxy;
+    let bytes_id = id;
+    let last_update = Rc::new(Cell::new(Instant::now() - Duration::from_secs(1)));
+    let bytes = BytesReceivedChangedEventHandler::create(Box::new(move |sender, _| {
+        unsafe {
+        let Some(sender) = sender else { return Ok(()) };
+        let mut received = 0i64;
+        sender.BytesReceived(&mut received)?;
+        let mut total = 0i64;
+        let _ = sender.TotalBytesToReceive(&mut total);
+        bytes_downloads
+            .borrow_mut()
+            .set_progress(&bytes_id, received.max(0) as u64, total.max(0) as u64);
+        // WebView2 can tick many times a second; the panel only needs ~8 fps.
+        let now = Instant::now();
+        if now.duration_since(last_update.get()) >= Duration::from_millis(120) {
+            last_update.set(now);
+            let _ = bytes_proxy.send_event(Event::DownloadsChanged { persist: false });
+        }
+        Ok(())
+        }
+    }));
+    unsafe { operation.add_BytesReceivedChanged(&bytes, &mut token)?; }
     Ok(())
 }
 // Window names are untrusted input. Only finite normalized click coordinates are accepted.

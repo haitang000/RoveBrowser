@@ -2,9 +2,21 @@ import { useBrowser } from "../stores/browser";
 import { SHORTCUTS, sameShortcut, shortcutFor, shortcutFromEvent } from "./settings";
 export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing) return;
+  if (e.key === "Escape" && b.downloadsOpen) {
+    e.preventDefault();
+    b.closeDownloads();
+    return;
+  }
   if (e.key === "Escape" && b.findOpen) {
     e.preventDefault();
     b.closeFind();
+    return;
+  }
+  // Ctrl+J opens/downloads panel, like Chrome. Fixed rather than a settings
+  // binding, alongside page zoom, since it is a browser convention.
+  if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "j") {
+    e.preventDefault();
+    b.toggleDownloads();
     return;
   }
   // Browser-standard page zoom. Kept outside the shortcut table because the

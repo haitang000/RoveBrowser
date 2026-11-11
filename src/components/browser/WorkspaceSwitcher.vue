@@ -20,6 +20,16 @@ defineProps<{ swipeShares?: Record<string, number> | null }>();
     >
       <Icon name="grid" :size="14" />
     </button>
+    <button
+      class="icon-button downloads-button"
+      :class="{ active: b.activeDownloads > 0 }"
+      :title="b.activeDownloads ? `下载 · ${b.activeDownloads} 个进行中 (Ctrl+J)` : '下载 (Ctrl+J)'"
+      aria-label="下载"
+      @click="b.toggleDownloads()"
+    >
+      <Icon name="download" :size="14" />
+      <span v-if="b.activeDownloads" class="downloads-badge">{{ b.activeDownloads }}</span>
+    </button>
     <div class="space-keys" :class="{ 'space-keys-tracking': swipeShares }" aria-label="工作区" title="在侧栏左右轻扫切换工作区">
       <button
         v-for="(s, i) in b.state.spaces"
