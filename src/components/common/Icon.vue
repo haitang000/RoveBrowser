@@ -37,6 +37,9 @@ const paths: Record<string, string> = {
   speaker:
     "M2 6h3l4-3v10l-4-3H2zM11 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9",
   speakerMuted: "M2 6h3l4-3v10l-4-3H2zM10.5 6l4 4M14.5 6l-4 4",
+  edit: "M2 14l1-3 8-8 2 2-8 8-3 1M9 5l2 2",
+  copy: "M5 5h8v8H5zM3 3h8v2M3 3v8h2",
+  duplicate: "M2 2h6v6H2zM8 8h6v6H8zM10 2h4v4",
 };
 </script>
 <template>

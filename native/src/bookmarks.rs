@@ -250,6 +250,8 @@ impl State {
                     favicon: f.favicon,
                     split_with: None,
                     muted: false,
+                    custom_title: None,
+                    last_activated: crate::model::now_secs(),
                 });
                 live.push(tab_id);
             }

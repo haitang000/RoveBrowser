@@ -6,6 +6,7 @@ import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, 
 import { tabsToDismiss } from "./command";
 import { sameOrigin } from "./favicon";
 import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type SettingsPane, type Settings } from "./settings";
+import { nowSeconds, tabIsFaded } from "./tab-meta";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -127,6 +128,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         title: isSettingsUrl(url) ? "设置" : host(url) || "New Tab",
         url,
         pinned: false,
+        lastActivated: nowSeconds(),
       };
       s.tabs.push(t);
       activate(t);
@@ -239,7 +241,9 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     }
     case "closeOthers":
     case "closeBelow": {
-      for (const id of tabsToDismiss(s, c.type === "closeOthers" ? "others" : "below")) {
+      // The tab menu can target a background tab; the command bar uses the active one.
+      const base = c.id ? String(c.id) : undefined;
+      for (const id of tabsToDismiss(s, c.type === "closeOthers" ? "others" : "below", base)) {
         const closing = s.tabs.find((item) => item.id === id);
         if (!closing || closing.bookmarkId) continue;
         s.closed.push({ ...closing, splitWith: undefined });
@@ -247,6 +251,56 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         s.tabs.forEach((item) => { if (item.splitWith === id) delete item.splitWith; });
       }
       s.closed = s.closed.slice(-30);
+      if (!s.tabs.some((item) => item.id === s.activeTab)) {
+        s.activeTab = "";
+        const fallback = s.tabs.filter((item) => item.spaceId === s.activeSpace).at(-1);
+        if (fallback) activate(fallback); else return reduce(s, { type: "new" });
+      }
+      break;
+    }
+    case "renameTab": {
+      const t = tab();
+      if (t && !t.bookmarkId) {
+        const title = String(c.title ?? "").trim().slice(0, 80);
+        if (title) t.customTitle = title; else delete t.customTitle;
+      }
+      break;
+    }
+    case "duplicate": {
+      const source = tab();
+      if (source && !source.bookmarkId) {
+        const duplicate: Tab = {
+          ...source,
+          id: crypto.randomUUID(),
+          splitWith: undefined,
+          lastActivated: nowSeconds(),
+        };
+        const index = s.tabs.findIndex((item) => item.id === source.id);
+        s.tabs.splice(index + 1, 0, duplicate);
+        activate(duplicate);
+      }
+      break;
+    }
+    case "clearStep": {
+      // The preview mirrors Zigzag's ladder without the native Undo batch.
+      const pages = s.tabs.filter((item) => item.spaceId === s.activeSpace && !item.bookmarkId);
+      const current = pages.find((item) => item.id === s.activeTab);
+      const partner = current?.splitWith || pages.find((item) => item.splitWith === current?.id)?.id;
+      const others = pages.filter((item) => item.id !== current?.id && item.id !== partner);
+      const now = nowSeconds();
+      const faded = others.filter((item) => tabIsFaded(item.lastActivated, now));
+      const targets = faded.length ? faded : others.length ? others : current ? [current] : [];
+      for (const target of targets) {
+        s.closed.push({ ...target, splitWith: undefined });
+        s.tabs = s.tabs.filter((item) => item.id !== target.id);
+        s.tabs.forEach((item) => { if (item.splitWith === target.id) delete item.splitWith; });
+      }
+      s.closed = s.closed.slice(-30);
+      if (!s.tabs.some((item) => item.id === s.activeTab)) {
+        s.activeTab = "";
+        const fallback = s.tabs.filter((item) => item.spaceId === s.activeSpace).at(-1);
+        if (fallback) activate(fallback); else return reduce(s, { type: "new" });
+      }
       break;
     }
   }

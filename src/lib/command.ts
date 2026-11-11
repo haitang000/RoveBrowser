@@ -4,6 +4,7 @@
 // Windows app can run, selectable search engines, and a reduced public-suffix list.
 import type { BrowserState, HistoryEntry, Tab } from "./types";
 import { isSettingsUrl, normalizeSettingsUrl, searchName } from "./settings";
+import { tabDisplayTitle } from "./tab-meta";
 
 export const COMMAND_LIMIT = 8;
 const LOCAL_TLDS = new Set(["local", "lan", "internal", "test", "localhost", "home", "arpa", "corp", "intranet"]);
@@ -193,16 +194,17 @@ function partnerId(state: BrowserState, id: string): string | undefined {
   const tab = state.tabs.find((item) => item.id === id);
   return tab?.splitWith || state.tabs.find((item) => item.splitWith === id)?.id;
 }
-function regularIds(state: BrowserState): string[] {
-  return state.tabs.filter((tab) => tab.spaceId === state.activeSpace && !tab.bookmarkId).map((tab) => tab.id);
+function regularIds(state: BrowserState, spaceId = state.activeSpace): string[] {
+  return state.tabs.filter((tab) => tab.spaceId === spaceId && !tab.bookmarkId).map((tab) => tab.id);
 }
-export function tabsToDismiss(state: BrowserState, mode: "others" | "below"): string[] {
-  const active = state.tabs.find((tab) => tab.id === state.activeTab);
-  const pages = regularIds(state);
-  const partner = active ? partnerId(state, active.id) : undefined;
-  if (!active || active.bookmarkId) return mode === "others" ? pages.filter((id) => id !== partner) : pages;
-  if (mode === "others") return pages.filter((id) => id !== active.id && id !== partner);
-  const last = findLastIndex(pages, (id) => id === active.id || id === partner);
+/** Tabs Close Others/Below would remove for the active tab or an explicit base tab. */
+export function tabsToDismiss(state: BrowserState, mode: "others" | "below", baseId?: string): string[] {
+  const anchor = baseId ? state.tabs.find((tab) => tab.id === baseId) : state.tabs.find((tab) => tab.id === state.activeTab);
+  const pages = regularIds(state, anchor?.spaceId ?? state.activeSpace);
+  const partner = anchor ? partnerId(state, anchor.id) : undefined;
+  if (!anchor || anchor.bookmarkId) return mode === "others" ? pages.filter((id) => id !== partner) : pages;
+  if (mode === "others") return pages.filter((id) => id !== anchor.id && id !== partner);
+  const last = findLastIndex(pages, (id) => id === anchor.id || id === partner);
   return pages.slice(last + 1);
 }
 export function commandContext(state: BrowserState, recent: string[]): CommandContext {
@@ -220,7 +222,7 @@ export function commandContext(state: BrowserState, recent: string[]): CommandCo
     isPinned: Boolean(saved && !favorite),
     isFavorite: favorite,
     inSplit: Boolean(partner),
-    splitPartner: splitPartner ? { id: splitPartner.id, title: splitPartner.title } : undefined,
+    splitPartner: splitPartner ? { id: splitPartner.id, title: tabDisplayTitle(splitPartner) } : undefined,
     canMove: Boolean(active && !active.bookmarkId && active.url && active.url !== "era://newtab"),
     hasOtherTabs: active?.bookmarkId ? pages.length > 0 : pages.some((id) => id !== active?.id && id !== partner),
     hasTabsBelow: active?.bookmarkId ? pages.length > 0 : last >= 0 && pages.length > last + 1,
@@ -254,7 +256,7 @@ export function rankCommands(text: string, input: {
     const tabs = input.recent.map((id) => input.state.tabs.find((tab) => tab.id === id)).filter((tab): tab is Tab => Boolean(tab));
     for (const tab of tabs) {
       if (results.length >= 6 || tab.id === input.state.activeTab || !tab.url || tab.url === "era://newtab") continue;
-      add(row({ type: "switchTo", id: tab.id }, tab.title, displayUrl(tab.url), "globe", "Switch to Tab", normalizeKey(tab.url)));
+      add(row({ type: "switchTo", id: tab.id }, tabDisplayTitle(tab), displayUrl(tab.url), "globe", "Switch to Tab", normalizeKey(tab.url)));
     }
     return results;
   }
@@ -280,10 +282,10 @@ export function rankCommands(text: string, input: {
   let tabCount = 0;
   const ordered = [...input.recent.map((id) => input.state.tabs.find((tab) => tab.id === id)), ...input.state.tabs].filter((tab): tab is Tab => Boolean(tab));
   for (const tab of ordered) {
-    if (tabCount >= 3 || !tab.url || tab.url === "era://newtab" || !containsWords(words, tab.title, tab.url)) continue;
+    if (tabCount >= 3 || !tab.url || tab.url === "era://newtab" || !containsWords(words, tabDisplayTitle(tab), tab.url)) continue;
     const key = normalizeKey(tab.url);
     if (seen.has(key)) continue;
-    add(row({ type: "switchTo", id: tab.id }, tab.title, displayUrl(tab.url), "globe", "Switch to Tab", key));
+    add(row({ type: "switchTo", id: tab.id }, tabDisplayTitle(tab), displayUrl(tab.url), "globe", "Switch to Tab", key));
     tabCount++;
   }
   let marks = 0;

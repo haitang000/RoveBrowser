@@ -3,6 +3,7 @@
 import type { BrowserState, Rect } from "./types";
 import { liveTab, savedPage } from "./bookmarks";
 import { isSettingsUrl } from "./settings";
+import { tabDisplayTitle } from "./tab-meta";
 
 export const TAB_PREVIEW = { delay: 600, hideDelay: 120, refresh: 1000, width: 320, caption: 48, enter: 160, leave: 120, reduced: 80, ease: "cubic-bezier(0.23, 1, 0.32, 1)" };
 export interface PreviewPage {
@@ -28,7 +29,7 @@ export function previewPages(state: BrowserState, id: string): PreviewPage[] {
     });
   } else if (tab && tab.spaceId === state.activeSpace) {
     pages = state.tabs.filter((t) => t.id === tab.id || t.id === tab.splitWith || t.splitWith === tab.id)
-      .map((t) => ({ key: t.id, tabId: t.id, title: t.title, url: t.url, favicon: t.favicon }));
+      .map((t) => ({ key: t.id, tabId: t.id, title: tabDisplayTitle(t), url: t.url, favicon: t.favicon }));
   } else return [];
   // Splitting two existing saved items does not yet change their library groups.
   // Still show the runtime pair, including a one-way splitWith relationship.
@@ -37,7 +38,7 @@ export function previewPages(state: BrowserState, id: string): PreviewPage[] {
     const partner = state.tabs.find((t) => t.id === live.splitWith || t.splitWith === live.id);
     if (partner) {
       const mark = partner.bookmarkId ? savedPage(state, partner.bookmarkId) : undefined;
-      pages.push({ key: mark?.id || partner.id, tabId: partner.id, title: mark?.title || partner.title, url: partner.url, favicon: partner.favicon });
+      pages.push({ key: mark?.id || partner.id, tabId: partner.id, title: mark?.title || tabDisplayTitle(partner), url: partner.url, favicon: partner.favicon });
     }
   }
   const active = state.tabs.find((t) => t.id === state.activeTab);

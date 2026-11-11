@@ -2,6 +2,7 @@
 mod bookmarks;
 mod caption;
 mod capture;
+mod clipboard;
 mod clip;
 mod favicon;
 mod find;

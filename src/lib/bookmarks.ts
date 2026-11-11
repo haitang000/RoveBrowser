@@ -3,6 +3,7 @@ import type { BrowserState, Command, Favorite, Tab } from "./types";
 import { favoriteUrl, MAX_FAVORITES } from "./favorites";
 import { sameOrigin } from "./favicon";
 import { normalizeSettingsUrl } from "./settings";
+import { nowSeconds } from "./tab-meta";
 
 export function samePinnedUrl(a: string, b: string) {
   const key = (input: string) => {
@@ -58,6 +59,8 @@ export function upgradeLibrary(s: BrowserState) {
   for (const t of s.tabs) {
     const pin = s.pins.find((f) => f.id === t.bookmarkId);
     if (pin) { t.pinned = true; t.spaceId = pin.spaceId!; }
+    // Older sessions have no tab age; treat them as fresh, as the native repair does.
+    if (!t.lastActivated) t.lastActivated = nowSeconds();
   }
   return s;
 }
@@ -74,6 +77,7 @@ export function activateTab(s: BrowserState, t?: Tab) {
     if (other) other.spaceId = s.activeSpace;
   }
   s.activeTab = t.id; s.activeSpace = t.spaceId;
+  t.lastActivated = nowSeconds();
 }
 export function openBookmark(s: BrowserState, id: string) {
   const marks = group(s, id);
@@ -83,7 +87,7 @@ export function openBookmark(s: BrowserState, id: string) {
   const tabs = marks.map((f) => {
     let t = liveTab(s, f.id);
     if (!t) {
-      t = { id: crypto.randomUUID(), spaceId: f.spaceId || s.activeSpace, title: f.title, url: f.url, favicon: f.favicon, pinned: !!f.spaceId, bookmarkId: f.id };
+      t = { id: crypto.randomUUID(), spaceId: f.spaceId || s.activeSpace, title: f.title, url: f.url, favicon: f.favicon, pinned: !!f.spaceId, bookmarkId: f.id, lastActivated: nowSeconds() };
       s.tabs.push(t);
     }
     return t;

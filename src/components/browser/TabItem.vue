@@ -6,11 +6,18 @@ import Icon from "../common/Icon.vue";
 import { computed } from "vue";
 import { savedPage, samePinnedUrl } from "../../lib/bookmarks";
 import { isSettingsUrl } from "../../lib/settings";
-const props = defineProps<{ tab: Tab }>();
+import { tabDisplayTitle, tabFreshness } from "../../lib/tab-meta";
+const props = defineProps<{ tab: Tab; doomed?: boolean }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser();
 const playing = computed(() => Boolean(b.audio[props.tab.id]));
 const muted = computed(() => Boolean(props.tab.muted));
+const title = computed(() => tabDisplayTitle(props.tab));
+// Zigzag's aging: freshly used tabs stay full, days-old tabs rest at 42%. The
+// Clear button previews what it would close by sinking those rows further.
+const fade = computed(() =>
+  props.doomed ? 0.18 : tabFreshness(props.tab.lastActivated, b.now),
+);
 function toggleMute() {
   b.toggleMute(props.tab);
 }
@@ -40,13 +47,14 @@ function drop(e: DragEvent) {
     class="tab-row"
     :data-tab-id="tab.id"
     :data-bookmark-id="tab.bookmarkId"
-    :class="{ selected: b.state.activeTab === tab.id, loading: tab.loading, unloaded: tab.unloaded }"
+    :class="{ selected: b.state.activeTab === tab.id, loading: tab.loading, unloaded: tab.unloaded, doomed }"
     role="tab"
-    :aria-label="tab.title"
+    :aria-label="title"
     :aria-selected="b.state.activeTab === tab.id"
     :tabindex="b.state.activeTab === tab.id ? 0 : -1"
     :title="b.previewTarget === (tab.bookmarkId || tab.id) ? undefined : tab.url"
     :aria-describedby="b.previewTarget === (tab.bookmarkId || tab.id) ? 'tab-hover-preview' : undefined"
+    :style="{ '--tab-freshness': fade }"
     draggable="true"
     @dragstart="drag($event, tab.id)"
     @dragend="b.dragging = false"
@@ -63,19 +71,19 @@ function drop(e: DragEvent) {
         v-else
         :url="tab.url"
         :favicon="tab.favicon" /></span
-    ><span class="tab-title">{{ tab.title }}</span
+    ><span class="tab-title">{{ title }}</span
     ><button
       v-if="playing || muted"
       class="tab-audio"
       :class="{ muted }"
-      :aria-label="muted ? `取消静音 ${tab.title}` : `静音 ${tab.title}`"
+      :aria-label="muted ? `取消静音 ${title}` : `静音 ${title}`"
       :title="muted ? '取消静音标签页' : '静音标签页'"
       @click.stop="toggleMute"
     >
       <Icon :name="muted ? 'speakerMuted' : 'speaker'" :size="12" />
     </button><button
       class="tab-close"
-      :aria-label="`${away() ? '返回固定网址' : tab.pinned ? '卸载' : '关闭'} ${tab.title}`"
+      :aria-label="`${away() ? '返回固定网址' : tab.pinned ? '卸载' : '关闭'} ${title}`"
       :title="away() ? '返回固定网址' : tab.pinned ? '卸载网页（保留固定项）' : '关闭标签页'"
       :disabled="tab.unloaded"
       @click.stop="close"

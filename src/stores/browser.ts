@@ -12,6 +12,7 @@ import type {
 } from "../lib/types";
 import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
+import { nowSeconds } from "../lib/tab-meta";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 export const useBrowser = defineStore("browser", () => {
@@ -55,9 +56,17 @@ export const useBrowser = defineStore("browser", () => {
     findFocusTicket = ref(0),
     pageZoom = ref(1),
     audio = ref<Record<string, boolean>>({}),
-    zoomNotice = ref<{ ticket: number; factor: number } | null>(null);
+    zoomNotice = ref<{ ticket: number; factor: number } | null>(null),
+    actionToast = ref<{ ticket: number; message: string; action?: string } | null>(null),
+    /** Clock for tab fading and the Clear button's stale check. */
+    now = ref(nowSeconds());
   let zoomNoticeTimer: ReturnType<typeof setTimeout> | undefined;
   let zoomNoticeTicket = 0;
+  let actionToastTimer: ReturnType<typeof setTimeout> | undefined;
+  let actionToastTicket = 0;
+  // Aging is displayed in minutes, so a minute tick is enough; the popup layer
+  // never renders tabs and does not need its own interval.
+  if (!popupWindow) setInterval(() => { now.value = nowSeconds(); }, 60_000);
   const active = computed(() =>
     state.value.tabs.find((t) => t.id === state.value.activeTab),
   );
@@ -181,10 +190,19 @@ export const useBrowser = defineStore("browser", () => {
         if (!url.startsWith("http")) throw Error("Peek 仅支持网页");
         peek.value = { ...peek.value, url, title: host(url) };
       } else {
+        const before = new Set(state.value.tabs.map((tab) => tab.id));
         state.value = reduce(
           structuredClone(JSON.parse(JSON.stringify(state.value))),
           c,
         );
+        // The native host confirms batch closes with an action toast; the
+        // standalone preview mirrors the message without the undo batch.
+        if (["clearStep", "closeOthers", "closeBelow"].includes(c.type)) {
+          const removed = [...before].filter(
+            (id) => !state.value.tabs.some((tab) => tab.id === id),
+          ).length;
+          if (removed > 0) notify(`已关闭 ${removed} 个标签`);
+        }
         if (
           [
             "new",
@@ -271,6 +289,18 @@ export const useBrowser = defineStore("browser", () => {
     zoomNoticeTimer = setTimeout(() => {
       zoomNotice.value = null;
     }, 1200);
+  }
+  /** Bottom action toast: Clear/Close batch confirms and the Copy-link hint. */
+  function notify(message: string, action?: string, duration = 2400) {
+    actionToast.value = { ticket: ++actionToastTicket, message, action };
+    clearTimeout(actionToastTimer);
+    actionToastTimer = setTimeout(() => {
+      actionToast.value = null;
+    }, duration);
+  }
+  function dismissToast() {
+    actionToast.value = null;
+    clearTimeout(actionToastTimer);
   }
   window.__ERA_RECEIVE__ = (e) => {
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
@@ -367,6 +397,8 @@ export const useBrowser = defineStore("browser", () => {
     }
     if (e.type === "audio" && e.id && typeof e.playing === "boolean")
       audio.value = { ...audio.value, [e.id]: e.playing };
+    if (e.type === "toast" && e.message)
+      notify(e.message, e.action, e.action === "undoBatch" ? 4000 : 2400);
     if (e.type === "shortcut") {
       if (e.action === "address") openCommand("edit");
       if (e.action === "new") openCommand();
@@ -464,6 +496,10 @@ export const useBrowser = defineStore("browser", () => {
     zoomNotice,
     zoom,
     toggleMute,
+    actionToast,
+    notify,
+    dismissToast,
+    now,
     active,
     space,
     tabs,

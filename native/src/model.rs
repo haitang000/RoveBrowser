@@ -7,6 +7,15 @@ pub const MAX_FAVORITES: usize = 8;
 pub const ZOOM_STEPS: [f64; 13] = [
     0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
 ];
+/// Zigzag's `Tokens.Fade.start`: a regular tab starts fading after this long.
+pub const TAB_FADE_AFTER_SECS: u64 = 6 * 60 * 60;
+
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +36,13 @@ pub struct Tab {
     /// The tab's sound is muted, as Chrome and Zigzag's `setMuted`.
     #[serde(default)]
     pub muted: bool,
+    /// A rename from the tab's context menu; the page title stays in `title`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_title: Option<String>,
+    /// Unix seconds the tab was last shown. Drives fading and Clear; an older
+    /// session without it is refreshed by `repair` rather than treated as ancient.
+    #[serde(default)]
+    pub last_activated: u64,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Space {
@@ -84,9 +100,15 @@ pub struct State {
 fn default_borderless() -> bool {
     true
 }
+/// What the sidebar's Clear button would remove right now.
+#[derive(Clone, Debug, Default)]
+pub struct ClearPlan {
+    pub ids: Vec<String>,
+    /// At least one target is stale, so the UI says "Clear old".
+    pub faded: bool,
+}
 #[derive(Clone, Copy, Deserialize, Debug, Default)]
-pub struct Rect {
-    pub x: f64,
+pub struct Rect {    pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
@@ -286,9 +308,30 @@ pub enum Command {
     #[serde(rename = "suggest")]
     Suggest { query: String, ticket: u64 },
     #[serde(rename = "closeOthers")]
-    CloseOthers,
+    CloseOthers {
+        #[serde(default)]
+        id: Option<String>,
+    },
     #[serde(rename = "closeBelow")]
-    CloseBelow,
+    CloseBelow {
+        #[serde(default)]
+        id: Option<String>,
+    },
+    /// Rename a regular tab; an empty title restores the page title.
+    #[serde(rename = "renameTab")]
+    RenameTab { id: String, title: Option<String> },
+    /// Open a new tab with the same URL right after the source tab.
+    #[serde(rename = "duplicate")]
+    Duplicate { id: String },
+    /// Write trusted UI text (a tab URL) to the Windows clipboard.
+    #[serde(rename = "copyText")]
+    CopyText { text: String },
+    /// Zigzag's sidebar Clear: close faded tabs, else others, else this pair.
+    #[serde(rename = "clearStep")]
+    ClearStep,
+    /// Restore the batch the last Clear/Close Others/Close Below removed.
+    #[serde(rename = "undoBatch")]
+    UndoBatch,
     #[serde(rename = "findOpen")]
     FindOpen,
     #[serde(rename = "findClose")]
@@ -496,9 +539,10 @@ impl State {
                 t.space_id = self.active_space.clone();
             }
         }
-        if let Some(t) = self.tabs.iter().find(|t| t.id == id) {
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
             self.active_tab = t.id.clone();
-            self.active_space = t.space_id.clone()
+            self.active_space = t.space_id.clone();
+            t.last_activated = now_secs();
         }
     }
     pub fn new_tab(&mut self, input: &str) -> Result<(), String> {
@@ -523,6 +567,8 @@ impl State {
             favicon: None,
             split_with: None,
             muted: false,
+            custom_title: None,
+            last_activated: now_secs(),
         });
         self.active_tab = id;
         Ok(())
@@ -536,36 +582,81 @@ impl State {
                 .map(|tab| tab.id.clone())
         })
     }
-    fn regular_pages(&self) -> Vec<String> {
+    fn regular_pages_in(&self, space_id: &str) -> Vec<String> {
         self.tabs
             .iter()
-            .filter(|tab| tab.space_id == self.active_space && tab.bookmark_id.is_none())
+            .filter(|tab| tab.space_id == space_id && tab.bookmark_id.is_none())
             .map(|tab| tab.id.clone())
             .collect()
     }
-    /// `below` closes regular tabs under the current one. Otherwise it closes the other regular tabs.
-    /// A pinned page treats every regular tab as both other and below. A split partner stays.
-    fn tabs_to_dismiss(&self, below: bool) -> Vec<String> {
-        let pages = self.regular_pages();
-        let active = self.active();
-        let partner = active.and_then(|tab| self.partner_of(&tab.id));
-        let pinned = active.is_some_and(|tab| tab.bookmark_id.is_some());
-        if pinned {
+    /// `below` closes regular tabs under the base tab (the active one when no id
+    /// is given). Otherwise it closes the other regular tabs. A pinned page
+    /// treats every regular tab as both other and below. A split partner stays.
+    pub fn tabs_to_dismiss(&self, below: bool, base: Option<&str>) -> Vec<String> {
+        let anchor = base
+            .and_then(|id| self.tabs.iter().find(|tab| tab.id == id))
+            .or_else(|| self.active());
+        let Some(anchor) = anchor else { return vec![] };
+        let pages = self.regular_pages_in(&anchor.space_id);
+        let partner = self.partner_of(&anchor.id);
+        if anchor.bookmark_id.is_some() {
             return if below {
                 pages
             } else {
                 pages.into_iter().filter(|id| Some(id) != partner.as_ref()).collect()
             };
         }
-        let Some(active) = active else { return vec![] };
         if !below {
             return pages
                 .into_iter()
-                .filter(|id| id != &active.id && Some(id) != partner.as_ref())
+                .filter(|id| id != &anchor.id && Some(id) != partner.as_ref())
                 .collect();
         }
-        let last = pages.iter().rposition(|id| id == &active.id || Some(id) == partner.as_ref());
+        let last = pages
+            .iter()
+            .rposition(|id| id == &anchor.id || Some(id) == partner.as_ref());
         pages.into_iter().skip(last.map(|index| index + 1).unwrap_or(0)).collect()
+    }
+    /// Zigzag's three-step sidebar Clear. Faded regular tabs go first; while
+    /// sound is playing the tab is never considered stale, as in Zigzag.
+    pub fn clear_targets(&self, playing: &std::collections::HashSet<String>, now: u64) -> ClearPlan {
+        let pages: Vec<&Tab> = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.space_id == self.active_space && tab.bookmark_id.is_none())
+            .collect();
+        let current = self.active().filter(|tab| tab.bookmark_id.is_none());
+        let current_id = current.map(|tab| tab.id.clone());
+        let partner = current.and_then(|tab| self.partner_of(&tab.id));
+        let others: Vec<&Tab> = pages
+            .iter()
+            .copied()
+            .filter(|tab| Some(&tab.id) != current_id.as_ref() && Some(&tab.id) != partner.as_ref())
+            .collect();
+        let faded: Vec<String> = others
+            .iter()
+            .filter(|tab| {
+                now.saturating_sub(tab.last_activated) > TAB_FADE_AFTER_SECS
+                    && !playing.contains(&tab.id)
+            })
+            .map(|tab| tab.id.clone())
+            .collect();
+        if !faded.is_empty() {
+            return ClearPlan { ids: faded, faded: true };
+        }
+        if !others.is_empty() {
+            return ClearPlan {
+                ids: others.iter().map(|tab| tab.id.clone()).collect(),
+                faded: false,
+            };
+        }
+        // Last step: the tab being looked at and its split partner.
+        let ids = current_id
+            .into_iter()
+            .chain(partner)
+            .filter(|id| self.tabs.iter().any(|tab| &tab.id == id))
+            .collect();
+        ClearPlan { ids, faded: false }
     }
     pub fn close(&mut self, id: &str) {
         if let Some(i) = self.tabs.iter().position(|t| t.id == id) {
@@ -600,6 +691,9 @@ impl State {
                     .unwrap_or_default();
                 if self.active_tab.is_empty() {
                     let _ = self.new_tab("");
+                } else if let Some(t) = self.tabs.iter_mut().find(|t| t.id == self.active_tab) {
+                    // The tab that takes over the empty pane is being looked at.
+                    t.last_activated = now_secs();
                 }
             }
         }
@@ -626,8 +720,14 @@ impl State {
         }
         self.repair_bookmarks();
         let ids: Vec<_> = self.tabs.iter().map(|t| t.id.clone()).collect();
+        let now = now_secs();
         for t in &mut self.tabs {
             t.loading = false;
+            // Sessions written before tab aging have no timestamp; treat them as
+            // fresh so switching to this build never sweeps real tabs away.
+            if t.last_activated == 0 || t.last_activated > now + 86_400 {
+                t.last_activated = now;
+            }
             if !self.spaces.iter().any(|s| s.id == t.space_id) {
                 t.space_id = self.active_space.clone()
             }
@@ -717,15 +817,38 @@ impl State {
                 }
             }
             Command::Close { id } => self.close(&id.clone().unwrap_or(self.active_tab.clone())),
-            Command::CloseOthers => {
-                for id in self.tabs_to_dismiss(false) {
-                    self.close(&id);
+            Command::CloseOthers { id } => {
+                let base = id.clone().or_else(|| Some(self.active_tab.clone()));
+                let targets = self.tabs_to_dismiss(false, base.as_deref());
+                for id in targets { self.close(&id); }
+            }
+            Command::CloseBelow { id } => {
+                let base = id.clone().or_else(|| Some(self.active_tab.clone()));
+                let targets = self.tabs_to_dismiss(true, base.as_deref());
+                for id in targets { self.close(&id); }
+            }
+            Command::RenameTab { id, title } => {
+                let value = title.clone().unwrap_or_default().trim().to_string();
+                if value.chars().count() > 80 { return Err("标签名称最多 80 个字符".into()); }
+                if let Some(tab) = self.tabs.iter_mut().find(|tab| &tab.id == id && tab.bookmark_id.is_none()) {
+                    tab.custom_title = (!value.is_empty()).then_some(value);
                 }
             }
-            Command::CloseBelow => {
-                for id in self.tabs_to_dismiss(true) {
-                    self.close(&id);
-                }
+            Command::Duplicate { id } => {
+                let Some(source) = self.tabs.iter().find(|tab| &tab.id == id && tab.bookmark_id.is_none()).cloned() else { return Ok(()); };
+                let index = self.tabs.iter().position(|tab| tab.id == source.id).unwrap_or(0);
+                let space = source.space_id.clone();
+                self.new_tab(&source.url)?;
+                let Some(mut duplicate) = self.tabs.pop() else { return Ok(()); };
+                duplicate.space_id = space.clone();
+                duplicate.title = source.title;
+                duplicate.custom_title = source.custom_title;
+                duplicate.muted = source.muted;
+                duplicate.last_activated = now_secs();
+                let position = (index + 1).min(self.tabs.len());
+                self.tabs.insert(position, duplicate.clone());
+                self.active_space = space;
+                self.active_tab = duplicate.id;
             }
             Command::Restore => {
                 if let Some(mut t) = self.closed.pop() {
@@ -736,6 +859,7 @@ impl State {
                     if !self.spaces.iter().any(|s| s.id == t.space_id) {
                         t.space_id = self.active_space.clone()
                     }
+                    t.last_activated = now_secs();
                     self.tabs.push(t);
                     self.activate(&id)
                 }
@@ -1045,13 +1169,13 @@ mod tests {
         let beta = s.active_tab.clone();
         let alpha = s.tabs.iter().find(|tab| tab.url.contains("alpha")).unwrap().id.clone();
         s.activate(&alpha);
-        s.apply(&Command::CloseBelow).unwrap();
+        s.apply(&Command::CloseBelow { id: None }).unwrap();
         assert!(s.tabs.iter().all(|tab| tab.id != beta));
         assert!(s.tabs.iter().any(|tab| tab.id == alpha));
         assert!(s.tabs.iter().any(|tab| tab.bookmark_id.is_some()));
         s.new_tab("https://gamma.example").unwrap();
         s.activate(&alpha);
-        s.apply(&Command::CloseOthers).unwrap();
+        s.apply(&Command::CloseOthers { id: None }).unwrap();
         assert_eq!(s.active_tab, alpha);
         assert!(s.tabs.iter().filter(|tab| tab.bookmark_id.is_none()).all(|tab| tab.id == alpha));
     }
@@ -1098,6 +1222,119 @@ mod tests {
         let old: State = serde_json::from_value(value).unwrap();
         assert!(!old.tabs[0].muted);
         assert!(old.site_zoom.is_empty());
+    }
+    fn tab_for_test(id: &str, space: &str, last: u64) -> Tab {
+        Tab {
+            id: id.into(),
+            space_id: space.into(),
+            title: id.into(),
+            url: format!("https://{id}.example/"),
+            pinned: false,
+            bookmark_id: None,
+            loading: false,
+            favicon: None,
+            split_with: None,
+            muted: false,
+            custom_title: None,
+            last_activated: last,
+        }
+    }
+    #[test]
+    fn clear_ladder_prefers_faded_tabs_and_never_stale_audio() {
+        let now = 1_000_000;
+        let old = now - TAB_FADE_AFTER_SECS - 5;
+        let mut state = State::default();
+        state.tabs.clear();
+        state.active_space = "personal".into();
+        state.active_tab = "current".into();
+        state.tabs.push(tab_for_test("current", "personal", now));
+        state.tabs.push(tab_for_test("old1", "personal", old));
+        state.tabs.push(tab_for_test("old2", "personal", old));
+        state.tabs.push(tab_for_test("fresh", "personal", now));
+        // A tab playing sound is never swept away, even when it is old.
+        let mut playing: std::collections::HashSet<String> = ["old2".to_string()].into();
+        let plan = state.clear_targets(&playing, now);
+        assert_eq!(plan.ids, vec!["old1"]);
+        assert!(plan.faded);
+        playing.clear();
+        assert_eq!(state.clear_targets(&playing, now).ids, vec!["old1", "old2"]);
+        // Nothing faded: Clear moves on to the other tabs.
+        for tab in &mut state.tabs[1..] {
+            tab.last_activated = now;
+        }
+        let plan = state.clear_targets(&playing, now);
+        assert!(!plan.faded);
+        assert_eq!(plan.ids, vec!["old1", "old2", "fresh"]);
+        // The split partner stays with the current tab until the last step.
+        state.tabs[1].split_with = Some("current".into());
+        state.tabs[0].split_with = Some("old1".into());
+        assert_eq!(state.clear_targets(&playing, now).ids, vec!["old2", "fresh"]);
+        state.tabs.retain(|tab| tab.id == "current" || tab.id == "old1");
+        let plan = state.clear_targets(&playing, now);
+        assert_eq!(plan.ids, vec!["current", "old1"]);
+        assert!(!plan.faded);
+    }
+    #[test]
+    fn renaming_duplicating_and_explicit_close_targets_work() {
+        let mut state = State::default();
+        state.tabs.clear();
+        state.active_space = "personal".into();
+        state.active_tab = "a".into();
+        state.tabs.push(tab_for_test("a", "personal", 1));
+        state.tabs.push(tab_for_test("b", "personal", 1));
+        state
+            .apply(&Command::RenameTab {
+                id: "a".into(),
+                title: Some("  我的标签  ".into()),
+            })
+            .unwrap();
+        assert_eq!(state.tabs[0].custom_title.as_deref(), Some("我的标签"));
+        assert!(state
+            .apply(&Command::RenameTab {
+                id: "a".into(),
+                title: Some("x".repeat(81)),
+            })
+            .is_err());
+        state
+            .apply(&Command::RenameTab {
+                id: "a".into(),
+                title: Some("  ".into()),
+            })
+            .unwrap();
+        assert_eq!(state.tabs[0].custom_title, None);
+        state.apply(&Command::Duplicate { id: "a".into() }).unwrap();
+        assert_eq!(state.tabs.len(), 3);
+        let duplicate = state.tabs[1].clone();
+        assert_eq!(duplicate.url, state.tabs[0].url);
+        assert_eq!(state.active_tab, duplicate.id);
+        assert_eq!(state.tabs[2].id, "b");
+        // An explicit base tab lets the menu target a background tab.
+        state.apply(&Command::CloseOthers { id: Some("b".into()) }).unwrap();
+        assert_eq!(state.tabs.len(), 1);
+        assert_eq!(state.tabs[0].id, "b");
+        state.tabs.push(tab_for_test("c", "personal", 1));
+        state.tabs.push(tab_for_test("d", "personal", 1));
+        state.active_tab = "d".into();
+        state.apply(&Command::CloseBelow { id: Some("b".into()) }).unwrap();
+        assert_eq!(state.tabs.len(), 1);
+        assert_eq!(state.tabs[0].id, "b");
+    }
+    #[test]
+    fn legacy_tabs_get_a_fresh_age_and_activation_touches_it() {
+        let mut state = State::default();
+        state.tabs[0].last_activated = 0;
+        state.repair();
+        let now = now_secs();
+        assert!(state.tabs[0].last_activated > 0);
+        assert!((now.saturating_sub(state.tabs[0].last_activated)) < 60);
+        state.new_tab("https://example.com").unwrap();
+        let created = state.tabs.last().unwrap();
+        assert!(now.saturating_sub(created.last_activated) < 60);
+        let id = created.id.clone();
+        state.tabs.iter_mut().find(|tab| tab.id == id).unwrap().last_activated = 1;
+        state.activate(&id);
+        let activated = state.tabs.iter().find(|tab| tab.id == id).unwrap();
+        assert!(now.saturating_sub(activated.last_activated) < 60);
     }
     #[test]
     fn borderless_defaults_on_and_glass_survives_a_session() {

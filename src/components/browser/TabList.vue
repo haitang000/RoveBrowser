@@ -2,7 +2,7 @@
 import type { Tab } from "../../lib/types";
 import TabItem from "./TabItem.vue";
 
-defineProps<{ tabs: Tab[] }>();
+defineProps<{ tabs: Tab[]; doomedIds?: string[] }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 
 function beforeLeave(element: Element) {
@@ -30,6 +30,7 @@ function beforeLeave(element: Element) {
       v-for="tab in tabs"
       :key="tab.bookmarkId || tab.id"
       :tab="tab"
+      :doomed="doomedIds?.includes(tab.id)"
       @menu="(event, tab) => emit('menu', event, tab)"
     />
   </TransitionGroup>

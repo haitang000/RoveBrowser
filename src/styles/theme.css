@@ -421,6 +421,20 @@ kbd {
 .tab-row:focus-within .tab-close {
   visibility: visible;
 }
+/* Zigzag tab aging: untouched tabs ease from full ink down to 42% after six
+ * hours and four days. The selected or hovered row returns to full strength. */
+.tab-picture,
+.tab-title {
+  transition: opacity 320ms var(--ease-out);
+}
+.tab-row:not(:hover):not(.selected):not(:focus-within) .tab-picture,
+.tab-row:not(:hover):not(.selected):not(:focus-within) .tab-title {
+  opacity: var(--tab-freshness, 1);
+}
+.tab-row.doomed .tab-picture,
+.tab-row.doomed .tab-title {
+  opacity: 0.18;
+}
 /* Zigzag's speaker on a tab that is playing sound or muted (SidebarRows.audio). */
 .tab-audio {
   height: 20px;
@@ -451,6 +465,50 @@ kbd {
 .section-label span:last-child {
   font-variant-numeric: tabular-nums;
   color: var(--tertiary);
+}
+/* Zigzag's Clear sits at the end of the Tabs label and appears on hover. It
+ * arms after 350ms and previews the rows it would close. */
+.section-label-end {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.clear-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  opacity: 0;
+  pointer-events: none;
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 500;
+  transition: opacity 140ms var(--ease-out), color 140ms var(--ease-out),
+    background 140ms var(--ease-out);
+}
+.space-list:hover .clear-tabs,
+.clear-tabs:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.clear-tabs:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.clear-tabs.armed {
+  color: var(--ink);
+}
+.clear-tabs.armed::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.tab-count {
+  font-variant-numeric: tabular-nums;
 }
 .new-tab {
   width: 100%;
@@ -964,6 +1022,19 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
 .menu-zoom button:disabled {
   opacity: 0.4;
 }
+.context-menu button small {
+  margin-left: auto;
+  color: var(--tertiary);
+  font-variant-numeric: tabular-nums;
+}
+/* The tab menu opens with the tab's displayed name, so a rename is visible. */
+.menu-tab-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-bottom: 6px;
+  color: var(--ink);
+}
 /* Zigzag's zoom Toast: a small capsule near the page's top. The wrapper keeps
  * the layout box (and so the native popup region) still; the capsule inside
  * drops in from above and slides back up on the way out. */
@@ -1019,6 +1090,65 @@ html[data-reduce-motion="true"] .zoom-toast-leave-active { animation-duration: 8
 html[data-reduce-motion="true"] .zoom-toast-enter-active .status-toast-surface,
 html[data-reduce-motion="true"] .zoom-toast-leave-active .status-toast-surface {
   animation: none;
+}
+/* Batch action bar at the page's bottom edge: Clear/Close Others confirmations
+ * with an Undo button, and small hints such as "link copied". It rises into
+ * place and drops away, the mirror of the zoom capsule up top. */
+.action-toast {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 92;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.action-toast-surface {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 6px 0 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 17px;
+  box-shadow: 0 2px 14px var(--panel-shadow);
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.action-toast-message {
+  line-height: 1;
+}
+.action-toast-undo {
+  pointer-events: auto;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--chosen);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+.action-toast-undo:hover {
+  background: var(--pressed);
+}
+.toast-bar-enter-active { animation: toast-bar-fade-in 160ms var(--ease-out) both; }
+.toast-bar-leave-active { animation: toast-bar-fade-out 120ms ease both; }
+.toast-bar-enter-active .action-toast-surface {
+  animation: toast-bar-rise-in 160ms var(--ease-out) both;
+}
+.toast-bar-leave-active .action-toast-surface {
+  animation: toast-bar-drop-out 120ms ease both;
+}
+@keyframes toast-bar-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toast-bar-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes toast-bar-rise-in {
+  from { opacity: 0.6; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-bar-drop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(8px); }
 }
 hr {
   border: 0;

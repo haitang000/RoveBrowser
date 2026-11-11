@@ -11,6 +11,7 @@ import TabPreviewCard from "./TabPreviewCard.vue";
 import ErrorToast from "./ErrorToast.vue";
 import FindBar from "./FindBar.vue";
 import StatusToast from "./StatusToast.vue";
+import ActionToast from "./ActionToast.vue";
 import { browserKey } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
 const b = useBrowser();
@@ -26,7 +27,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast");
+  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast");
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -77,6 +78,6 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /></div>
+  <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
   <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><TabPreviewCard /><ErrorToast />
 </template>

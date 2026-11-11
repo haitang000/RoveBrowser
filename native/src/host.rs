@@ -197,6 +197,14 @@ struct PageLayout {
     secondary: Option<Rect>,
     live_resize: bool,
 }
+/// Tabs removed together by Clear or Close Others/Below, with the active tab
+/// before the batch so the Undo toast can put everything back as it was.
+struct UndoBatch {
+    entries: Vec<(String, usize, Tab)>,
+    previous_active: String,
+    /// A blank tab that closing everything auto-created; undo takes it back.
+    auto_created: Option<String>,
+}
 struct App {
     // Drop child controllers before their parent HWND and shared context.
     split_handle: Option<crate::split::SplitHandle>,
@@ -212,6 +220,9 @@ struct App {
     preview_epoch: u64,
     find: Option<crate::find::Session>,
     find_open: Rc<Cell<bool>>,
+    /// Tabs currently playing sound; Zigzag never treats those as stale.
+    playing: std::collections::HashSet<String>,
+    undo_batch: Option<UndoBatch>,
     popup: Option<WebView>,
     popup_state: serde_json::Map<String, serde_json::Value>,
     ui: Option<WebView>,
@@ -267,6 +278,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         preview_epoch: 0,
         find: None,
         find_open: Rc::new(Cell::new(false)),
+        playing: std::collections::HashSet::new(),
+        undo_batch: None,
         popup: None,
         popup_state: serde_json::Map::new(),
         ui: None,
@@ -505,8 +518,114 @@ impl App {
             }
         }
     }
-    fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {
-        let navigation = Rc::new(NavigationPolicy {
+    /// A short-lived message for the floating layer. `action` names the button
+    /// ("undoBatch" for the batch Undo), or is absent for a plain notice.
+    fn toast(&self, message: &str, action: Option<&str>) {
+        self.emit(json!({"type":"toast","message":message,"action":action}));
+    }
+    fn focus_page_or_ui(&self) {
+        if let Some(page) = self.page() {
+            let _ = page.focus();
+        } else if let Some(ui) = &self.ui {
+            let _ = ui.focus();
+        }
+    }
+    /// Closes a set of tabs as one undoable batch, keeping enough geometry to put
+    /// them back exactly where they were. Used by Clear, Close Others and Close Below.
+    fn close_batch(&mut self, ids: Vec<String>, faded: bool) {
+        if ids.is_empty() {
+            return;
+        }
+        let before: std::collections::HashSet<String> =
+            self.state.tabs.iter().map(|tab| tab.id.clone()).collect();
+        let previous_active = self.state.active_tab.clone();
+        let mut entries = Vec::new();
+        for id in ids {
+            if let Some(index) = self.state.tabs.iter().position(|tab| tab.id == id) {
+                let tab = self.state.tabs[index].clone();
+                if tab.bookmark_id.is_some() {
+                    continue;
+                }
+                entries.push((tab.space_id.clone(), index, tab));
+            }
+        }
+        if entries.is_empty() {
+            return;
+        }
+        let count = entries.len();
+        for (_, _, tab) in &entries {
+            self.state.close(&tab.id);
+            self.playing.remove(&tab.id);
+        }
+        let auto_created = self
+            .state
+            .tabs
+            .iter()
+            .find(|tab| !before.contains(&tab.id))
+            .map(|tab| tab.id.clone());
+        self.undo_batch = Some(UndoBatch {
+            entries,
+            previous_active,
+            auto_created,
+        });
+        self.publish();
+        self.save();
+        if let Err(error) = self.sync() {
+            self.error(error);
+        }
+        self.focus_page_or_ui();
+        self.toast(
+            &format!("已关闭 {count} 个{}标签", if faded { "旧" } else { "" }),
+            Some("undoBatch"),
+        );
+    }
+    /// Puts the last batch back at its original indexes and restores selection.
+    fn undo_batch(&mut self) {
+        let Some(batch) = self.undo_batch.take() else {
+            return;
+        };
+        let count = batch.entries.len();
+        if let Some(blank) = batch.auto_created {
+            self.state.tabs.retain(|tab| tab.id != blank);
+        }
+        let mut entries = batch.entries;
+        entries.sort_by_key(|(_, index, _)| *index);
+        let mut restored = Vec::new();
+        for (space_id, index, mut tab) in entries {
+            if self.state.tabs.iter().any(|existing| existing.id == tab.id) {
+                continue;
+            }
+            tab.space_id = if self.state.spaces.iter().any(|space| space.id == space_id) {
+                space_id
+            } else {
+                self.state.active_space.clone()
+            };
+            tab.last_activated = model::now_secs();
+            let position = index.min(self.state.tabs.len());
+            restored.push(tab.id.clone());
+            self.state.tabs.insert(position, tab);
+        }
+        let target = self
+            .state
+            .tabs
+            .iter()
+            .any(|tab| tab.id == batch.previous_active)
+            .then_some(batch.previous_active)
+            .or_else(|| restored.first().cloned());
+        if let Some(id) = target {
+            self.state.activate(&id);
+        }
+        // Undo re-adds the tabs itself, so the closed stack must not offer them again.
+        self.state.closed.retain(|tab| !restored.contains(&tab.id));
+        self.publish();
+        self.save();
+        if let Err(error) = self.sync() {
+            self.error(error);
+        }
+        self.focus_page_or_ui();
+        self.toast(&format!("已恢复 {count} 个标签"), None);
+    }
+    fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {        let navigation = Rc::new(NavigationPolicy {
             bookmarked: Cell::new(tab.bookmark_id.is_some()),
             current: RefCell::new(tab.url.clone()),
             host_navigation: Cell::new(false),
@@ -779,6 +898,8 @@ impl App {
             favicon: None,
             split_with: None,
             muted: false,
+            custom_title: None,
+            last_activated: model::now_secs(),
         };
         let page = self.build_page(&tab)?;
         // Replacing a Peek drops its controller, without stacking temporary tabs.
@@ -1241,8 +1362,8 @@ impl App {
                     | Command::OpenBookmark { .. }
                     | Command::Navigate { .. }
                     | Command::Close { .. }
-                    | Command::CloseOthers
-                    | Command::CloseBelow
+                        | Command::CloseOthers { .. }
+                        | Command::CloseBelow { .. }
                     | Command::SwitchSpace { .. }
                     | Command::CreateSpace { .. }
                     | Command::Restore
@@ -1268,8 +1389,8 @@ impl App {
                 | Command::Restore
                 | Command::SwitchSpace { .. }
                 | Command::Close { .. }
-                | Command::CloseOthers
-                | Command::CloseBelow
+                        | Command::CloseOthers { .. }
+                        | Command::CloseBelow { .. }
                 | Command::Split { .. }
                 | Command::Unsplit
         );
@@ -1280,8 +1401,8 @@ impl App {
                     | Command::Activate { .. }
                     | Command::OpenBookmark { .. }
                     | Command::Close { .. }
-                    | Command::CloseOthers
-                    | Command::CloseBelow
+                        | Command::CloseOthers { .. }
+                        | Command::CloseBelow { .. }
                     | Command::SwitchSpace { .. }
                     | Command::CreateSpace { .. }
                     | Command::Restore
@@ -1692,6 +1813,39 @@ impl App {
                 }
                 return;
             }
+            Command::ClearStep => {
+                // Zigzag's sidebar Clear: old tabs first, then the others, then
+                // the tab being looked at and its split partner.
+                let plan = self.state.clear_targets(&self.playing, model::now_secs());
+                self.close_batch(plan.ids, plan.faded);
+                return;
+            }
+            Command::CloseOthers { id } => {
+                let base = id.or_else(|| Some(self.state.active_tab.clone()));
+                let targets = self.state.tabs_to_dismiss(false, base.as_deref());
+                self.close_batch(targets, false);
+                return;
+            }
+            Command::CloseBelow { id } => {
+                let base = id.or_else(|| Some(self.state.active_tab.clone()));
+                let targets = self.state.tabs_to_dismiss(true, base.as_deref());
+                self.close_batch(targets, false);
+                return;
+            }
+            Command::UndoBatch => {
+                self.undo_batch();
+                return;
+            }
+            Command::CopyText { text } => {
+                if text.is_empty() || text.len() > 8192 {
+                    self.error("无法复制这个链接");
+                    return;
+                }
+                if let Err(error) = crate::clipboard::write_text(&text) {
+                    self.error(format!("复制失败：{error}"));
+                }
+                return;
+            }
             Command::Back | Command::Forward | Command::Reload => {
                 if let Some(p) = self.page() {
                     let r = match c {
@@ -1722,8 +1876,8 @@ impl App {
                         | Command::Activate { .. }
                         | Command::OpenBookmark { .. }
                         | Command::Close { .. }
-                        | Command::CloseOthers
-                        | Command::CloseBelow
+                        | Command::CloseOthers { .. }
+                        | Command::CloseBelow { .. }
                         | Command::SwitchSpace { .. }
                         | Command::CreateSpace { .. }
                         | Command::Restore
@@ -1735,6 +1889,8 @@ impl App {
                     self.error(e);
                     return;
                 }
+                // A tab closed through the generic path stops being "playing".
+                self.playing.retain(|id| self.state.tabs.iter().any(|tab| &tab.id == id));
                 *self.live_settings.borrow_mut() = self.state.settings.clone();
                 if matches!(c, Command::UpdateSettings { .. }) {
                     let mut errors = vec![];
@@ -1968,6 +2124,11 @@ impl ApplicationHandler<Event> for App {
                 self.emit(json!({"type":"zoom","id":id,"factor":factor}));
             }
             Event::Audio(id, playing) => {
+                if playing {
+                    self.playing.insert(id.clone());
+                } else {
+                    self.playing.remove(&id);
+                }
                 self.emit(json!({"type":"audio","id":id,"playing":playing}));
             }
             Event::Command(c) => self.command(c, Some(event_loop)),

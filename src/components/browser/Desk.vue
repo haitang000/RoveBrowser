@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
+import { tabDisplayTitle } from "../../lib/tab-meta";
 const b = useBrowser(),
   query = ref(""),
   input = ref<HTMLInputElement>();
@@ -12,10 +13,15 @@ const spaces = computed(() =>
     tabs: b.state.tabs.filter(
       (t) =>
         t.spaceId === s.id &&
-        `${t.title} ${t.url}`.toLowerCase().includes(query.value.toLowerCase()),
+        `${tabDisplayTitle(t)} ${t.title} ${t.url}`.toLowerCase().includes(query.value.toLowerCase()),
     ),
   })),
 );
+/** A split half may be a live tab or the card's own tab; either way a rename wins. */
+function titleFor(id: string, fallback: string) {
+  const tab = b.state.tabs.find((x) => x.id === id);
+  return tab ? tabDisplayTitle(tab) : fallback;
+}
 watch(
   () => b.deskOpen,
   async (open) => {
@@ -106,14 +112,14 @@ watch(
                     v-if="b.thumbnails[id]"
                     class="tab-snapshot"
                     :src="b.thumbnails[id]"
-                    :alt="`${b.state.tabs.find((x) => x.id === id)?.title || t.title} 的真实网页缩略图`"
+                    :alt="`${titleFor(id, t.title)} 的真实网页缩略图`"
                     draggable="false"
                   />
                   <div v-else class="snapshot-empty">
                     <Favicon
                       :url="b.state.tabs.find((x) => x.id === id)?.url || t.url"
                     /><span>{{
-                      b.state.tabs.find((x) => x.id === id)?.title || t.title
+                      titleFor(id, t.title)
                     }}</span
                     ><small>{{
                       t.url === "era://newtab"
@@ -126,7 +132,7 @@ watch(
                 </template>
               </div>
               <div class="desk-caption">
-                <Favicon :url="t.url" /><span>{{ t.title }}</span>
+                <Favicon :url="t.url" /><span>{{ tabDisplayTitle(t) }}</span>
               </div>
             </button>
           </div>
