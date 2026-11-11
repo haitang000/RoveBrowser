@@ -121,15 +121,18 @@ async function waitForClearSlot() {
 }
 async function openTab(url) {
   await send({ type: 'new', url });
-  await ui.waitForTimeout(350);
+  // Page creation can take a moment under load; wait for the command to land
+  // before issuing the next one so a slow batch cannot be mistaken for a drop.
+  await waitFor(async () => (await lastState()).tabs.some((tab) => tab.url === url), 'tab ' + url);
+  await ui.waitForTimeout(120);
 }
 
 try {
   await launch();
   const baseline = await rowCount();
   for (const site of sites) await openTab(site);
+  await rowsEventually(baseline + 3, 'three new regular tabs');
   const afterCreate = await rowCount();
-  assert.equal(afterCreate, baseline + 3, 'three new regular tabs');
   const activeUrl = () => lastState().then((state) => state.tabs.find((tab) => tab.id === state.activeTab)?.url);
   assert.equal(await activeUrl(), sites[2]);
 
