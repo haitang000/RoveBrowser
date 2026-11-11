@@ -15,8 +15,27 @@ const space = computed(() => b.state.spaces.find((s) => s.id === props.spaceId))
 const tabs = computed(() => b.state.tabs.filter((t) => t.spaceId === props.spaceId && !t.pinned && !b.state.favorites.some((f) => f.id === t.bookmarkId)));
 const pins = computed<Tab[]>(() => (b.state.pins || []).filter((f) => f.spaceId === props.spaceId)
   .map((f) => ({ ...(liveTab(b.state, f.id) || { id: f.id, spaceId: props.spaceId, url: f.url, unloaded: true }), title: f.title, favicon: liveTab(b.state, f.id)?.favicon || f.favicon, pinned: true, bookmarkId: f.id })));
-onMounted(() => { if (list.value) list.value.scrollTop = props.savedScroll; });
-onBeforeUnmount(() => { if (list.value) emit("scroll", props.spaceId, list.value.scrollTop); });
+// The scrollbar is ambient: it only paints while the list is actually moving.
+// Restoring a pane's scroll position on mount is not a scroll the user made, so
+// it must not flash the bar.
+const scrolling = ref(false);
+let scrollingTimer: ReturnType<typeof setTimeout> | undefined;
+let scrollReady = false;
+function onScroll() {
+  if (!scrollReady) return;
+  scrolling.value = true;
+  clearTimeout(scrollingTimer);
+  scrollingTimer = setTimeout(() => (scrolling.value = false), 900);
+  emit("scroll", props.spaceId, list.value?.scrollTop ?? 0);
+}
+onMounted(() => {
+  if (list.value) list.value.scrollTop = props.savedScroll;
+  requestAnimationFrame(() => (scrollReady = true));
+});
+onBeforeUnmount(() => {
+  clearTimeout(scrollingTimer);
+  if (list.value) emit("scroll", props.spaceId, list.value.scrollTop);
+});
 
 // Zigzag's Clear button: step one closes faded tabs, step two the other tabs,
 // step three the tab being looked at and its split partner. This copy only
@@ -88,7 +107,7 @@ function clickClear() {
 </script>
 
 <template>
-  <section ref="list" class="space-list" :data-space-id="spaceId" :aria-label="space?.name" @scroll="emit('scroll', spaceId, list!.scrollTop)">
+  <section ref="list" class="space-list" :class="{ scrolling }" :data-space-id="spaceId" :aria-label="space?.name" @scroll="onScroll">
     <PinnedTabs :tabs="pins" :space-id="spaceId" @menu="(e, t) => emit('menu', e, t)" />
     <div class="section-label">
       <span>Tabs</span>

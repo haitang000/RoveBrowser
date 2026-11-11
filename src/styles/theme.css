@@ -325,9 +325,38 @@ kbd {
 .space-list {
   flex: 1;
   overflow: auto;
-  scrollbar-width: thin;
   min-height: 0;
   padding-top: 12px;
+}
+/* Chromium's stock scrollbar is replaced by an ambient pill that only appears
+ * while the list moves. The heavy top inset lowers the pill's visual centre so
+ * it hangs away from the header instead of reading as part of it. */
+.space-list::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+.space-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.space-list::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 3px solid transparent;
+  border-top-width: 16px;
+  border-bottom-width: 3px;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: transparent;
+  transition: background-color 180ms var(--ease-out);
+}
+.space-list.scrolling::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.space-list.scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ink) 26%, transparent);
+}
+.space-list::-webkit-scrollbar-corner {
+  background: transparent;
 }
 .space-viewport {
   flex: 1;
