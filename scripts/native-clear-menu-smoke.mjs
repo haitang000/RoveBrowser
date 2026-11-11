@@ -110,6 +110,15 @@ async function clearStepOnce() {
   await ui.waitForTimeout(450);
   await clear.click();
 }
+/** A recent batch shows Undo in the Clear slot; wait for the window to lapse. */
+async function waitForClearSlot() {
+  for (let i = 0; i < 80; i++) {
+    const text = await ui.locator('.clear-tabs').first().innerText().catch(() => '');
+    if (text.includes('Clear')) return;
+    await ui.waitForTimeout(100);
+  }
+  throw Error('Clear slot did not return after the undo window');
+}
 async function openTab(url) {
   await send({ type: 'new', url });
   await ui.waitForTimeout(350);
@@ -187,15 +196,29 @@ try {
   await rowsEventually(beforeBelow, 'undo close below');
   checks.push('关闭下方标签页以右键的目标标签为基准，并可撤销');
 
-  // Clear step two: the other tabs go first, with an Undo batch.
+  // Clear step two: the other tabs go first, and the Clear slot turns Undo.
   const beforeClear = await rowCount();
   assert.ok(beforeClear > 1);
+  await waitForClearSlot();
   await clearStepOnce();
   await rowsEventually(1, 'clear others');
   await waitFor(async () => /已关闭 \d+ 个标签/.test(await toastText()), 'clear toast');
-  await clickUndo();
+  await ui.locator('.clear-tabs').getByText('Undo').waitFor();
+  await ui.locator('.clear-tabs').click();
   await rowsEventually(beforeClear, 'undo clear');
-  checks.push('Clear 关闭其他标签并显示带撤销的操作提示');
+  checks.push('Clear 后原按钮变为 Undo，点击即恢复批量关闭的标签');
+
+  // The Undo window expires: the slot returns to Clear while the host keeps
+  // the batch (used here through the same IPC to put the tabs back).
+  await openTabMenu();
+  await (await menuItem('关闭其他标签页')).click();
+  await rowsEventually(1, 'close others for expiry');
+  await ui.locator('.clear-tabs').getByText('Undo').waitFor();
+  await ui.waitForTimeout(4300);
+  await waitFor(async () => (await ui.locator('.clear-tabs').innerText()).includes('Clear'), 'undo window expires');
+  await send({ type: 'undoBatch' });
+  await rowsEventually(beforeClear, 'undo after expiry');
+  checks.push('Undo 窗口（4 秒）结束后按钮恢复为 Clear，宿主仍保留最近批次');
 
   // Clear step three: only the current tab left; Clear removes it entirely.
   await openTabMenu();
@@ -203,7 +226,7 @@ try {
   await rowsEventually(1, 'single tab before clear');
   const solo = await lastState();
   const soloUrl = solo.tabs.find((tab) => tab.id === solo.activeTab).url;
-  await ui.waitForTimeout(500);
+  await waitForClearSlot();
   await clearStepOnce();
   await waitFor(async () => (await toastText()).includes('已关闭 1 个标签'), 'clear last toast');
   const blanked = await lastState();
@@ -230,9 +253,11 @@ try {
   checks.push('自定义标签名经 SQLite 会话在重启后恢复');
 
   const result = { passed: true, profile, checks };
+  await mkdir(output, { recursive: true });
   await writeFile(join(output, 'native-clear-menu-smoke.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
+  await mkdir(output, { recursive: true }).catch(() => {});
   await ui?.screenshot({ path: join(output, 'failure-ui.png') }).catch(() => {});
   await popup?.screenshot({ path: join(output, 'failure-popup.png') }).catch(() => {});
   const state = await Promise.all(

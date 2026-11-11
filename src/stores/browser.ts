@@ -58,12 +58,17 @@ export const useBrowser = defineStore("browser", () => {
     audio = ref<Record<string, boolean>>({}),
     zoomNotice = ref<{ ticket: number; factor: number } | null>(null),
     actionToast = ref<{ ticket: number; message: string; action?: string } | null>(null),
+    /** Whether an undoable close batch is recent enough for the sidebar Undo. */
+    undoAvailable = ref(false),
     /** Clock for tab fading and the Clear button's stale check. */
     now = ref(nowSeconds());
   let zoomNoticeTimer: ReturnType<typeof setTimeout> | undefined;
   let zoomNoticeTicket = 0;
   let actionToastTimer: ReturnType<typeof setTimeout> | undefined;
   let actionToastTicket = 0;
+  let undoTimer: ReturnType<typeof setTimeout> | undefined;
+  type PreviewUndo = { entries: { index: number; tab: Tab }[]; active: string; blankIds: string[] };
+  let previewUndo: PreviewUndo | null = null;
   // Aging is displayed in minutes, so a minute tick is enough; the popup layer
   // never renders tabs and does not need its own interval.
   if (!popupWindow) setInterval(() => { now.value = nowSeconds(); }, 60_000);
@@ -190,18 +195,34 @@ export const useBrowser = defineStore("browser", () => {
         if (!url.startsWith("http")) throw Error("Peek 仅支持网页");
         peek.value = { ...peek.value, url, title: host(url) };
       } else {
-        const before = new Set(state.value.tabs.map((tab) => tab.id));
+        const batchClose = ["clearStep", "closeOthers", "closeBelow"].includes(c.type);
+        const beforeTabs = batchClose
+          ? state.value.tabs.map((tab) => ({ ...tab }))
+          : [];
+        const beforeActive = state.value.activeTab;
         state.value = reduce(
           structuredClone(JSON.parse(JSON.stringify(state.value))),
           c,
         );
         // The native host confirms batch closes with an action toast; the
-        // standalone preview mirrors the message without the undo batch.
-        if (["clearStep", "closeOthers", "closeBelow"].includes(c.type)) {
-          const removed = [...before].filter(
-            (id) => !state.value.tabs.some((tab) => tab.id === id),
-          ).length;
-          if (removed > 0) notify(`已关闭 ${removed} 个标签`);
+        // standalone preview mirrors both the message and a real Undo batch.
+        if (batchClose && beforeTabs.length) {
+          const alive = new Set(state.value.tabs.map((tab) => tab.id));
+          const removed = beforeTabs.filter((tab) => !alive.has(tab.id));
+          if (removed.length) {
+            previewUndo = {
+              entries: removed.map((tab) => ({
+                index: beforeTabs.findIndex((item) => item.id === tab.id),
+                tab,
+              })),
+              active: beforeActive,
+              blankIds: state.value.tabs
+                .filter((tab) => !beforeTabs.some((item) => item.id === tab.id))
+                .map((tab) => tab.id),
+            };
+            armUndoWindow();
+            notify(`已关闭 ${removed.length} 个标签`);
+          }
         }
         if (
           [
@@ -302,6 +323,39 @@ export const useBrowser = defineStore("browser", () => {
     actionToast.value = null;
     clearTimeout(actionToastTimer);
   }
+  /** Keeps the sidebar's Clear turned into Undo for the same window as the toast. */
+  function armUndoWindow() {
+    undoAvailable.value = true;
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => {
+      undoAvailable.value = false;
+    }, 4000);
+  }
+  function undoBatch() {
+    clearTimeout(undoTimer);
+    undoAvailable.value = false;
+    if (native) {
+      send({ type: "undoBatch" });
+      return;
+    }
+    const batch = previewUndo;
+    previewUndo = null;
+    if (!batch) return;
+    try {
+      state.value = reduce(
+        structuredClone(JSON.parse(JSON.stringify(state.value))),
+        {
+          type: "restoreBatch",
+          entries: batch.entries,
+          active: batch.active,
+          blankIds: batch.blankIds,
+        },
+      );
+      notify(`已恢复 ${batch.entries.length} 个标签`);
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
   window.__ERA_RECEIVE__ = (e) => {
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
       splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
@@ -397,8 +451,10 @@ export const useBrowser = defineStore("browser", () => {
     }
     if (e.type === "audio" && e.id && typeof e.playing === "boolean")
       audio.value = { ...audio.value, [e.id]: e.playing };
-    if (e.type === "toast" && e.message)
+    if (e.type === "toast" && e.message) {
       notify(e.message, e.action, e.action === "undoBatch" ? 4000 : 2400);
+      if (e.action === "undoBatch") armUndoWindow();
+    }
     if (e.type === "shortcut") {
       if (e.action === "address") openCommand("edit");
       if (e.action === "new") openCommand();
@@ -499,6 +555,8 @@ export const useBrowser = defineStore("browser", () => {
     actionToast,
     notify,
     dismissToast,
+    undoAvailable,
+    undoBatch,
     now,
     active,
     space,

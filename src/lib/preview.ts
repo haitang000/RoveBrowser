@@ -303,6 +303,26 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       }
       break;
     }
+    case "restoreBatch": {
+      // Preview-only counterpart of the host's Undo: put the batch back at its
+      // original indexes, drop the blank tab a clear-all auto-created, then
+      // return to the tab that was active before the batch.
+      for (const id of (c.blankIds as string[] | undefined) ?? []) {
+        s.tabs = s.tabs.filter((tab) => tab.id !== id);
+      }
+      const entries = (c.entries as { index: number; tab: Tab }[] | undefined) ?? [];
+      const restored: Tab[] = [];
+      for (const entry of [...entries].sort((a, b) => a.index - b.index)) {
+        if (s.tabs.some((tab) => tab.id === entry.tab.id)) continue;
+        const tab: Tab = { ...entry.tab, splitWith: undefined, lastActivated: nowSeconds() };
+        s.tabs.splice(Math.min(entry.index, s.tabs.length), 0, tab);
+        restored.push(tab);
+      }
+      const previous = s.tabs.find((tab) => tab.id === String(c.active ?? ""));
+      const target = previous || restored[0];
+      if (target) activate(target);
+      break;
+    }
   }
   return { ...s };
 }

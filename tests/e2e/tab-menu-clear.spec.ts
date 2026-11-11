@@ -60,6 +60,11 @@ test("Clear closes the other tabs and previews the rows it would remove", async 
   await clear.click();
   await expect(regularRows(page)).toHaveCount(before - 1);
   await expect(page.locator(".action-toast")).toContainText(/已关闭 \d+ 个标签/);
+  // The Clear slot becomes Undo for the undo window; clicking it restores.
+  await expect(clear).toHaveText("Undo");
+  await clear.click();
+  await expect(regularRows(page)).toHaveCount(before);
+  await expect(clear).toHaveText("Clear");
 });
 
 test("the Clear button arms only after it has been visible for a moment", async ({

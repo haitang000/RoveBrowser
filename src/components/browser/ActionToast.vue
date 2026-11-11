@@ -15,7 +15,7 @@ onMounted(() => reducedMotion.addEventListener("change", syncCalm));
 onBeforeUnmount(() => reducedMotion.removeEventListener("change", syncCalm));
 const motion = computed(() => (calm.value ? 80 : { enter: 160, leave: 120 }));
 function undo() {
-  b.send({ type: "undoBatch" });
+  b.undoBatch();
   b.dismissToast();
 }
 </script>

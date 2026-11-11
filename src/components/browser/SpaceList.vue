@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { liveTab } from "../../lib/bookmarks";
 import type { Tab } from "../../lib/types";
@@ -59,6 +59,32 @@ function stepClear() {
   b.send({ type: "clearStep" });
   arm();
 }
+// For a few seconds after a batch close the same spot offers Zigzag's Undo
+// instead of Clear, so the action and its reversal live in one place.
+const undoActive = computed(() => b.undoAvailable);
+const clearLabel = computed(() =>
+  undoActive.value ? "Undo" : clearPlan.value.faded ? "Clear Old" : "Clear",
+);
+watch(undoActive, (active) => {
+  if (active) {
+    clearTimeout(armTimer);
+    armed.value = false;
+    previewing.value = false;
+  }
+});
+function enterClear() {
+  if (undoActive.value) return;
+  arm();
+  previewing.value = true;
+}
+function clickClear() {
+  if (undoActive.value) {
+    b.undoBatch();
+    disarm();
+    return;
+  }
+  stepClear();
+}
 </script>
 
 <template>
@@ -68,24 +94,24 @@ function stepClear() {
       <span>Tabs</span>
       <span class="section-label-end">
         <button
-          v-if="tabs.length"
+          v-if="tabs.length || undoActive"
           class="clear-tabs"
-          :class="{ armed }"
-          :aria-label="clearPlan.faded ? `关闭 ${clearPlan.ids.length} 个旧标签页` : `关闭 ${clearPlan.ids.length} 个标签页`"
-          :title="clearPlan.faded ? '先关闭很久没看的标签页；再次点击关闭其余' : '关闭其他标签页；再次点击关闭当前页'"
-          @pointerenter="arm(); previewing = true"
+          :class="{ armed: armed && !undoActive, undo: undoActive }"
+          :aria-label="undoActive ? '撤销刚才关闭的标签页' : clearPlan.faded ? `关闭 ${clearPlan.ids.length} 个旧标签页` : `关闭 ${clearPlan.ids.length} 个标签页`"
+          :title="undoActive ? '撤销刚才的批量关闭（4 秒内）' : clearPlan.faded ? '先关闭很久没看的标签页；再次点击关闭其余' : '关闭其他标签页；再次点击关闭当前页'"
+          @pointerenter="enterClear"
           @pointerleave="disarm()"
           @focus="focusClear"
           @blur="disarm()"
-          @click="stepClear"
+          @click="clickClear"
         >
-          <Icon name="chevronDown" :size="11" />
-          {{ clearPlan.faded ? "Clear Old" : "Clear" }}
+          <Icon :name="undoActive ? 'history' : 'chevronDown'" :size="11" />
+          {{ clearLabel }}
         </button>
         <span class="tab-count">{{ tabs.length }}</span>
       </span>
     </div>
     <button class="new-tab" @click="b.openCommand()"><Icon name="plus" :size="16" /><span>New Tab</span><kbd v-if="b.shortcutLabel('new')">{{ b.shortcutLabel('new') }}</kbd></button>
-    <TabList :tabs="tabs" :doomed-ids="previewing ? clearPlan.ids : []" aria-label="标签页" @menu="(e, t) => emit('menu', e, t)" />
+    <TabList :tabs="tabs" :doomed-ids="previewing && !undoActive ? clearPlan.ids : []" aria-label="标签页" @menu="(e, t) => emit('menu', e, t)" />
   </section>
 </template>

@@ -507,6 +507,19 @@ kbd {
   border-radius: 50%;
   background: currentColor;
 }
+/* After a batch close the Clear slot becomes a visible Undo for the window in
+ * which the host still holds the batch. */
+.clear-tabs.undo,
+.space-list:hover .clear-tabs.undo,
+.clear-tabs.undo:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--ink);
+  background: var(--chosen);
+}
+.clear-tabs.undo:hover {
+  background: var(--pressed);
+}
 .tab-count {
   font-variant-numeric: tabular-nums;
 }
