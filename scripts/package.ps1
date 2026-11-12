@@ -27,5 +27,12 @@ if ($SkipArchive) {
     return
 }
 $archive = "$bundleRoot.zip"
+# Some Cargo license files retain Unix-epoch timestamps. ZIP only supports
+# 1980-2107; normalize copied payload metadata without touching source files.
+Get-ChildItem -LiteralPath $bundleRoot -Recurse -Force | ForEach-Object {
+    if ($_.LastWriteTime.Year -lt 1980 -or $_.LastWriteTime.Year -gt 2107) {
+        $_.LastWriteTime = [datetime]'1980-01-02T00:00:00'
+    }
+}
 Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $archive -Force
 Get-Item -LiteralPath $archive | Select-Object FullName, Length
