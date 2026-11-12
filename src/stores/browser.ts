@@ -98,6 +98,7 @@ export const useBrowser = defineStore("browser", () => {
   const settings = computed(() => settingsFor(state.value.settings));
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
+  const defaultBrowser = ref<{ http: boolean; https: boolean }>();
   const importPhase = ref("checking");
   function scanImports() { importPhase.value = "checking"; if (native) send({ type: "importScan" }); }
   function runImport(request: ImportRequest) { importPhase.value = "importing"; if (native) send({ type: "importRun", request }); }
@@ -480,6 +481,7 @@ export const useBrowser = defineStore("browser", () => {
       if (typeof e.importBusy === "boolean") importBusy.value = e.importBusy;
       if (e.importSources) importSources.value = e.importSources;
     }
+    if (e.type === "defaultBrowser" && e.defaultBrowser) defaultBrowser.value = e.defaultBrowser;
     if (e.type === "state" && e.state) {
       const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
       const previous = sources(state.value);
@@ -580,7 +582,7 @@ export const useBrowser = defineStore("browser", () => {
   }
   send({ type: popupWindow ? "popupReady" : "ready" });
   return {
-    importSources, importBusy, importPhase, scanImports, runImport, importPasswords,
+    importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser,
     onboardingOpen,
     openOnboarding,
     native,

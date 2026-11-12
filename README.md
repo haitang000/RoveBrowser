@@ -36,7 +36,7 @@ cargo test --manifest-path native/Cargo.toml
 
 ## Windows 安装版
 
-运行 `release\Rove-0.1.0-beta5-windows-x64-setup.exe`，支持 Windows 10/11 x64 及可运行 x64 应用的 Windows ARM64。默认安装到 `%LOCALAPPDATA%\Programs\Rove`，无需管理员权限；创建开始菜单快捷方式，可选桌面快捷方式，并可通过 Windows 设置中的应用列表卸载。同一用户重新运行安装程序即可覆盖升级，安装及卸载均保留原有 EraBrowser 用户数据、会话和登录状态。安装程序尚未代码签名。
+运行 `release\Rove-0.1.0-beta6-windows-x64-setup.exe`，支持 Windows 10/11 x64 及可运行 x64 应用的 Windows ARM64。默认安装到 `%LOCALAPPDATA%\Programs\Rove`，无需管理员权限；创建开始菜单快捷方式，可选桌面快捷方式，并可通过 Windows 设置中的应用列表卸载。同一用户重新运行安装程序即可覆盖升级，安装及卸载均保留原有 EraBrowser 用户数据、会话和登录状态。安装程序尚未代码签名。
 
 已安装 Microsoft Edge WebView2 Evergreen Runtime 时可离线安装；缺少时安装程序会使用内置的微软引导程序联网安装运行时，失败会提示重试。安装版应用静态链接 VC++ 运行库，无需额外安装 VC++ Redistributable，也不需要 Node.js 或 Rust。
 
@@ -46,9 +46,11 @@ cargo test --manifest-path native/Cargo.toml
 
 GitHub Release 工作流同时生成安装 EXE 和便携 ZIP。静默安装支持 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`，可追加 `/DIR="C:\path\to\Rove"`；静默模式不会自动启动应用。
 
+「设置 → 通用 → 设为默认浏览器」或首次引导的最后一步会打开 Windows 默认应用设置，选择 Rove 后即可接收 HTTP／HTTPS 链接。安装版为当前用户注册候选项；便携版点击按钮时注册当前位置。界面分别检测 HTTP 和 HTTPS 的实际默认状态，从系统设置返回后刷新。外部链接会交给同一用户数据目录的现有窗口，首次引导未结束时先保留链接。卸载清理属于该安装路径的候选项，不更改 Windows 的 UserChoice，也不删除用户资料。当前关联范围是网页链接，不注册本地 HTML／PDF 文件。详见 [默认浏览器支持](docs/DEFAULT_BROWSER.md)。
+
 ## 已实现
 
-- Zigzag onboarding 五步流程：欢迎、数据导入、常用网站选择、广告拦截说明、默认浏览器设置入口。首次启动自动展示，步骤和网站选择写入 SQLite；旧会话直接恢复，可从设置的「欢迎引导」重看。支持 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 多配置书签／历史导入，以及密码 CSV 导入；书签进入来源工作区，重复导入去重，密码使用 Windows DPAPI 加密并在匹配网站提供手动填充。支持返回／跳过、Enter／Esc、减少动态效果、深色与小窗口。广告拦截后端尚未提供；默认项只打开 Windows 设置。源码映射、预览方法和平台限制见 [Onboarding 移植记录](docs/ONBOARDING_PORT.md)。
+- Zigzag onboarding 五步流程：欢迎、数据导入、常用网站选择、广告拦截说明、默认浏览器设置入口。首次启动自动展示，步骤和网站选择写入 SQLite；旧会话直接恢复，可从设置的「欢迎引导」重看。支持 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 多配置书签／历史导入，以及密码 CSV 导入；书签进入来源工作区，重复导入去重，密码使用 Windows DPAPI 加密并在匹配网站提供手动填充。支持返回／跳过、Enter／Esc、减少动态效果、深色与小窗口。广告拦截后端尚未提供；默认浏览器候选注册和链接启动已接入，最终选择由 Windows 设置完成。源码映射、预览方法和平台限制见 [Onboarding 移植记录](docs/ONBOARDING_PORT.md)。
 
 - Zigzag 设置页：7 个分类、跨分类搜索、响应式导航、设置标签页与分类地址恢复；搜索引擎／自定义搜索地址、外观、工作区增删排序、下载目录、密码／表单偏好、历史与网站数据清理、自定义快捷键和退出确认。入口为侧栏底部设置按钮、命令面板 Settings 或 Ctrl+,。移植范围和平台适配见 [设置移植记录](docs/SETTINGS_PORT.md)。
 

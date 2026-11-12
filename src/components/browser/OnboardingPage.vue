@@ -42,7 +42,7 @@ function advance(skip = false) {
   if (busy.value || b.importBusy) return;
   if (step.value === "bring" && !skip && importer.value?.canImport) { importer.value.run(); return; }
   busy.value = true;
-  b.send({ type: "onboardingAdvance", step: step.value, skip, sites: [...picked.value], makeDefault: step.value === "ready" && makeDefault.value && b.native });
+  b.send({ type: "onboardingAdvance", step: step.value, skip, sites: [...picked.value], makeDefault: step.value === "ready" && makeDefault.value && b.native && !(b.defaultBrowser?.http && b.defaultBrowser?.https) });
   if (!b.native) busy.value = false;
 }
 function back() {
@@ -103,7 +103,7 @@ onMounted(focusHeading);
             <button :aria-pressed="makeDefault" :class="{ chosen: makeDefault }" @click="makeDefault = true"><Icon name="check" v-if="makeDefault" :size="16" />设为默认</button>
             <button :aria-pressed="!makeDefault" :class="{ chosen: !makeDefault }" @click="makeDefault = false"><Icon name="check" v-if="!makeDefault" :size="16" />暂时不用</button>
           </div>
-          <p v-if="b.native">{{ makeDefault ? '点击“开始浏览”后，将打开 Windows 默认应用设置。' : '你可以稍后在设置中更改默认浏览器。' }}</p>
+          <p v-if="b.native">{{ b.defaultBrowser?.http && b.defaultBrowser?.https ? 'Rove 已是默认浏览器。' : makeDefault ? '点击“开始浏览”后，在 Windows 设置中选择 Rove。' : '你可以稍后在设置中更改默认浏览器。' }}</p>
           <p v-else>当前为界面预览，不会更改系统默认浏览器。</p>
         </div>
       </section>

@@ -3,18 +3,27 @@
 #ifndef AppVersion
   #error Run scripts/installer.ps1 to build the installer.
 #endif
+#ifndef AppRegistrationName
+  #define AppRegistrationName "Rove"
+#endif
+#ifndef SetupAppId
+  #define SetupAppId "{{76F5D0C8-2824-42C5-A964-CAD38178E0BA}"
+#endif
+#ifndef AppTitle
+  #define AppTitle "Rove"
+#endif
 
 [Setup]
-AppId={{76F5D0C8-2824-42C5-A964-CAD38178E0BA}
-AppName=Rove
+AppId={#SetupAppId}
+AppName={#AppTitle}
 AppVersion={#AppVersion}
-AppVerName=Rove {#AppVersion}
+AppVerName={#AppTitle} {#AppVersion}
 VersionInfoVersion={#FileVersion}
 VersionInfoProductVersion={#FileVersion}
 VersionInfoProductTextVersion={#AppVersion}
 VersionInfoTextVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\Rove
-DefaultGroupName=Rove
+DefaultGroupName={#AppTitle}
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -60,10 +69,53 @@ Name: "{autodesktop}\Rove"; Filename: "{app}\Rove.exe"; WorkingDir: "{app}"; Tas
 [Run]
 Filename: "{app}\Rove.exe"; Description: "{cm:LaunchProgram,Rove}"; Flags: nowait postinstall skipifsilent
 
+; Offer HTTP/HTTPS handling for this user. Never overwrite UserChoice or
+; Software\Classes\http(s): Windows Default Apps owns the final decision.
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\{#AppRegistrationName}URL"; ValueType: string; ValueName: ""; ValueData: "Rove 网页链接"
+Root: HKCU; Subkey: "Software\Classes\{#AppRegistrationName}URL"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\{#AppRegistrationName}URL\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\Rove.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\{#AppRegistrationName}URL\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Rove.exe"" -- ""%1"""
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}"; ValueType: string; ValueName: ""; ValueData: "Rove"
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\Rove.exe"",0"
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Rove.exe"""
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Rove"
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Rove 网页浏览器"
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: """{app}\Rove.exe"",0"
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\Capabilities\URLAssociations"; ValueType: string; ValueName: "http"; ValueData: "{#AppRegistrationName}URL"
+Root: HKCU; Subkey: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\Capabilities\URLAssociations"; ValueType: string; ValueName: "https"; ValueData: "{#AppRegistrationName}URL"
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppRegistrationName}"; ValueData: "Software\Clients\StartMenuInternet\{#AppRegistrationName}\Capabilities"
+
 ; Intentionally no UninstallDelete: the existing EraBrowser profile belongs to the user.
 [Code]
 const
   WebView2Key = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+procedure SHChangeNotify(EventId: Integer; Flags: Cardinal; Item1, Item2: Integer);
+  external 'SHChangeNotify@shell32.dll stdcall';
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SHChangeNotify($08000000, 0, 0, 0);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Command, Expected: String;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  Expected := '"' + ExpandConstant('{app}\Rove.exe') + '" -- "%1"';
+  { Preserve a registration subsequently claimed by another portable copy. }
+  if RegQueryStringValue(HKCU, 'Software\Classes\{#AppRegistrationName}URL\shell\open\command', '', Command) and
+    (CompareText(Command, Expected) = 0) then
+  begin
+    RegDeleteValue(HKCU, 'Software\RegisteredApplications', '{#AppRegistrationName}');
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Clients\StartMenuInternet\{#AppRegistrationName}');
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\{#AppRegistrationName}URL');
+    SHChangeNotify($08000000, 0, 0, 0);
+  end;
+end;
 
 function RuntimeInRegistry(RootKey: Integer): Boolean;
 var

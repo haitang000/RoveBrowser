@@ -289,3 +289,15 @@ TypeScript／Vite 构建、73 项前端单元测试、76 项串行 Rust 测试�
 `node scripts/native-import-smoke.mjs` 在隔离临时用户目录中用合成 Edge／Chrome／Firefox 数据和 CSV 启动真实 WebView2，六组检查通过：来源检测与 UI 数据类型选择；历史原时间及损坏来源修复重试；DPAPI 密文、重复密码和非法来源 ID；导入工作区固定标签与历史搜索；重启恢复及用户点击选择账号后同时替换用户名／密码、不自动提交；new-password、跨 origin action、其他 origin 排除及关闭自动填充后立即移除入口。结果与界面截图保存在 `test-results/native-import/`。测试密码是本地合成数据，CSV 文件选择由 Debug fixture 路径替代，未手动验证系统文件选择对话框。
 
 首次引导原生集成复测通过。导入界面 E2E 以模拟 IPC 覆盖来源多选、数据类型、忙状态时禁用导航、报告、重试与 480×400 布局；检查了桌面版结果截图及小窗口底部操作不重叠。依赖许可证清单重新生成，包含新增 CSV 依赖。最终 Debug 可执行文件为 `native/target/debug/rove.exe`。
+
+## 默认浏览器与 beta6（2026-11-12）
+
+设置页和首次引导接入当前用户的 HTTP／HTTPS 能力注册、系统默认状态查询和 Windows 默认应用入口。安装版与便携版使用相同的 `RoveURL` 命令；卸载仅清理仍属于本次安装的注册。新增按 profile 隔离的单实例管道，外部链接可冷启动或转交现有窗口，首次引导结束后打开排队链接。范围与源码见 [DEFAULT_BROWSER.md](DEFAULT_BROWSER.md)。
+
+TypeScript／Vite 构建、73 项前端单元测试、79 项串行 Rust 测试、生产目标 Clippy（`-D warnings`）通过。本轮复测默认浏览器、设置和首次引导的 10 项界面 E2E，全数通过；上轮数据导入已执行完整 91 项界面 E2E，本轮没有重复执行其他用例。
+
+`npm run test:native:default-browser` 的真实 WebView2 四组检查通过，覆盖首次引导排队、冷／热启动链接、无参激活、原有标签恢复、设置注册与状态 IPC，并核对真实 UserChoice 不变；结果在 `test-results/native-default-browser/checks.json`。`scripts/installer-smoke.ps1` 使用独立 AppId、注册名和中文空格安装目录，19 项检查通过，覆盖 beta5 → beta6 升级、实际安装 EXE 哈希、两个协议、启动命令和快捷方式、冷启动链接落库、卸载清理、用户数据保留及真实 UserChoice 不变。
+
+computer-use 在 Windows 11 26200 上点击隔离 Release 窗口中的默认浏览器按钮，确认真实注册命令正确并启动 Windows 设置。系统窗口初始空白，通用默认应用页随后显示；本机没有完成 Rove 详情页和最终系统选择的交互核对，不将其计为已验证。未更改用户实际默认浏览器，测试后删除本次新增的候选注册并停止测试进程，用户原有 Rove 窗口继续运行。
+
+发布使用静态 CRT 的 x64 Release 构建，生成安装器和便携 ZIP。许可证清单重新生成，包含 181 条记录和 289 份许可正文。安装包未代码签名；其他 Windows 版本与物理多屏设备未实机覆盖。

@@ -95,6 +95,7 @@ fn browser_args(ui: bool) -> String {
 }
 #[derive(Debug)]
 enum Event {
+    ExternalUrls(Vec<String>),
     ImportSources(Vec<crate::import::Source>),
     ImportRead(Vec<crate::import::Batch>),
     Layout,
@@ -241,6 +242,8 @@ struct UndoBatch {
     auto_created: Option<String>,
 }
 struct App {
+    _instance: crate::instance::Instance,
+    external_urls: Vec<String>,
     import_sources: Vec<crate::import::Source>,
     import_busy: bool,
     // Drop child controllers before their parent HWND and shared context.
@@ -306,6 +309,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|d| d.data_local_dir().to_path_buf())
         })
         .ok_or("无法定位用户数据目录")?;
+    let external_urls = crate::instance::urls(std::env::args_os().skip(1))?;
+    let Some(mut instance) = crate::instance::Instance::claim(&data, &external_urls)? else { return Ok(()); };
     let mut storage = Storage::open(&data)?;
     // A malformed session is retained, and startup stops instead of overwriting it.
     let mut state = storage.load()?;
@@ -328,7 +333,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
+    let external_proxy = proxy.clone();
+    instance.listen(move |urls| { let _ = external_proxy.send_event(Event::ExternalUrls(urls)); });
     let mut app = App {
+        _instance: instance,
+        external_urls,
         import_sources: vec![],
         import_busy: false,
         split_handle: None,
@@ -375,6 +384,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 impl App {
+    fn publish_default_browser(&self) {
+        self.emit(json!({"type":"defaultBrowser","defaultBrowser":crate::default_browser::status()}));
+    }
+    fn open_external_urls(&mut self, event_loop: Option<&ActiveEventLoop>) {
+        if !self.state.onboarding.completed || !self.ready { return; }
+        for url in std::mem::take(&mut self.external_urls) { self.command(Command::New { url }, event_loop); }
+    }
     fn confirm_quit(&self) -> bool {
         if !self.state.settings.ask_before_quit { return true; }
         unsafe {
@@ -1699,6 +1715,7 @@ impl App {
             }
             let make_default = matches!(c, Command::OnboardingAdvance { step: crate::onboarding::Step::Ready, make_default: true, .. });
             if let Err(e) = self.state.apply(&c) { self.error(e); return; }
+            self.open_external_urls(event_loop);
             self.save(); self.publish();
             if let Err(e) = self.sync() { self.error(e); }
             if let Some(ui) = &self.ui { let _ = ui.focus(); }
@@ -1770,11 +1787,12 @@ impl App {
             );
         match c {
             Command::SystemSettings => {
-                unsafe {
-                    use windows::{core::w, Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL}};
-                    let result = ShellExecuteW(None, w!("open"), w!("ms-settings:defaultapps"), None, None, SW_SHOWNORMAL);
-                    if result.0 as isize <= 32 { self.error("无法打开 Windows 默认应用设置"); }
-                }
+                if let Err(e) = crate::default_browser::open_settings() { self.error(e); }
+                self.publish_default_browser();
+                return;
+            }
+            Command::DefaultBrowserStatus => {
+                self.publish_default_browser();
                 return;
             }
             Command::ClearBrowsingData { kind } => {
@@ -1972,11 +1990,13 @@ impl App {
             }
             Command::Ready => {
                 self.ready = true;
+                self.open_external_urls(event_loop);
                 if let Err(e) = self.update_window_frame() {
                     self.error(e);
                 }
                 self.publish();
                 self.publish_downloads();
+                self.publish_default_browser();
                 if let Err(e) = self.sync() {
                     self.error(e);
                 }
@@ -2408,6 +2428,11 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::ExternalUrls(urls) => {
+                self.external_urls.extend(urls.into_iter().take(32usize.saturating_sub(self.external_urls.len())));
+                self.open_external_urls(Some(event_loop));
+                if let Some(window) = &self.window { window.set_minimized(false); window.focus_window(); }
+            }
             Event::ImportSources(sources) => {
                 self.import_sources = sources;
                 self.import_busy = false;
@@ -2752,6 +2777,7 @@ impl ApplicationHandler<Event> for App {
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
+            WindowEvent::Focused(true) => self.publish_default_browser(),
             WindowEvent::Focused(false) => self.dismiss_tab_preview(),
             WindowEvent::CloseRequested => {
                 if !self.confirm_quit() { return; }

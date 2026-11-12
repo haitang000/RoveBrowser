@@ -1,7 +1,8 @@
 // Existing browser feature checks use an established profile. First-run
 // behavior is covered separately by native-onboarding-smoke.mjs.
 import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 export function createLegacyNativeProfile(profile) {
   const db = new DatabaseSync(join(profile, "era.sqlite"));
   try {
@@ -14,4 +15,18 @@ export function createLegacyNativeProfile(profile) {
     };
     db.prepare("INSERT INTO session(id,json) VALUES(1,?) ON CONFLICT(id) DO NOTHING").run(JSON.stringify(state));
   } finally { db.close(); }
+}
+// File-based CLI for PowerShell 5, whose native argument handling strips quotes
+// from inline JavaScript. Also checks the installed application's saved URL.
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const [profile, expectedUrl] = process.argv.slice(2);
+  if (!profile) throw Error("A fixture profile directory is required");
+  if (!expectedUrl) createLegacyNativeProfile(profile);
+  else {
+    const db = new DatabaseSync(join(profile, "era.sqlite"), { readOnly: true });
+    try {
+      const state = JSON.parse(db.prepare("SELECT json FROM session").get().json);
+      if (!state.tabs.some(tab => tab.url === expectedUrl)) throw Error("Installed application did not save the external URL");
+    } finally { db.close(); }
+  }
 }

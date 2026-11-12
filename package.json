@@ -1,6 +1,6 @@
 {
   "name": "rove",
-  "version": "0.1.0-beta5",
+  "version": "0.1.0-beta6",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "test:native": "node scripts/native-smoke.mjs",
     "test:native:onboarding": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-onboarding-smoke.mjs",
     "test:native:import": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-import-smoke.mjs",
+    "test:native:default-browser": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-default-browser-smoke.mjs",
     "test:native:split": "node scripts/native-split-smoke.mjs",
     "test:native:favorites": "node scripts/native-favorites-smoke.mjs",
     "test:native:favicons": "node scripts/native-favicon-smoke.mjs",

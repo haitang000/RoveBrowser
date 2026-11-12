@@ -2261,7 +2261,7 @@ dependencies = [
 
 [[package]]
 name = "rove"
-version = "0.1.0-beta5"
+version = "0.1.0-beta6"
 dependencies = [
  "base64 0.22.1",
  "csv",
@@ -2277,6 +2277,7 @@ dependencies = [
  "webview2-com",
  "windows",
  "winit",
+ "winreg",
  "wry",
 ]
 

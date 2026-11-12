@@ -109,6 +109,7 @@ declare global {
       type: string;
       importSources?: import("./import").ImportSource[];
       importBusy?: boolean;
+      defaultBrowser?: { http: boolean; https: boolean };
       ratio?: number;
       resizing?: boolean;
       state?: BrowserState;

@@ -139,9 +139,9 @@ const groups = computed<Group[]>(() => [
       {
         id: "default",
         title: "默认浏览器",
-        detail: "在 Windows 的默认应用中管理网页链接的打开方式。",
+        detail: !b.native ? "请在 Rove 桌面版中设置默认浏览器。" : !b.defaultBrowser ? "在 Windows 设置中选择 Rove 打开网页链接。" : b.defaultBrowser.http && b.defaultBrowser.https ? "Rove 已是 HTTP 和 HTTPS 链接的默认浏览器。" : b.defaultBrowser.http || b.defaultBrowser.https ? "部分网页链接仍由其他浏览器打开，请在 Windows 中将 HTTP 和 HTTPS 都设为 Rove。" : "Rove 尚未设为默认浏览器。在 Windows 设置中选择 Rove。",
         kind: "button",
-        action: "打开系统设置",
+        action: "设为默认浏览器",
         keywords: "default browser",
       },
     ],
@@ -408,6 +408,7 @@ function saveInput(id: string) {
 function action(row: Row) {
   if (row.id === "onboarding") { b.openOnboarding(); return; }
   if (row.id === "default") {
+    if (!b.native) { notice.value = "请在 Rove 桌面版中设置默认浏览器。"; return; }
     b.send({ type: "systemSettings" });
     return;
   }
@@ -623,7 +624,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   :id="`setting-${row.id}-${tabId}`"
                   class="setting-button"
                   :disabled="row.id === 'default' && !b.native"
-                  :aria-label="`${row.action}${row.title}`"
+                  :aria-label="row.id === 'default' ? row.action : `${row.action}${row.title}`"
                   @click="action(row)"
                 >
                   {{ row.action }}

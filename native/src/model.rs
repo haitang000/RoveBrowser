@@ -191,6 +191,8 @@ pub enum Command {
     ClearBrowsingData { kind: String },
     #[serde(rename = "systemSettings")]
     SystemSettings,
+    #[serde(rename = "defaultBrowserStatus")]
+    DefaultBrowserStatus,
     #[serde(rename = "ready")]
     Ready,
     #[serde(rename = "presented")]
