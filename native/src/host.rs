@@ -20,7 +20,7 @@ use webview2_com::{
     IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
+        ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
         ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_4,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
@@ -103,6 +103,12 @@ enum Event {
     Load(String, String, bool),
     Source(String, String),
     Favicon(String, String, String),
+    /// Icon links the loaded page declares, for the sharper fetch that follows.
+    FaviconLinks(String, String, Vec<crate::favicon::Link>),
+    /// The fetched icon of a page's site; `None` when the site had none.
+    SiteIcon(String, String, Option<String>),
+    /// Site icons fetched for saved addresses: the one-time legacy icon upgrade.
+    IconsRefreshed(Vec<(String, Option<String>)>),
     Shortcut(String, bool),
     Open(String),
     PeekRequest(String, String, Option<Point>),
@@ -272,6 +278,12 @@ struct App {
     last_error: Option<String>,
     ui_data: PathBuf,
     glass: bool,
+    /// Site icons fetched this session, one request per site.
+    site_icons: crate::favicon::SiteIcons,
+    /// A pre-upgrade session still holds upscaled icons; fetch each site once.
+    icon_refresh: bool,
+    /// At least one saved icon was actually replaced by that refresh.
+    icon_refresh_found: bool,
 }
 struct PreviewRender {
     view: WebView,
@@ -292,7 +304,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("无法定位用户数据目录")?;
     let mut storage = Storage::open(&data)?;
     // A malformed session is retained, and startup stops instead of overwriting it.
-    let state = storage.load()?;
+    let mut state = storage.load()?;
+    // Icons cached by an older build were stretched to 64 pixels and are soft;
+    // the one-time refresh after the UI is ready re-fetches each saved site. The
+    // marker is only written once that refresh found real icons, so an offline
+    // first launch tries again next time.
+    let icon_refresh = state.icons_need_upgrade();
+    if !icon_refresh && state.icon_version != crate::favicon::ICON_VERSION {
+        state.mark_icons_upgraded();
+        storage.save(&state)?;
+    }
     // Downloads that were running when the app quit become interruptions; the
     // repaired list is written back so a second launch shows the same thing.
     let downloads = Rc::new(RefCell::new(Downloads::load(
@@ -340,6 +361,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         last_error: None,
         ui_data: data.join("UI"),
         glass: false,
+        site_icons: crate::favicon::SiteIcons::default(),
+        icon_refresh,
+        icon_refresh_found: false,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -432,6 +456,78 @@ impl App {
         // and once more on exit keeps the final byte count of a quit download.
         let items = self.downloads.borrow().items.clone();
         let _ = self.storage.save_downloads(&items);
+    }
+    /// One-time: replace icons an older build enlarged to 64 pixels. Each saved
+    /// site is asked for its own icon in the background and the replacements
+    /// arrive in small batches, so the sidebar fills in instead of freezing.
+    fn refresh_saved_icons(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        let mut targets: Vec<(String, String)> = Vec::new();
+        let urls = self
+            .state
+            .tabs
+            .iter()
+            .map(|tab| &tab.url)
+            .chain(self.state.pins.iter().map(|mark| &mark.url))
+            .chain(self.state.favorites.iter().map(|mark| &mark.url));
+        for url in urls {
+            let Some(origin) = crate::favicon::origin_of(url) else {
+                continue;
+            };
+            if !seen.insert(origin.clone()) || !self.site_icons.begin(&origin) {
+                continue;
+            }
+            targets.push((origin, url.clone()));
+        }
+        if targets.is_empty() {
+            return;
+        }
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let mut batch = Vec::new();
+            for (origin, url) in targets {
+                batch.push((origin, crate::favicon::site_icon(&url)));
+                if batch.len() >= 4
+                    && proxy
+                        .send_event(Event::IconsRefreshed(std::mem::take(&mut batch)))
+                        .is_err()
+                {
+                    return;
+                }
+            }
+            if !batch.is_empty() {
+                let _ = proxy.send_event(Event::IconsRefreshed(batch));
+            }
+            // An empty batch ends the refresh; the host then decides whether the
+            // session may record the upgrade (offline launches retry next time).
+            let _ = proxy.send_event(Event::IconsRefreshed(Vec::new()));
+        });
+    }
+    /// Fetches the icons a loaded page declares at their own resolution; the
+    /// WebView2 capture that already arrived stays as the instant fallback.
+    fn start_site_icon(&mut self, id: String, page_url: String, links: Vec<crate::favicon::Link>) {
+        let Some(origin) = crate::favicon::origin_of(&page_url) else {
+            return;
+        };
+        if links.is_empty() {
+            return;
+        }
+        if let Some(icon) = self.site_icons.known(&origin).cloned() {
+            // Another page of this site already produced its icon; reuse it.
+            if self.state.cache_page_icon(&id, &page_url, icon) {
+                self.save();
+                self.publish();
+            }
+            return;
+        }
+        if !self.site_icons.begin(&origin) {
+            return;
+        }
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let icon = crate::favicon::resolve(&links, &page_url);
+            let _ = proxy.send_event(Event::SiteIcon(id, page_url, icon));
+        });
     }
     fn page(&self) -> Option<&WebView> {
         self.peek
@@ -1811,6 +1907,10 @@ impl App {
                 if let Err(e) = self.sync() {
                     self.error(e);
                 }
+                if self.icon_refresh {
+                    self.icon_refresh = false;
+                    self.refresh_saved_icons();
+                }
                 return;
             }
             Command::Presented => {
@@ -2415,6 +2515,10 @@ impl ApplicationHandler<Event> for App {
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
                     p.tab.loading = loading;
                     if model::is_web(&url) {
+                        // A page on another site must not keep the last site's icon.
+                        if !crate::favicon::same_origin(&p.tab.url, &url) {
+                            p.tab.favicon = None;
+                        }
                         p.tab.url = url.clone();
                         p.page.url = url;
                         if loading {
@@ -2431,6 +2535,10 @@ impl ApplicationHandler<Event> for App {
                 if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
                     t.loading = loading;
                     if model::is_web(&url) {
+                        // A page on another site must not keep the last site's icon.
+                        if !crate::favicon::same_origin(&t.url, &url) {
+                            t.favicon = None;
+                        }
                         t.url = url.clone();
                         if let Some(p) = self.pages.get_mut(&id) {
                             p.url = url;
@@ -2463,6 +2571,9 @@ impl ApplicationHandler<Event> for App {
             Event::Source(id, url) => {
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
                     if model::is_web(&url) {
+                        if !crate::favicon::same_origin(&p.tab.url, &url) {
+                            p.tab.favicon = None;
+                        }
                         p.tab.url = url.clone();
                         p.page.url = url;
                         self.publish_peek();
@@ -2474,6 +2585,9 @@ impl ApplicationHandler<Event> for App {
                         self.invalidate_thumbnail(&id);
                     }
                     if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
+                        if !crate::favicon::same_origin(&t.url, &url) {
+                            t.favicon = None;
+                        }
                         t.url = url.clone();
                     }
                     if let Some(p) = self.pages.get_mut(&id) {
@@ -2492,6 +2606,52 @@ impl ApplicationHandler<Event> for App {
                 }
                 if self.state.cache_favicon(&id, &page_url, icon) { self.save(); }
                 self.publish();
+            }
+            Event::FaviconLinks(id, page_url, links) => self.start_site_icon(id, page_url, links),
+            Event::SiteIcon(id, page_url, icon) => {
+                let Some(origin) = crate::favicon::origin_of(&page_url) else { return };
+                let Some(icon) = self.site_icons.finish(&origin, icon) else { return };
+                if let Some(p) = self
+                    .peek
+                    .as_mut()
+                    .filter(|p| p.tab.id == id && crate::favicon::same_origin(&p.tab.url, &page_url))
+                {
+                    p.tab.favicon = Some(icon);
+                    self.publish_peek();
+                    return;
+                }
+                if self.state.cache_page_icon(&id, &page_url, icon) {
+                    self.save();
+                    self.publish();
+                }
+            }
+            Event::IconsRefreshed(items) => {
+                if items.is_empty() {
+                    // The one-time refresh finished: remembered only when it found
+                    // real icons, so an offline first launch tries again next time.
+                    if self.icon_refresh_found {
+                        self.icon_refresh_found = false;
+                        self.state.mark_icons_upgraded();
+                        self.save();
+                    }
+                    return;
+                }
+                let mut fetched = Vec::new();
+                for (origin, icon) in items {
+                    if let Some(icon) = self.site_icons.finish(&origin, icon) {
+                        fetched.push((origin, icon));
+                    }
+                }
+                // One publish for the whole batch: the state carries every icon.
+                let mut changed = false;
+                for (origin, icon) in fetched {
+                    changed |= self.state.cache_site_icon(&origin, icon);
+                }
+                self.icon_refresh_found |= changed;
+                if changed {
+                    self.save();
+                    self.publish();
+                }
             }
         }
     }
@@ -2760,11 +2920,25 @@ fn register_page_events(
                     core.Source(&mut value)?;
                 }
                 let page_url = take_pwstr(value);
-                let proxy = proxy.clone();
-                let id = id.clone();
+                let capture_proxy = proxy.clone();
+                let capture_id = id.clone();
+                let capture_url = page_url.clone();
                 crate::favicon::capture(&core, move |icon| {
-                    let _ = proxy.send_event(Event::Favicon(id, page_url, icon));
+                    let _ = capture_proxy.send_event(Event::Favicon(capture_id, capture_url, icon));
                 })?;
+                // WebView2's favicon store only holds 16 and 32 pixel bitmaps; the
+                // page's declared SVG or 64px+ icon is what stays sharp when cached.
+                if let Ok(web) = core.cast::<ICoreWebView2>() {
+                    let link_proxy = proxy.clone();
+                    let link_id = id.clone();
+                    let link_url = page_url;
+                    let _ = crate::favicon::discover_links(&web, move |links| {
+                        if !links.is_empty() {
+                            let _ =
+                                link_proxy.send_event(Event::FaviconLinks(link_id, link_url, links));
+                        }
+                    });
+                }
             }
             Ok(())
         }));

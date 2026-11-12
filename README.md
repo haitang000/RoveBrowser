@@ -27,6 +27,7 @@ npm test
 npm run test:e2e  # 使用本机 Microsoft Edge headless
 npm run test:native # 先 cargo build；本地固定网页 + Windows 原生宿主集成
 npm run test:native:favorites # 本地 PNG 图标、8 个上限及离线重启缓存
+npm run test:native:favicons # 图标清晰度：声明图标取回、不放大、旧缓存升级
 npm run test:native:spaces # 先 cargo build；独立临时目录验证真实 WebView2 Space 切换
 npm run test:native:preview # 先 cargo build；本地网页验证真实 WebView2 悬停预览与分屏
 npm run test:native:settings # 先 cargo build；设置持久化、真实下载和浏览数据清理
@@ -50,7 +51,7 @@ GitHub Release 工作流同时生成安装 EXE 和便携 ZIP。静默安装支�
 - Zigzag 设置页：7 个分类、跨分类搜索、响应式导航、设置标签页与分类地址恢复；搜索引擎／自定义搜索地址、外观、工作区增删排序、下载目录、密码／表单偏好、历史与网站数据清理、自定义快捷键和退出确认。入口为侧栏底部设置按钮、命令面板 Settings 或 Ctrl+,。移植范围和平台适配见 [设置移植记录](docs/SETTINGS_PORT.md)。
 
 - 源码参数化侧栏、Favorites、固定/普通标签、选中/hover/focus、浅深主题、数字工作区、统一设计 tokens。
-- 侧栏顶部置顶网站最多 8 个，所有工作区共用。通过标签页右键或拖拽添加、拖动排序、网站右键编辑和移除；移除独立管理弹窗及区域标题。网站图标从 WebView2 获取真实 PNG 并随 SQLite 会话缓存，卸载网页、离线及重启后继续显示；旧会话超出上限的项目保留为当前工作区固定标签，分屏组合一同迁移。
+- 侧栏顶部置顶网站最多 8 个，所有工作区共用。通过标签页右键或拖拽添加、拖动排序、网站右键编辑和移除；移除独立管理弹窗及区域标题。网站图标只缩小不放大：WebView2 的真实 PNG 位图按原尺寸缓存，页面声明的 SVG／大图标在后台取回后使用，旧版本缓存的放大模糊图标首次启动时自动重新获取；随 SQLite 会话缓存，卸载网页、离线及重启后继续显示；旧会话超出上限的项目保留为当前工作区固定标签，分屏组合一同迁移。
 - 固定标签逻辑迁自 Zigzag 的 Swift Library/TabManager：保存项与运行中页面分离；关闭只卸载网页，固定项及起始网址保留；支持返回固定网址、分离为普通标签、编辑保存的名称/网址，普通标签/固定项/Favorites 间拖动转换保留同一网页实例。Favorites 跨工作区复用单个实例；已有分屏可整体固定并恢复配对。旧会话自动迁移，细节与平台差异见 [固定标签移植记录](docs/PINNED_TABS_PORT.md)。
 - Windows 无边框标题栏、拖动、边缘原生 resize、最小化/最大化/关闭，逻辑坐标与 DPI 换算。
 - 基本布局恢复为整行32px标题栏（Rove位于左上角）、下方240px侧栏和内缩圆角网页卡片；旧会话保存的无边框页面选项不再改变布局。工作区玻璃外观与标签悬停预览保留。

@@ -89,6 +89,10 @@ pub struct State {
     pub pins: Vec<Favorite>,
     #[serde(default)]
     pub library_version: u8,
+    /// Bumped when the cached-icon pipeline changes; older icons are fetched
+    /// again once so a previously blurred cache is replaced (see `favicon`).
+    #[serde(default)]
+    pub icon_version: u8,
     pub closed: Vec<Tab>,
     pub theme: String,
     pub sidebar_collapsed: bool,
@@ -519,6 +523,7 @@ impl Default for State {
             favorites,
             pins: vec![],
             library_version: 0,
+            icon_version: 0,
             closed: vec![],
             theme: "light".into(),
             sidebar_collapsed: false,
