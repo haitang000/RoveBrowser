@@ -56,13 +56,46 @@ export function initialState(): BrowserState {
     ],
   });
 }
+/** Records the tab the current space is showing, so switching back restores it. */
+function rememberActive(s: BrowserState) {
+  const space = s.spaces.find((item) => item.id === s.activeSpace);
+  if (space && s.tabs.some((tab) => tab.id === s.activeTab)) space.activeTab = s.activeTab;
+}
+function mostRecentTab(s: BrowserState, spaceId: string) {
+  let best: Tab | undefined;
+  for (const tab of s.tabs) {
+    if (tab.spaceId === spaceId && (!best || (tab.lastActivated || 0) > (best.lastActivated || 0))) best = tab;
+  }
+  return best;
+}
+/** The tab to show when entering a space: the one it was showing when the user
+ * left it, else its most recently shown page. A favorite is shared by every
+ * space, so its live tab may currently belong to another one. */
+function spaceTab(s: BrowserState, spaceId: string) {
+  const space = s.spaces.find((item) => item.id === spaceId);
+  const remembered = s.tabs.find((tab) => tab.id === space?.activeTab);
+  if (remembered && (remembered.spaceId === spaceId || s.favorites.some((f) => f.id === remembered.bookmarkId)))
+    return remembered;
+  return mostRecentTab(s, spaceId);
+}
+/** Switches spaces and restores the tab the target space was showing, opening a
+ * blank page only when that space has no tabs left. */
+function enterSpace(s: BrowserState, spaceId: string) {
+  s.activeSpace = spaceId;
+  const target = spaceTab(s, spaceId);
+  if (target) activateTab(s, target);
+  else reduce(s, { type: "new" });
+}
 export function reduce(s: BrowserState, c: Command): BrowserState {
   upgradeLibrary(s);
   const tab = () => s.tabs.find((t) => t.id === String(c.id || s.activeTab));
   const activate = (t?: Tab) => {
     activateTab(s, t);
   };
-  if (bookmarkCommand(s, c, (id) => { Object.assign(s, reduce(s, { type: "close", id })); })) return { ...s };
+  if (bookmarkCommand(s, c, (id) => { Object.assign(s, reduce(s, { type: "close", id })); })) {
+    rememberActive(s);
+    return { ...s };
+  }
   switch (c.type) {
     case "settingsOpen": {
       const existing = s.tabs.find((t) => t.spaceId === s.activeSpace && isSettingsUrl(t.url)) || s.tabs.find((t) => isSettingsUrl(t.url));
@@ -92,7 +125,12 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       s.tabs = s.tabs.filter((t) => !removed.has(t.id));
       s.tabs.forEach((t) => { if (t.spaceId === c.id) t.spaceId = s.activeSpace; if (t.splitWith && removed.has(t.splitWith)) delete t.splitWith; });
       s.closed = s.closed.filter((t) => t.spaceId !== c.id);
-      if (!s.tabs.some((t) => t.id === s.activeTab)) { s.activeTab = s.tabs.find((t) => t.spaceId === s.activeSpace)?.id || ""; if (!s.activeTab) return reduce(s, { type: "new" }); }
+      if (!s.tabs.some((t) => t.id === s.activeTab)) {
+        // Deleting the current space lands in the first remaining one, which
+        // restores the tab it was showing.
+        s.activeTab = "";
+        enterSpace(s, s.activeSpace);
+      }
       break;
     }
     case "favoriteSave": {
@@ -188,9 +226,10 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     }
     case "space": {
       if (s.spaces.some((x) => x.id === c.id)) {
-        s.activeSpace = String(c.id);
-        s.activeTab = s.tabs.find((t) => t.spaceId === c.id)?.id || "";
-        if (!s.activeTab) return reduce(s, { type: "new" });
+        // Keep what the space we are leaving is showing, then restore what the
+        // target space was showing when it was left.
+        rememberActive(s);
+        enterSpace(s, String(c.id));
       }
       break;
     }
@@ -324,5 +363,6 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
   }
+  rememberActive(s);
   return { ...s };
 }

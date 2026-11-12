@@ -55,6 +55,10 @@ pub struct Space {
     /// False selects frosted glass. Absent or true selects clear glass.
     #[serde(default, rename = "clearGlass", skip_serializing_if = "Option::is_none")]
     pub clear_glass: Option<bool>,
+    /// The tab this space was showing when the user left it. Switching back
+    /// restores it instead of the space's first tab; absent in an older session.
+    #[serde(default, rename = "activeTab", skip_serializing_if = "Option::is_none")]
+    pub active_tab: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -506,6 +510,7 @@ impl Default for State {
                 color: c.to_string(),
                 translucency: None,
                 clear_glass: None,
+                active_tab: None,
             })
             .collect(),
             tabs: vec![],
@@ -556,6 +561,7 @@ impl State {
             self.active_space = t.space_id.clone();
             t.last_activated = now_secs();
         }
+        self.remember_active();
     }
     pub fn new_tab(&mut self, input: &str) -> Result<(), String> {
         if self.tabs.len() >= 256 {
@@ -583,7 +589,65 @@ impl State {
             last_activated: now_secs(),
         });
         self.active_tab = id;
+        self.remember_active();
         Ok(())
+    }
+    /// Remembers the tab the current space is showing, so a later switch back
+    /// restores that tab rather than the space's first one.
+    fn remember_active(&mut self) {
+        let space_id = self.active_space.clone();
+        let tab_id = self.active_tab.clone();
+        if !self.tabs.iter().any(|t| t.id == tab_id) {
+            return;
+        }
+        if let Some(space) = self.spaces.iter_mut().find(|s| s.id == space_id) {
+            space.active_tab = Some(tab_id);
+        }
+    }
+    /// The tab to show when entering a space: the one it was showing when the
+    /// user left it, else its most recently shown tab.
+    fn space_tab(&self, space_id: &str) -> Option<String> {
+        if let Some(id) = self
+            .spaces
+            .iter()
+            .find(|s| s.id == space_id)
+            .and_then(|s| s.active_tab.clone())
+        {
+            // A favorite is shared by every space, so its live tab may currently
+            // be assigned to another one; activating it brings it back here.
+            let alive = self.tabs.iter().any(|t| {
+                t.id == id
+                    && (t.space_id == space_id
+                        || t.bookmark_id.as_ref().is_some_and(|mark| {
+                            self.favorites.iter().any(|f| &f.id == mark)
+                        }))
+            });
+            if alive {
+                return Some(id);
+            }
+        }
+        self.most_recent_tab(space_id)
+    }
+    fn most_recent_tab(&self, space_id: &str) -> Option<String> {
+        let mut best: Option<&Tab> = None;
+        for tab in self.tabs.iter().filter(|t| t.space_id == space_id) {
+            if best.is_none_or(|seen| tab.last_activated > seen.last_activated) {
+                best = Some(tab);
+            }
+        }
+        best.map(|tab| tab.id.clone())
+    }
+    /// Switches to a space and restores the tab it was showing, opening a blank
+    /// page only when the space has no tabs left.
+    fn enter_space(&mut self, space_id: &str) -> Result<(), String> {
+        self.active_space = space_id.to_string();
+        match self.space_tab(space_id) {
+            Some(id) => {
+                self.activate(&id);
+                Ok(())
+            }
+            None => self.new_tab(""),
+        }
     }
     fn partner_of(&self, id: &str) -> Option<String> {
         let tab = self.tabs.iter().find(|tab| tab.id == id)?;
@@ -709,6 +773,7 @@ impl State {
                 }
             }
         }
+        self.remember_active();
     }
     pub fn repair(&mut self) {
         // A missing removable download folder must not reset unrelated preferences.
@@ -758,9 +823,11 @@ impl State {
         } else {
             let _ = self.new_tab("");
         }
+        self.remember_active();
     }
     pub fn apply(&mut self, c: &Command) -> Result<(), String> {
         if self.apply_bookmark_command(c)? {
+            self.remember_active();
             return Ok(());
         }
         match c {
@@ -809,7 +876,13 @@ impl State {
                     }
                     self.tabs.retain(|t| !removed.contains(&t.id));
                     self.closed.retain(|t| &t.space_id != id);
-                    if !self.tabs.iter().any(|t| t.id == self.active_tab) { self.active_tab = self.tabs.iter().find(|t| t.space_id == self.active_space).map(|t| t.id.clone()).unwrap_or_default(); if self.active_tab.is_empty() { self.new_tab("")?; } }
+                    if !self.tabs.iter().any(|t| t.id == self.active_tab) {
+                        // Deleting the current space lands in the first remaining
+                        // one, which restores the tab it was showing.
+                        self.active_tab.clear();
+                        let space = self.active_space.clone();
+                        self.enter_space(&space)?;
+                    }
                 }
             }
             Command::New { url } => self.new_tab(url)?,
@@ -958,16 +1031,10 @@ impl State {
             }
             Command::SwitchSpace { id } => {
                 if self.spaces.iter().any(|s| &s.id == id) {
-                    self.active_space = id.clone();
-                    self.active_tab = self
-                        .tabs
-                        .iter()
-                        .find(|t| &t.space_id == id)
-                        .map(|t| t.id.clone())
-                        .unwrap_or_default();
-                    if self.active_tab.is_empty() {
-                        self.new_tab("")?
-                    }
+                    // Keep what the space we are leaving is showing, then restore
+                    // what the target space was showing when it was left.
+                    self.remember_active();
+                    self.enter_space(id)?;
                 }
             }
             Command::CreateSpace { name, color, background, translucency, clear_glass } => {
@@ -985,6 +1052,7 @@ impl State {
                     color: color.clone(),
                     translucency: (0.005..=1.0).contains(translucency).then_some(*translucency),
                     clear_glass: (*clear_glass == Some(false)).then_some(false),
+                    active_tab: None,
                 });
                 if !background { self.active_space = id; self.new_tab("")?; }
             }
@@ -1038,6 +1106,7 @@ impl State {
             }
             _ => {}
         }
+        self.remember_active();
         Ok(())
     }
 }
@@ -1148,6 +1217,58 @@ mod tests {
             .unwrap()
             .split_with
             .is_none());
+    }
+    #[test]
+    fn switching_spaces_restores_the_tab_each_space_was_showing() {
+        let mut s = State::default();
+        s.new_tab("https://example.com/docs").unwrap();
+        let personal = s.active_tab.clone();
+        s.apply(&Command::SwitchSpace { id: "work".into() }).unwrap();
+        let work = s.active_tab.clone();
+        s.new_tab("https://example.com/work-notes").unwrap();
+        let notes = s.active_tab.clone();
+        // Leaving a space remembers the tab it was showing, not its first tab.
+        s.apply(&Command::SwitchSpace { id: "personal".into() }).unwrap();
+        assert_eq!(s.active_tab, personal);
+        s.apply(&Command::SwitchSpace { id: "work".into() }).unwrap();
+        assert_eq!(s.active_tab, notes);
+        // A remembered tab that no longer belongs to the space falls back to the
+        // most recently shown one instead of the first tab.
+        s.apply(&Command::SwitchSpace { id: "personal".into() }).unwrap();
+        s.apply(&Command::Move {
+            id: notes,
+            space_id: "studio".into(),
+        })
+        .unwrap();
+        s.apply(&Command::SwitchSpace { id: "work".into() }).unwrap();
+        assert_eq!(s.active_tab, work);
+        // Favorites are shared, so a space still restores one that was opened
+        // elsewhere after it was left here.
+        let favorite = s.favorites[0].id.clone();
+        s.apply(&Command::Activate {
+            id: favorite.clone(),
+        })
+        .unwrap();
+        let favorite_tab = s.active_tab.clone();
+        s.apply(&Command::SwitchSpace { id: "personal".into() }).unwrap();
+        assert_ne!(s.active_tab, favorite_tab);
+        s.apply(&Command::Activate {
+            id: favorite.clone(),
+        })
+        .unwrap();
+        s.apply(&Command::SwitchSpace { id: "work".into() }).unwrap();
+        assert_eq!(s.active_tab, favorite_tab);
+        assert_eq!(s.active_space, "work");
+    }
+    #[test]
+    fn spaces_without_a_remembered_tab_fall_back_to_the_most_recent_page() {
+        // Sessions written before spaces remembered their tab still restore the
+        // most recently shown page rather than the first one.
+        let mut s = State::default();
+        s.tabs.push(tab_for_test("studio-old", "studio", 10));
+        s.tabs.push(tab_for_test("studio-recent", "studio", 20));
+        s.apply(&Command::SwitchSpace { id: "studio".into() }).unwrap();
+        assert_eq!(s.active_tab, "studio-recent");
     }
     #[test]
     fn close_last_creates_blank() {

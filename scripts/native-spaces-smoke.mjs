@@ -158,11 +158,15 @@ try {
   await ui.getByRole('tab', { name: 'Personal native fixture', exact: true }).waitFor();
   assert.deepEqual(await personal.evaluate(() => [window.__spaceMarker, scrollY]), ['personal state', 300]);
   assert.equal(work.isClosed(), false);
+  // Coming back lands on the page Personal was showing, not its first tab.
+  assert.equal(await ui.locator('.space-list .tab-row.selected .tab-title').textContent(), 'Personal native fixture');
   await swipe(ui, 100);
   await home(ui, 'Work');
   assert.deepEqual(await work.evaluate(() => [window.__spaceMarker, scrollY]), ['work state', 450]);
+  assert.equal(await ui.locator('.space-list .tab-row.selected .tab-title').textContent(), 'Work native fixture');
   assert.equal(hits.get('/personal'), 1); assert.equal(hits.get('/work'), 1);
   checks.push('双向切换保留两个真实网页控制器、DOM 标记及滚动位置，服务器无重复加载');
+  checks.push('双向切换恢复每个工作区离开前打开的标签页，而不是该工作区的第一个标签页');
   await ui.screenshot({ path: join(output, 'work-shell.png') });
   await close();
   await waitFor(async () => {

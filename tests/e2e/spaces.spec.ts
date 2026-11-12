@@ -285,6 +285,18 @@ test("reduced motion keeps lists still and switches with a same-place cross-fade
   expect(await page.locator(".browser-shell").evaluate((e) => e.getAnimations().length)).toBe(0);
 });
 
+test("switching back restores the tab each space was showing", async ({ page }) => {
+  // Personal opens on its New Tab page, not on its first tab.
+  await expect(page.locator('[data-space-id="personal"] .tab-row.selected')).toHaveAttribute("data-tab-id", "start");
+  await page.keyboard.press("Control+2");
+  await settled(page);
+  await expect(currentName(page)).toHaveText("Work");
+  await page.keyboard.press("Control+1");
+  await settled(page);
+  await expect(currentName(page)).toHaveText("Personal");
+  await expect(page.locator('[data-space-id="personal"] .tab-row.selected')).toHaveAttribute("data-tab-id", "start");
+});
+
 test("opening an overlay cancels an unfinished swipe without changing space", async ({ page }) => {
   await wheel(page, 110);
   await page.keyboard.press("Control+t");

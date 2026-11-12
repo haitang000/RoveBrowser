@@ -66,6 +66,9 @@ test("spaces, dark mode, pinning and split container", async ({ page }) => {
   await page
     .getByRole("button", { name: "工作区 Personal", exact: true })
     .click();
+  // Coming back restores Personal's New Tab page, so select the pinned web page
+  // the split needs explicitly instead of relying on the first tab.
+  await page.getByRole("tab", { name: "GitHub" }).click();
   await page.getByRole("tab", { name: "Wikipedia" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "在当前网页旁分屏" }).click();
   await expect(page.locator(".page-pane")).toHaveCount(2);

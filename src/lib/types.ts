@@ -8,6 +8,8 @@ export interface Space {
   translucency?: number;
   /** False is frosted. Absent or true is clear. */
   clearGlass?: boolean;
+  /** The tab this space was showing when the user left it; restored on switch back. */
+  activeTab?: string;
 }
 export interface Tab {
   id: string;
