@@ -4,6 +4,7 @@
 // 3. A large declared icon is shrunk to 64, never kept larger.
 // 4. Icons cached by an older build (blurred by that stretch) are fetched once
 //    at each site's own resolution.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -14,6 +15,7 @@ import { once } from 'node:events';
 import assert from 'node:assert/strict';
 
 const profile = await mkdtemp(join(tmpdir(), 'rove-favicon-'));
+createLegacyNativeProfile(profile);
 const legacyProfile = await mkdtemp(join(tmpdir(), 'rove-favicon-legacy-'));
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-favicon');
 await mkdir(output, { recursive: true });

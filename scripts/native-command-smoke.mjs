@@ -1,4 +1,5 @@
 // Command bar integration with real native pages and an isolated temporary profile.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -9,6 +10,7 @@ import assert from 'node:assert/strict';
 import { checkCommand, checkCommandHandoff, popupPage } from './native-command-checks.mjs';
 
 const profile=await mkdtemp(join(tmpdir(),'rove-command-smoke-'));
+createLegacyNativeProfile(profile);
 const output=resolve(process.env.ERA_SMOKE_OUTPUT||'test-results/native-command');
 const port=Number(process.env.ERA_SMOKE_PORT||19646);
 await mkdir(output,{recursive:true});

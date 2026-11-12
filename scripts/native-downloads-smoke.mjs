@@ -3,6 +3,7 @@
 // unfinished rows, the two keyboard routes work, and the history survives a
 // restart. Playwright's CDP denies downloads by default, so the page session
 // restores WebView2's own behavior without choosing a destination.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -54,6 +55,7 @@ await new Promise((done) => server.listen(0, '127.0.0.1', done));
 const port = Number(process.env.ERA_SMOKE_PORT || 19846);
 const base = `http://127.0.0.1:${server.address().port}`;
 const profile = await mkdtemp(join(tmpdir(), 'rove-downloads-smoke-'));
+createLegacyNativeProfile(profile);
 const downloadsDir = join(profile, 'Downloads');
 await mkdir(downloadsDir, { recursive: true });
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-downloads');

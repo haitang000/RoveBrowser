@@ -3,6 +3,7 @@
 // (127.0.0.1 and localhost) serve the same fixture so per-site zoom is real.
 // The swipe gesture itself needs a precision touchpad and is not synthesized
 // here; everything else is driven through the same IPC the trusted UI uses.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -52,6 +53,7 @@ const hostPort = server.address().port;
 const siteA = `http://127.0.0.1:${hostPort}/a`;
 const siteB = `http://localhost:${hostPort}/b`;
 const profile = await mkdtemp(join(tmpdir(), 'rove-site-controls-smoke-'));
+createLegacyNativeProfile(profile);
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-site-controls');
 const port = Number(process.env.ERA_SMOKE_PORT || 19786);
 await mkdir(output, { recursive: true });

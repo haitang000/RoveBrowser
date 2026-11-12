@@ -12,6 +12,8 @@
     "installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer.ps1",
     "test:e2e": "playwright test",
     "test:native": "node scripts/native-smoke.mjs",
+    "test:native:onboarding": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-onboarding-smoke.mjs",
+    "test:native:import": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-import-smoke.mjs",
     "test:native:split": "node scripts/native-split-smoke.mjs",
     "test:native:favorites": "node scripts/native-favorites-smoke.mjs",
     "test:native:favicons": "node scripts/native-favicon-smoke.mjs",

@@ -17,6 +17,8 @@ import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
+import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
+import type { ImportRequest, ImportSource } from "../lib/import";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const popupWindow = Boolean(window.__ERA_POPUP__);
@@ -25,7 +27,7 @@ export const useBrowser = defineStore("browser", () => {
   const splitResize = ref<{ ratio: number; resizing: boolean }>();
   const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
   const previewAnimationDone = ref(0);
-  const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || initialState())),
+  const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || onboardingPreview(initialState()))),
     history = ref<HistoryEntry[]>([]),
     suggestions = ref<string[]>([]),
     recent = ref<string[]>([]),
@@ -94,6 +96,23 @@ export const useBrowser = defineStore("browser", () => {
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedPage(state.value, active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
+  const importSources = ref<ImportSource[]>([]);
+  const importBusy = ref(false);
+  const importPhase = ref("checking");
+  function scanImports() { importPhase.value = "checking"; if (native) send({ type: "importScan" }); }
+  function runImport(request: ImportRequest) { importPhase.value = "importing"; if (native) send({ type: "importRun", request }); }
+  function importPasswords() { importPhase.value = "importing"; if (native) send({ type: "importPasswords" }); }
+  const onboardingOpen = computed(() => state.value.onboarding?.completed === false);
+  function openOnboarding() {
+    commandOpen.value = false; settingsOpen.value = false; deskOpen.value = false;
+    contextMenu.value = undefined; downloadsOpen.value = false; closeFind();
+    send({ type: "onboardingOpen" });
+  }
+  if (!native && new URLSearchParams(location.search).has("onboarding")) {
+    watch(state, (value) => {
+      try { localStorage.setItem(ONBOARDING_PREVIEW_KEY, JSON.stringify(value)); } catch { /* Preview remains usable without storage. */ }
+    }, { deep: true });
+  }
   function shortcutLabel(id: string) {
     const binding = shortcutFor(id, settings.value);
     return binding ? shortcutText(binding) : "";
@@ -457,6 +476,10 @@ export const useBrowser = defineStore("browser", () => {
       peekBackground.value[e.pane] = e.background;
       if (e.backgroundReady) peekBackgroundReady.value = true;
     }
+    if (e.type === "importState") {
+      if (typeof e.importBusy === "boolean") importBusy.value = e.importBusy;
+      if (e.importSources) importSources.value = e.importSources;
+    }
     if (e.type === "state" && e.state) {
       const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
       const previous = sources(state.value);
@@ -557,6 +580,9 @@ export const useBrowser = defineStore("browser", () => {
   }
   send({ type: popupWindow ? "popupReady" : "ready" });
   return {
+    importSources, importBusy, importPhase, scanImports, runImport, importPasswords,
+    onboardingOpen,
+    openOnboarding,
     native,
     popupWindow,
     contextMenu,

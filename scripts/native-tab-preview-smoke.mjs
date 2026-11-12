@@ -1,4 +1,5 @@
 // Real WebView2 hover previews, using an isolated profile and local-only fixtures.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -8,6 +9,7 @@ import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 const profile = await mkdtemp(join(tmpdir(), 'rove-tab-preview-'));
+createLegacyNativeProfile(profile);
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-tab-preview');
 const port = Number(process.env.ERA_SMOKE_PORT || 19746);
 await mkdir(output, { recursive: true });

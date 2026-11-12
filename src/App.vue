@@ -12,6 +12,7 @@ import FindBar from "./components/browser/FindBar.vue";
 import StatusToast from "./components/browser/StatusToast.vue";
 import ActionToast from "./components/browser/ActionToast.vue";
 import ErrorToast from "./components/browser/ErrorToast.vue";
+import OnboardingPage from "./components/browser/OnboardingPage.vue";
 import Icon from "./components/common/Icon.vue";
 import { browserKey } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
@@ -21,7 +22,8 @@ const shell = ref<HTMLElement>();
 const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
 const transparencyReduced = ref(reducedTransparency.matches);
 const glassAllowed = computed(() => !transparencyReduced.value && !b.glassBlocked);
-const glassActive = computed(() => isSeeThrough(b.space?.translucency) && glassAllowed.value);
+const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(b.space?.translucency) && glassAllowed.value);
+watch(() => b.onboardingOpen, (open) => { document.documentElement.dataset.onboarding = String(open); }, { immediate: true, flush: "sync" });
 const shellStyle = computed(() => ({
   ...(glassActive.value
     ? { "--frame-coverage": String(coverage(b.space?.translucency, usesClearGlass(b.space?.clearGlass, true))) }
@@ -94,6 +96,8 @@ onBeforeUnmount(() => {
     :style="shellStyle"
   >
     <WindowControls />
+    <OnboardingPage v-if="b.onboardingOpen" />
+    <template v-else>
     <div class="browser-body">
       <div
         class="sidebar-track"
@@ -114,5 +118,6 @@ onBeforeUnmount(() => {
     </div>
     <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><TabPreview />
     <ErrorToast v-if="!b.native" />
+    </template>
   </div>
 </template>

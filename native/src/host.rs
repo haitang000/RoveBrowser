@@ -95,6 +95,8 @@ fn browser_args(ui: bool) -> String {
 }
 #[derive(Debug)]
 enum Event {
+    ImportSources(Vec<crate::import::Source>),
+    ImportRead(Vec<crate::import::Batch>),
     Layout,
     SplitResize,
     DataCleared(String, bool),
@@ -239,6 +241,8 @@ struct UndoBatch {
     auto_created: Option<String>,
 }
 struct App {
+    import_sources: Vec<crate::import::Source>,
+    import_busy: bool,
     // Drop child controllers before their parent HWND and shared context.
     split_handle: Option<crate::split::SplitHandle>,
     pages: HashMap<String, Page>,
@@ -325,6 +329,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let mut app = App {
+        import_sources: vec![],
+        import_busy: false,
         split_handle: None,
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
@@ -1355,6 +1361,7 @@ impl App {
         if self.window.is_none() {
             return Ok(());
         }
+        if !self.state.onboarding.completed { return self.sync_layout(); }
         // Release native mouse capture and controller references before a tab
         // switch or close can destroy the pages the handle was resizing.
         self.finish_split_resize();
@@ -1433,6 +1440,12 @@ impl App {
         let Some(window) = &self.window else {
             return Ok(false);
         };
+        if !self.state.onboarding.completed {
+            let changed = self.pages.values().any(|page| page.visible.get());
+            for page in self.pages.values() { page.set_visible(false)?; }
+            if let Some(handle) = &self.split_handle { handle.configure(None)?; }
+            return Ok(changed);
+        }
         let mut visibility_changed = false;
         let mut visibility = Vec::new();
         let mut focus_peek = false;
@@ -1592,6 +1605,7 @@ impl App {
         Ok(())
     }
     fn shortcut(&mut self, key: String, shift: bool) {
+        if !self.state.onboarding.completed { return; }
         if let Some(index) = key.strip_prefix("space:").and_then(|i| i.parse::<usize>().ok()) {
             if let Some(space) = self.state.spaces.get(index) { self.command(Command::SwitchSpace { id: space.id.clone() }, None); }
             return;
@@ -1639,6 +1653,65 @@ impl App {
         }
     }
     fn command(&mut self, c: Command, event_loop: Option<&ActiveEventLoop>) {
+        if self.import_busy && matches!(c, Command::OnboardingOpen | Command::OnboardingBack { .. } | Command::OnboardingAdvance { .. }) {
+            self.error("正在导入，请稍候"); return;
+        }
+        if matches!(c, Command::ImportScan | Command::ImportRun { .. } | Command::ImportPasswords) {
+            if self.import_busy { self.error("正在导入或检查，请稍候"); return; }
+            if !self.state.onboarding.completed && self.state.onboarding.step != crate::onboarding::Step::Bring { return; }
+            match c {
+                Command::ImportScan => {
+                    self.import_busy = true;
+                    self.emit(json!({"type":"importState","importBusy":true}));
+                    let proxy = self.proxy.clone();
+                    std::thread::spawn(move || { let _ = proxy.send_event(Event::ImportSources(crate::import::detect())); });
+                }
+                Command::ImportRun { request } => {
+                    let unique: std::collections::HashSet<_> = request.sources.iter().collect();
+                    let sources: Vec<_> = request.sources.iter().filter_map(|id| self.import_sources.iter().find(|s| &s.id == id).cloned()).collect();
+                    if sources.is_empty() || sources.len() > 20 || unique.len() != sources.len() || request.sources.len() != sources.len() || (!request.bookmarks && !request.history) { self.error("请选择有效的浏览器和数据类型"); return; }
+                    self.import_busy = true;
+                    self.emit(json!({"type":"importState","importBusy":true}));
+                    let proxy = self.proxy.clone();
+                    std::thread::spawn(move || { let batches = sources.iter().map(|source| crate::import::read_browser(source, &request)).collect(); let _ = proxy.send_event(Event::ImportRead(batches)); });
+                }
+                Command::ImportPasswords => {
+                    let owner = self.window.as_ref().and_then(|w| w.window_handle().ok()).and_then(|handle| match handle.as_raw() { RawWindowHandle::Win32(h) => Some(HWND(h.hwnd.get() as *mut _)), _ => None });
+                    match crate::passwords::choose_csv(owner) {
+                        Ok(Some(path)) => {
+                            self.import_busy = true;
+                            self.emit(json!({"type":"importState","importBusy":true}));
+                            let proxy = self.proxy.clone();
+                            std::thread::spawn(move || { let _ = proxy.send_event(Event::ImportRead(vec![crate::import::read_csv(&path)])); });
+                        }
+                        Ok(None) => self.emit(json!({"type":"importState","importBusy":false})),
+                        Err(e) => self.error(e),
+                    }
+                }
+                _ => {},
+            }
+            return;
+        }
+        if matches!(c, Command::OnboardingOpen | Command::OnboardingBack { .. } | Command::OnboardingAdvance { .. }) {
+            if matches!(c, Command::OnboardingOpen) {
+                self.finish_split_resize(); self.dismiss_tab_preview(); self.close_peek(); self.close_find(true);
+                self.overlay = false;
+            }
+            let make_default = matches!(c, Command::OnboardingAdvance { step: crate::onboarding::Step::Ready, make_default: true, .. });
+            if let Err(e) = self.state.apply(&c) { self.error(e); return; }
+            self.save(); self.publish();
+            if let Err(e) = self.sync() { self.error(e); }
+            if let Some(ui) = &self.ui { let _ = ui.focus(); }
+            // Windows owns the final choice. Opening Settings never claims that
+            // Rove has become the default browser.
+            if make_default { self.command(Command::SystemSettings, event_loop); }
+            return;
+        }
+        if !self.state.onboarding.completed && !matches!(c,
+            Command::Ready | Command::Presented | Command::Window { .. } | Command::WindowChrome { .. }
+            | Command::Layout { .. } | Command::Glass { .. } | Command::PopupReady
+            | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
+        ) { return; }
         // A find session lives on one page. Switching, closing, splitting or
         // opening a new tab ends it, so the bar never highlights a hidden page.
         if (self.find.is_some() || self.find_open.get())
@@ -1914,7 +1987,7 @@ impl App {
                 return;
             }
             Command::Presented => {
-                if self.ready && self.primary.width > 0. && self.primary.height > 0. {
+                if self.ready && (!self.state.onboarding.completed || (self.primary.width > 0. && self.primary.height > 0.)) {
                     if let Some(window) = &self.window {
                         window.set_visible(true);
                         if let Some(caption) = &self.caption {
@@ -2198,6 +2271,7 @@ impl App {
                     let mut errors = vec![];
                     for view in self.pages.values().map(|p| &p.view).chain(self.peek.iter().map(|p| &p.page.view)).chain(self.preview_renders.values().map(|p| &p.view)) {
                         if let Err(e) = crate::web_settings::apply(view, &self.state.settings) { errors.push(e); }
+                        if !self.state.settings.autofill { let _ = view.evaluate_script("window.dispatchEvent(new Event('__rove_disable_imported_logins'))"); }
                     }
                     for error in errors { self.error(error); }
                 }
@@ -2334,6 +2408,19 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::ImportSources(sources) => {
+                self.import_sources = sources;
+                self.import_busy = false;
+                self.emit(json!({"type":"importState","importBusy":false,"importSources":self.import_sources}));
+            }
+            Event::ImportRead(batches) => {
+                for batch in batches {
+                    if let Err(e) = self.storage.import_batch(&mut self.state, batch) { self.error(e); }
+                }
+                self.import_busy = false;
+                self.publish();
+                self.emit(json!({"type":"importState","importBusy":false}));
+            }
             Event::SplitResize => {
                 self.receive_split_resize();
             }
@@ -2553,6 +2640,14 @@ impl ApplicationHandler<Event> for App {
                 }
                 self.publish();
                 if !loading {
+                    if self.state.settings.autofill {
+                        if let Some(page) = self.pages.get(&id) {
+                            if let Some(origin) = crate::import::origin(&page.url) {
+                                let logins = self.storage.imported_logins(&origin);
+                                if !logins.is_empty() { let _ = page.view.evaluate_script(&crate::passwords::fill_script(&origin, &logins)); }
+                            }
+                        }
+                    }
                     // The page may have started or stopped sound while loading,
                     // before the audio change handler was registered for it.
                     if let Some(page) = self.pages.get(&id) {

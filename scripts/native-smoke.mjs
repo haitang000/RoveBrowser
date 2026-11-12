@@ -1,3 +1,4 @@
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { checkCommand as verifyCommand, checkCommandHandoff as verifyCommandHandoff } from './native-command-checks.mjs';
 import { checkSplitResize } from './native-split-checks.mjs';
 // Deterministic browser-core integration tests. Debug CDP is enabled only by a debug-build env flag.
@@ -12,6 +13,7 @@ import { once } from 'node:events'
 import { promisify } from 'node:util'
 const execFileAsync=promisify(execFile)
 const profile=await mkdtemp(join(tmpdir(),'rove-native-smoke-'))
+createLegacyNativeProfile(profile);
 const output=resolve(process.env.ERA_SMOKE_OUTPUT||'test-results');
 await mkdir(output,{recursive:true});
 const hits=new Map();

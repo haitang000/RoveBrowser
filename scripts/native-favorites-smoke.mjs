@@ -1,4 +1,5 @@
 // Real WebView2 favicon persistence and top-favorite limits, using an isolated profile.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -9,6 +10,7 @@ import { once } from 'node:events';
 import assert from 'node:assert/strict';
 
 const profile = await mkdtemp(join(tmpdir(), 'rove-favorites-'));
+createLegacyNativeProfile(profile);
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-favorites');
 await mkdir(output, { recursive: true });
 const icon = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNoSXrxHwAGCgLO2e10KwAAAABJRU5ErkJggg==', 'base64');

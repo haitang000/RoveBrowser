@@ -48,6 +48,8 @@ GitHub Release 工作流同时生成安装 EXE 和便携 ZIP。静默安装支�
 
 ## 已实现
 
+- Zigzag onboarding 五步流程：欢迎、数据导入、常用网站选择、广告拦截说明、默认浏览器设置入口。首次启动自动展示，步骤和网站选择写入 SQLite；旧会话直接恢复，可从设置的「欢迎引导」重看。支持 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 多配置书签／历史导入，以及密码 CSV 导入；书签进入来源工作区，重复导入去重，密码使用 Windows DPAPI 加密并在匹配网站提供手动填充。支持返回／跳过、Enter／Esc、减少动态效果、深色与小窗口。广告拦截后端尚未提供；默认项只打开 Windows 设置。源码映射、预览方法和平台限制见 [Onboarding 移植记录](docs/ONBOARDING_PORT.md)。
+
 - Zigzag 设置页：7 个分类、跨分类搜索、响应式导航、设置标签页与分类地址恢复；搜索引擎／自定义搜索地址、外观、工作区增删排序、下载目录、密码／表单偏好、历史与网站数据清理、自定义快捷键和退出确认。入口为侧栏底部设置按钮、命令面板 Settings 或 Ctrl+,。移植范围和平台适配见 [设置移植记录](docs/SETTINGS_PORT.md)。
 
 - 源码参数化侧栏、Favorites、固定/普通标签、选中/hover/focus、浅深主题、数字工作区、统一设计 tokens。

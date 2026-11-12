@@ -1,4 +1,5 @@
 // Settings port integration: real WebView2, temporary profile, loopback fixtures.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -8,6 +9,7 @@ import { join, resolve } from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 const profile = await mkdtemp(join(tmpdir(), "rove-settings-"));
+createLegacyNativeProfile(profile);
 const downloads = join(profile, "Downloads");
 const output = resolve("test-results/native-settings");
 const executable = resolve(

@@ -1,4 +1,5 @@
 // Exercise painted split viewports with two real WebView2 controllers.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -8,6 +9,7 @@ import { join, resolve } from 'node:path';
 import { checkSplitResize } from './native-split-checks.mjs';
 
 const profile = await mkdtemp(join(tmpdir(), 'rove-split-'));
+createLegacyNativeProfile(profile);
 const port = Number(process.env.ERA_SMOKE_PORT || 19876);
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-split');
 await mkdir(output, { recursive: true });

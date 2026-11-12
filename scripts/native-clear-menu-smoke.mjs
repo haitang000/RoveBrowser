@@ -3,6 +3,7 @@
 // Close Others/Below, both Clear steps with Undo, and restart persistence.
 // The faded-tab step itself is covered by the Rust model tests because aging a
 // tab takes six hours; here the UI flow of steps two and three is exercised.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -23,6 +24,7 @@ const port = Number(process.env.ERA_SMOKE_PORT || 19806);
 const base = `http://127.0.0.1:${server.address().port}`;
 const sites = [`${base}/a`, `${base}/b`, `${base}/c`];
 const profile = await mkdtemp(join(tmpdir(), 'rove-clear-menu-smoke-'));
+createLegacyNativeProfile(profile);
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-clear-menu');
 await mkdir(output, { recursive: true });
 

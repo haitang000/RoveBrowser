@@ -227,6 +227,7 @@ const groups = computed<Group[]>(() => [
         action: "浏览器",
         keywords: "version about 版本",
       },
+      { id: "onboarding", title: "欢迎引导", detail: "重新选择常用网站，或了解首次使用流程。", kind: "button", action: "打开", keywords: "onboarding welcome 新手" },
     ],
   },
   {
@@ -244,7 +245,7 @@ const groups = computed<Group[]>(() => [
       {
         id: "autofill",
         title: "自动填充表单",
-        detail: "允许 WebView2 填充已保存的姓名、地址等表单信息。",
+        detail: "允许填充表单信息，并在登录页提供已导入密码的账号选择。",
         kind: "toggle",
         setting: "autofill",
         keywords: "forms autofill",
@@ -405,6 +406,7 @@ function saveInput(id: string) {
   } else update("downloadFolder", folder.value.trim());
 }
 function action(row: Row) {
+  if (row.id === "onboarding") { b.openOnboarding(); return; }
   if (row.id === "default") {
     b.send({ type: "systemSettings" });
     return;

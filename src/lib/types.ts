@@ -59,6 +59,8 @@ export interface Favorite {
   spaceId?: string;
 }
 export interface BrowserState {
+  /** Absent in existing profiles: onboarding is already complete. */
+  onboarding?: import("./onboarding").OnboardingState;
   spaces: Space[];
   tabs: Tab[];
   activeSpace: string;
@@ -105,6 +107,8 @@ declare global {
     __ERA_INITIAL_STATE__?: BrowserState;
     __ERA_RECEIVE__?: (event: {
       type: string;
+      importSources?: import("./import").ImportSource[];
+      importBusy?: boolean;
       ratio?: number;
       resizing?: boolean;
       state?: BrowserState;

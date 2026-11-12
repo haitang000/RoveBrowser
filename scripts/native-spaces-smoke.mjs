@@ -1,4 +1,5 @@
 // Focused WebView2 integration: isolated profile, loopback pages, existing Space IPC.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -9,6 +10,7 @@ import { once } from 'node:events';
 import assert from 'node:assert/strict';
 
 const profile = await mkdtemp(join(tmpdir(), 'rove-spaces-smoke-'));
+createLegacyNativeProfile(profile);
 const output = resolve(process.env.ERA_SPACES_OUTPUT || 'test-results/native-spaces');
 const port = Number(process.env.ERA_SPACES_PORT || 19546);
 await mkdir(output, { recursive: true });

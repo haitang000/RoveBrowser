@@ -33,7 +33,7 @@ function report() {
   });
 }
 watch(
-  () => [b.state.theme, b.space.color, b.space.translucency, b.space.clearGlass],
+    () => [b.state.theme, b.space.color, b.space.translucency, b.space.clearGlass, b.onboardingOpen],
   async () => {
     await nextTick();
     report();
@@ -53,7 +53,7 @@ onBeforeUnmount(() => {
 <template>
   <header class="titlebar">
     <div class="titlebar-identity"><span class="app-name">Rove</span></div>
-    <div class="browser-toolbar">
+    <div v-if="!b.onboardingOpen" class="browser-toolbar">
       <nav class="browser-navigation" aria-label="网页导航">
         <button
           class="icon-button"

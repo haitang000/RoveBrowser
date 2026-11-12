@@ -2,6 +2,7 @@ import { useBrowser } from "../stores/browser";
 import { SHORTCUTS, sameShortcut, shortcutFor, shortcutFromEvent } from "./settings";
 export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing) return;
+  if (b.onboardingOpen) return;
   if (e.key === "Escape" && b.downloadsOpen) {
     e.preventDefault();
     b.closeDownloads();

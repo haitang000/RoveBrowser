@@ -7,6 +7,7 @@ import { tabsToDismiss } from "./command";
 import { sameOrigin } from "./favicon";
 import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type SettingsPane, type Settings } from "./settings";
 import { nowSeconds, tabIsFaded } from "./tab-meta";
+import { ONBOARDING_STEPS, saveOnboardingSites } from "./onboarding";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -97,6 +98,21 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     return { ...s };
   }
   switch (c.type) {
+    case "onboardingOpen":
+      s.onboarding = { step: "hello", completed: false }; break;
+    case "onboardingBack":
+    case "onboardingAdvance": {
+      const current = s.onboarding;
+      if (!current || current.completed || current.step !== c.step) throw Error("引导步骤已更新，请重试");
+      const index = ONBOARDING_STEPS.indexOf(current.step);
+      if (c.type === "onboardingBack") current.step = ONBOARDING_STEPS[Math.max(0, index - 1)]!;
+      else {
+        if (current.step === "sites" && !c.skip) saveOnboardingSites(s, (c.sites || []) as string[]);
+        if (current.step === "ready") current.completed = true;
+        else current.step = ONBOARDING_STEPS[index + 1]!;
+      }
+      break;
+    }
     case "settingsOpen": {
       const existing = s.tabs.find((t) => t.spaceId === s.activeSpace && isSettingsUrl(t.url)) || s.tabs.find((t) => isSettingsUrl(t.url));
       if (existing) { if (c.pane) existing.url = settingsUrl(c.pane as SettingsPane); activate(existing); }

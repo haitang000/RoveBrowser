@@ -2,6 +2,7 @@
 // an isolated temporary profile. Focuses on the host-owned find session:
 // WebView2's accelerator keys cannot be synthesized over CDP, so opening the bar
 // is driven through the same trusted-UI IPC the shell uses.
+import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -13,6 +14,7 @@ import assert from 'node:assert/strict';
 
 const execFileAsync=promisify(execFile);
 const profile=await mkdtemp(join(tmpdir(),'rove-find-smoke-'));
+createLegacyNativeProfile(profile);
 const output=resolve(process.env.ERA_SMOKE_OUTPUT||'test-results/native-find');
 const port=Number(process.env.ERA_SMOKE_PORT||19666);
 await mkdir(output,{recursive:true});

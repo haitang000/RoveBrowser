@@ -80,6 +80,8 @@ pub fn new_id() -> String {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
+    #[serde(default)]
+    pub onboarding: crate::onboarding::Onboarding,
     pub spaces: Vec<Space>,
     pub tabs: Vec<Tab>,
     pub active_space: String,
@@ -158,6 +160,23 @@ impl Rect {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Command {
+    #[serde(rename = "importScan")]
+    ImportScan,
+    #[serde(rename = "importRun")]
+    ImportRun { request: crate::import::Request },
+    #[serde(rename = "importPasswords")]
+    ImportPasswords,
+    #[serde(rename = "onboardingOpen")]
+    OnboardingOpen,
+    #[serde(rename = "onboardingBack")]
+    OnboardingBack { step: crate::onboarding::Step },
+    #[serde(rename = "onboardingAdvance")]
+    OnboardingAdvance {
+        step: crate::onboarding::Step,
+        #[serde(default)] skip: bool,
+        #[serde(default)] sites: Vec<String>,
+        #[serde(default, rename = "makeDefault")] make_default: bool,
+    },
     #[serde(rename = "settingsOpen")]
     OpenSettings { pane: Option<String> },
     #[serde(rename = "settingsUpdate")]
@@ -502,6 +521,7 @@ impl Default for State {
         })
         .collect();
         let mut s = Self {
+            onboarding: crate::onboarding::Onboarding::default(),
             spaces: [
                 ("personal", "Personal", "sky"),
                 ("work", "Work", "sage"),
@@ -836,6 +856,9 @@ impl State {
             return Ok(());
         }
         match c {
+            Command::OnboardingOpen => { self.onboarding = crate::onboarding::Onboarding { step: crate::onboarding::Step::Hello, completed: false, imports: self.onboarding.imports.clone() }; }
+            Command::OnboardingBack { step } => self.back_onboarding(*step)?,
+            Command::OnboardingAdvance { step, skip, sites, .. } => self.advance_onboarding(*step, *skip, sites)?,
             Command::OpenSettings { pane } => {
                 let existing = self.tabs.iter().find(|t| t.space_id == self.active_space && crate::settings::is_settings(&t.url))
                     .or_else(|| self.tabs.iter().find(|t| crate::settings::is_settings(&t.url))).map(|t| t.id.clone());

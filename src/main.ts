@@ -7,4 +7,5 @@ import "./styles/theme.css";
 import "./styles/palette.css";
 import "./styles/typography.css";
 import "./styles/animations.css";
+import "./styles/onboarding.css";
 createApp(window.__ERA_POPUP__ ? PopupRoot : App).use(createPinia()).mount("#app");

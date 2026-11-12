@@ -269,3 +269,23 @@ computer-use实机核对浅色、深色关闭按钮的红色背景贴齐顶部�
 补充真实可见HWND的绘制计数检查：三个按钮各连续接收100次相同悬停消息后，绘制次数及无效区域均不增加；离开仅重画一次清除悬停，再次离开保持空闲。DPI像素检查改走真实缓冲绘制路径。29项Rust测试、Clippy（`-D warnings`）及Debug构建重新通过；前端未改动。实机核对关闭按钮内部移动、切换最大化按钮、Snap菜单、最大化及还原，未出现系统旧式按钮覆盖。此检查不是逐帧桌面录像。
 
 后续验证使用独立的 `.local/issue-6/hover-profile` 和19876调试端口，测试窗口已关闭。最新可执行文件为 `native/target/debug/rove.exe`；之前的 `rove-issue6.exe` 不包含悬停闪动修复。
+
+## Onboarding 移植验证（2026-11-12）
+
+参考 Zigzag `78edb3201b8ec1383bedf4f2eb3b3832af6c15f4` 的 Swift onboarding，迁移五步页面与进度，并接入 Rust 权威状态、SQLite 和现有 Favorites。平台支持及具体映射见 [ONBOARDING_PORT.md](ONBOARDING_PORT.md)。
+
+验证通过：TypeScript／Vite 构建、73 项前端单元测试、65 项 Rust 测试（`--test-threads=1`）、90 项界面 E2E（单 worker）及 Clippy（`-D warnings`）。Rust 默认并行运行时一项既有 HWND 命中测试发生冲突，串行全量复测通过。
+
+独立临时用户目录中的真实 WebView2 验证了首次欢迎窗口显示、浏览命令隔离、常用网站落库、未完成步骤重启恢复、完成后不再显示，以及设置页重新打开。既有设置原生集成也以旧会话 fixture 复测通过，包括真实下载、SQLite 历史和 WebView2 缓存／站点数据清理、偏好重启恢复。其他原生集成脚本改用同一旧会话 fixture，未逐个全量重跑。
+
+检查了浅色／深色和 480×400 小窗口截图。广告拦截后端尚未移植；默认应用入口只调用 Windows 设置，不修改实际默认关联，未操作用户系统默认浏览器。浏览器数据导入随后补齐，见下节。
+
+## 数据导入实现与验证（2026-11-12）
+
+已接入 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 配置检测，真实书签／历史读取及密码 CSV 导入。书签保存到来源工作区，文件夹路径编码到名称；历史保留原时间并合并去重；密码使用当前 Windows 用户的 DPAPI 加密。导入结果和重试在引导第二步展示，原来源只读。源码映射与读取上限见 [ONBOARDING_PORT.md](ONBOARDING_PORT.md)。
+
+TypeScript／Vite 构建、73 项前端单元测试、76 项串行 Rust 测试、91 项界面 E2E，以及生产目标 Clippy（`cargo clippy --manifest-path native/Cargo.toml -- -D warnings`）通过。新增 Rust 检查包含多配置和 Firefox profiles.ini、嵌套书签、URL 过滤、SQLite 已提交 WAL、损坏和锁定来源、访问时间换算、CSV 编码／引号／换行、DPAPI、重复导入、保留已有密码与较新历史、写入失败时回滚数据和内存状态。额外尝试的 `--all-targets -D warnings` 会触发既有 `favicon.rs:1020` 测试的 `field_reassign_with_default`，未修改该无关测试。
+
+`node scripts/native-import-smoke.mjs` 在隔离临时用户目录中用合成 Edge／Chrome／Firefox 数据和 CSV 启动真实 WebView2，六组检查通过：来源检测与 UI 数据类型选择；历史原时间及损坏来源修复重试；DPAPI 密文、重复密码和非法来源 ID；导入工作区固定标签与历史搜索；重启恢复及用户点击选择账号后同时替换用户名／密码、不自动提交；new-password、跨 origin action、其他 origin 排除及关闭自动填充后立即移除入口。结果与界面截图保存在 `test-results/native-import/`。测试密码是本地合成数据，CSV 文件选择由 Debug fixture 路径替代，未手动验证系统文件选择对话框。
+
+首次引导原生集成复测通过。导入界面 E2E 以模拟 IPC 覆盖来源多选、数据类型、忙状态时禁用导航、报告、重试与 480×400 布局；检查了桌面版结果截图及小窗口底部操作不重叠。依赖许可证清单重新生成，包含新增 CSV 依赖。最终 Debug 可执行文件为 `native/target/debug/rove.exe`。
