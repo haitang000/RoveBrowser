@@ -35,7 +35,8 @@ jobs:
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        # Keep release builds on the compiler used for native/installer validation.
+        uses: dtolnay/rust-toolchain@1.99.1
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
