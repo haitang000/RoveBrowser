@@ -1,3 +1,5 @@
+# GitLab CI: verify the web client, then build the same Windows installer and
+# portable zip that `npm run installer` produces locally.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -8,7 +10,12 @@ workflow:
 
 stages:
   - verify
-  - native
+  - package
+
+variables:
+  ROVE_TARGET: x86_64-pc-windows-msvc
+  INNO_SETUP_VERSION: "6.7.3"
+  INNO_SETUP_SHA256: "F780898E402FF80612CC8D9FCB8C6E02932BD1CB4C900FFDAA31F9341CFB49F4"
 
 frontend:
   stage: verify
@@ -32,25 +39,168 @@ frontend:
       - dist/
     expire_in: 1 week
 
-# 需要 GitLab Windows Shell Runner，标签为 windows，并安装 Rust MSVC、
-# Visual Studio C++ Build Tools 和 Windows SDK。该任务下载上一步生成的 dist。
-windows-native:
-  stage: native
+# Mirrors .github/workflows/release.yml: build the x64 MSVC release with the
+# static CRT, then compile the Inno Setup installer and the portable zip.
+# Needs a GitLab Windows shell runner tagged `windows` with the MSVC C++
+# build tools; Rust is reused when present, otherwise installed with rustup.
+windows-installer:
+  stage: package
   tags:
     - windows
   needs:
     - job: frontend
       artifacts: true
+  timeout: 90 minutes
   variables:
     CARGO_TERM_COLOR: always
     RUSTFLAGS: "-C target-feature=+crt-static"
+  before_script:
+    - |
+      $ErrorActionPreference = 'Stop'
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+      Write-Host "Runner: $env:COMPUTERNAME user=$(whoami) PowerShell=$($PSVersionTable.PSVersion)"
+
+      function Find-Tool([string]$Name, [string[]]$Directories) {
+        $command = Get-Command $Name -ErrorAction SilentlyContinue
+        if ($command) { return $command.Source }
+        foreach ($directory in $Directories) {
+          if (-not $directory) { continue }
+          $candidate = Join-Path $directory $Name
+          if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+        return $null
+      }
+
+      # Rust: reuse an existing toolchain from PATH or any user profile so the
+      # runner does not download a second copy on every pipeline.
+      $cargoDirectories = @()
+      if ($env:CARGO_HOME) { $cargoDirectories += (Join-Path $env:CARGO_HOME 'bin') }
+      if ($env:USERPROFILE) { $cargoDirectories += (Join-Path $env:USERPROFILE '.cargo\bin') }
+      $cargoDirectories += @('C:\Rust\bin', 'C:\Program Files\Rust\bin', 'C:\ProgramData\chocolatey\bin')
+      foreach ($profile in (Get-ChildItem -LiteralPath 'C:\Users' -Directory -ErrorAction SilentlyContinue)) {
+        $cargoDirectories += (Join-Path $profile.FullName '.cargo\bin')
+      }
+      $cargo = Find-Tool 'cargo.exe' $cargoDirectories
+      if (-not $cargo) {
+        Write-Host 'Rust toolchain not found; installing the stable MSVC toolchain with rustup.'
+        $rustupInit = Join-Path $env:TEMP 'rustup-init.exe'
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+          try {
+            Invoke-WebRequest -UseBasicParsing -Uri 'https://win.rustup.rs/x86_64' -OutFile $rustupInit -TimeoutSec 300
+            break
+          } catch {
+            Write-Host "rustup download failed (attempt $attempt): $($_.Exception.Message)"
+            if ($attempt -eq 3) { throw }
+            Start-Sleep -Seconds 5
+          }
+        }
+        & $rustupInit -y --profile minimal --default-toolchain stable
+        if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with exit code $LASTEXITCODE." }
+        $cargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+      }
+      $cargoDirectory = Split-Path -Parent $cargo
+      $env:PATH = "$cargoDirectory;$env:PATH"
+      # A toolchain installed for another account keeps its toolchains there.
+      if (-not $env:RUSTUP_HOME -and $cargoDirectory -match '^([A-Za-z]:\\Users\\[^\\]+)\\\.cargo\\bin$') {
+        $sharedRustupHome = Join-Path $Matches[1] '.rustup'
+        if (Test-Path -LiteralPath $sharedRustupHome -PathType Container) { $env:RUSTUP_HOME = $sharedRustupHome }
+      }
+      Write-Host "cargo: $cargo"
+      if ($env:RUSTUP_HOME) { Write-Host "RUSTUP_HOME: $env:RUSTUP_HOME" }
+      rustc --version
+      cargo --version
+      if ($LASTEXITCODE -ne 0) { throw 'The Rust toolchain is not usable.' }
+
+      # The MSVC linker comes from the Visual Studio C++ build tools.
+      $programFilesX86 = ${env:ProgramFiles(x86)}
+      if ($programFilesX86) {
+        $vswhere = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
+        if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+          $visualStudio = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if ($visualStudio) { Write-Host "Visual Studio C++ tools: $visualStudio" }
+        }
+      }
+      if (-not $visualStudio) {
+        Write-Host 'WARNING: Visual Studio C++ build tools were not detected; linking may fail.'
+      }
+
+      # Inno Setup: prefer an installed compiler, otherwise use the same
+      # checksum-verified NuGet package as the GitHub release workflow.
+      $compilerDirectories = @()
+      if ($programFilesX86) { $compilerDirectories += (Join-Path $programFilesX86 'Inno Setup 6') }
+      if ($env:LOCALAPPDATA) { $compilerDirectories += (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6') }
+      if ($env:ProgramFiles) { $compilerDirectories += (Join-Path $env:ProgramFiles 'Inno Setup 6') }
+      $compiler = Find-Tool 'ISCC.exe' $compilerDirectories
+      if (-not $compiler) {
+        Write-Host "Inno Setup was not found; fetching $env:INNO_SETUP_VERSION from NuGet."
+        $package = Join-Path $env:TEMP "tools.innosetup.$env:INNO_SETUP_VERSION.nupkg"
+        if (-not (Test-Path -LiteralPath $package -PathType Leaf)) {
+          Invoke-WebRequest -UseBasicParsing -TimeoutSec 600 -OutFile $package `
+            -Uri "https://api.nuget.org/v3-flatcontainer/tools.innosetup/$env:INNO_SETUP_VERSION/tools.innosetup.$env:INNO_SETUP_VERSION.nupkg"
+        }
+        $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash
+        if ($hash -ne $env:INNO_SETUP_SHA256) { throw "Inno Setup package checksum mismatch: $hash" }
+        $toolRoot = Join-Path $env:TEMP "rove-inno-setup-$env:INNO_SETUP_VERSION"
+        if (-not (Test-Path -LiteralPath (Join-Path $toolRoot 'tools\ISCC.exe') -PathType Leaf)) {
+          Expand-Archive -LiteralPath $package -DestinationPath $toolRoot -Force
+        }
+        $compiler = Join-Path $toolRoot 'tools\ISCC.exe'
+        if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'ISCC.exe is missing from the Inno Setup package.' }
+      }
+      $env:INNO_SETUP_COMPILER = $compiler
+      Write-Host "Inno Setup compiler: $compiler"
+
+      # The installer embeds Microsoft's signed WebView2 bootstrapper; fetch it
+      # with retries so a transient network error does not fail the build.
+      $bootstrapper = Join-Path $env:CI_PROJECT_DIR 'build\installer\dependencies\MicrosoftEdgeWebview2Setup.exe'
+      if (-not (Test-Path -LiteralPath $bootstrapper -PathType Leaf)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bootstrapper) | Out-Null
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+          try {
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 600 -OutFile $bootstrapper -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
+            break
+          } catch {
+            Write-Host "WebView2 bootstrapper download failed (attempt $attempt): $($_.Exception.Message)"
+            if ($attempt -eq 3) { throw }
+            Start-Sleep -Seconds 5
+          }
+        }
+      }
   script:
-    - rustc --version
-    - cargo --version
-    - cargo test --manifest-path native/Cargo.toml --locked --target x86_64-pc-windows-msvc -- --test-threads=1
-    - cargo build --manifest-path native/Cargo.toml --locked --release --target x86_64-pc-windows-msvc
+    - |
+      if (-not (Test-Path -LiteralPath 'dist\index.html' -PathType Leaf)) {
+        throw 'The frontend artifact is missing: dist/index.html not found.'
+      }
+      cargo build --release --locked --manifest-path native/Cargo.toml --target $env:ROVE_TARGET
+      if ($LASTEXITCODE -ne 0) { throw 'Native release build failed.' }
+    - |
+      & .\scripts\installer.ps1 -SkipBuild
+      if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
+      $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+      $installer = "release\Rove-$version-windows-x64-setup.exe"
+      if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Installer output is missing: $installer" }
+      Write-Host "Installer: $installer"
+    - |
+      & .\scripts\package.ps1 -ExecutablePath "native\target\$env:ROVE_TARGET\release\rove.exe"
+      if ($LASTEXITCODE -ne 0) { throw 'Portable package build failed.' }
+    - |
+      $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+      $files = @(
+        "release\Rove-$version-windows-x64-setup.exe",
+        "release\Rove-$version-windows-x64.zip"
+      )
+      $hashes = foreach ($file in $files) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing release file: $file" }
+        $sha = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$sha  $(Split-Path -Leaf $file)"
+      }
+      $hashes | Set-Content -LiteralPath 'release\SHA256SUMS.txt' -Encoding ascii
+      Get-Content -LiteralPath 'release\SHA256SUMS.txt'
+      Get-ChildItem -LiteralPath 'release' | Select-Object Name, Length
   artifacts:
     name: "$CI_PROJECT_NAME-$CI_COMMIT_SHORT_SHA-windows-x64"
     paths:
-      - native/target/x86_64-pc-windows-msvc/release/rove.exe
-    expire_in: 1 week
+      - release/Rove-*-windows-x64-setup.exe
+      - release/Rove-*-windows-x64.zip
+      - release/SHA256SUMS.txt
+    expire_in: 1 month
