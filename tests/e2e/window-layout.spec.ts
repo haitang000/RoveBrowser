@@ -115,6 +115,42 @@ test("native caption geometry keeps three equal buttons flush with the window ed
   }
 });
 
+test("restored chrome inset keeps the address field below the resize strip", async ({ page }) => {
+  await nativeShell(page, initialState());
+  await page.setViewportSize({ width: 1280, height: 820 });
+  const place = (selector: string) => page.locator(selector).boundingBox();
+  await page.evaluate(() => document.documentElement.style.setProperty("--chrome-inset", "6px"));
+  const titlebar = (await place(".titlebar"))!;
+  const address = (await place(".address-field"))!;
+  const navigation = (await place(".browser-navigation"))!;
+  const body = (await place(".browser-body"))!;
+  expect(titlebar).toMatchObject({ y: 0, height: 38 });
+  expect(address.y).toBeGreaterThanOrEqual(6);
+  expect(address.y + address.height).toBeLessThanOrEqual(titlebar.height);
+  expect(navigation.y).toBeGreaterThanOrEqual(6);
+  expect(navigation.y + navigation.height).toBeLessThanOrEqual(titlebar.height);
+  expect(body.y).toBe(titlebar.height);
+  const buttons = await page.locator(".window-controls button").evaluateAll((nodes) =>
+    nodes.map((button) => {
+      const { y, height } = button.getBoundingClientRect();
+      const icon = button.querySelector("svg")!.getBoundingClientRect();
+      return { y, height, iconCenter: icon.y + icon.height / 2 };
+    }),
+  );
+  expect(buttons.map(({ y, height }) => ({ y, height }))).toEqual([
+    { y: 0, height: 38 },
+    { y: 0, height: 38 },
+    { y: 0, height: 38 },
+  ]);
+  const addressCenter = address.y + address.height / 2;
+  for (const button of buttons) expect(Math.abs(button.iconCenter - addressCenter)).toBeLessThan(1);
+  await page.evaluate(() => document.documentElement.style.setProperty("--chrome-inset", "0px"));
+  expect(await place(".titlebar")).toMatchObject({ y: 0, height: 32 });
+  expect((await place(".window-controls button"))!.height).toBe(32);
+  expect((await place(".address-field"))!.y).toBeGreaterThanOrEqual(0);
+  expect((await place(".address-field"))!.y).toBeLessThan(6);
+});
+
 test("restores the full-width titlebar and framed page even for a saved borderless session", async ({ page }) => {
   await page.route("**/favicon.ico", route => route.abort());
   const state = initialState();

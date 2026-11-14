@@ -419,8 +419,9 @@ impl App {
         if self.ready {
             if let Some(ui) = &self.ui {
                 let radius = if maximized { 0. } else { WINDOW_RADIUS };
+                let inset = crate::caption::chrome_inset(maximized);
                 ui.evaluate_script(&format!(
-                    "document.documentElement.style.setProperty('--radius-window', '{radius}px')"
+                    "document.documentElement.style.setProperty('--radius-window', '{radius}px');document.documentElement.style.setProperty('--chrome-inset', '{inset}px')"
                 ))?;
             }
         }

@@ -15,7 +15,7 @@
   --onboard-edge: #1e3a5f21;
   --onboard-tile: #f5f7fa;
   position: relative;
-  height: calc(100% - var(--titlebar-height));
+  height: calc(100% - var(--titlebar-block));
   overflow: auto;
   overscroll-behavior: contain;
   color: #dae5f2;

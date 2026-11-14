@@ -24,6 +24,11 @@ const SUBCLASS: usize = 0x524f5645;
 const SURFACE_SUBCLASS: usize = SUBCLASS + 1;
 const RESIZE_BORDER: f64 = 6.;
 const RESIZE_CORNER: f64 = 12.;
+/// Logical pixels the restored frame reserves for resizing. Maximized windows
+/// have no strip, so the toolbar can sit flush with the top.
+pub(crate) fn chrome_inset(maximized: bool) -> f64 {
+    if maximized { 0. } else { RESIZE_BORDER }
+}
 // UxTheme's private frame-paint messages are also suppressed by Chromium's
 // custom frame (ui/views/win/hwnd_message_handler.cc). USER32 can send these
 // while tracking caption hover even when the window has no standard frame.
@@ -837,6 +842,11 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn maximized_windows_drop_the_resize_strip() {
+        assert_eq!(chrome_inset(false), RESIZE_BORDER);
+        assert_eq!(chrome_inset(true), 0.);
+    }
     #[test]
     #[allow(deprecated)]
     fn winit_state_changes_do_not_restore_the_system_caption() {

@@ -192,14 +192,21 @@ kbd {
 }
 .titlebar {
   app-region: drag;
-  height: var(--titlebar-height);
+  height: var(--titlebar-block);
   display: grid;
   grid-template-columns: clamp(64px, calc(100vw - 400px), var(--sidebar-width)) minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   user-select: none;
+}
+.titlebar-identity,
+.browser-toolbar {
+  height: var(--titlebar-height);
+  margin-top: var(--chrome-inset);
 }
 .titlebar-identity {
   min-width: 0;
+  display: flex;
+  align-items: center;
   padding-left: 12px;
 }
 .collapsed .titlebar {
@@ -228,12 +235,13 @@ kbd {
 .window-controls {
   app-region: no-drag;
   display: flex;
-  height: 32px;
+  height: var(--titlebar-block);
 }
 .window-controls button {
   width: 46px;
   display: grid;
   place-items: center;
+  padding-top: var(--chrome-inset);
   border-radius: 0;
 }
 .window-controls button:hover {
@@ -247,7 +255,7 @@ kbd {
   color: #fff;
 }
 .browser-body {
-  height: calc(100% - var(--titlebar-height));
+  height: calc(100% - var(--titlebar-block));
   display: flex;
 }
 .sidebar-track {
@@ -910,7 +918,7 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
   align-items: flex-start;
   --command-top: max(
     24px,
-    calc((100dvh - var(--titlebar-height) - 8px) * 0.18)
+    calc((100dvh - var(--titlebar-block) - 8px) * 0.18)
   );
   padding-top: var(--command-top);
   background: rgb(0 0 0 / 0.12);
@@ -1041,7 +1049,7 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
 .menu-scrim,
 .settings-scrim {
   position: fixed;
-  inset: 32px 0 0;
+  inset: var(--titlebar-block) 0 0;
   z-index: 110;
 }
 .context-menu {
@@ -1402,7 +1410,7 @@ hr {
 }
 .desk {
   position: absolute;
-  inset: 32px 0 0;
+  inset: var(--titlebar-block) 0 0;
   z-index: 60;
   overflow: auto;
   background: var(--frame);
