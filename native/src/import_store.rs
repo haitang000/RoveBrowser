@@ -42,6 +42,7 @@ impl Storage {
                     color: "sand".into(),
                     translucency: None,
                     active_tab: None,
+                    icon: None,
                 });
             }
             next.pins.push(Favorite {

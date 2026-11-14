@@ -3,8 +3,11 @@ import { ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import type { SpaceColor } from "../../lib/types";
 import Icon from "../common/Icon.vue";
+import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 const b = useBrowser(),
   name = ref(""),
+  icon = ref<string>(),
+  pickingIcon = ref(false),
   color = ref<SpaceColor>("sky"),
   translucency = ref(0);
 const colors: SpaceColor[] = [
@@ -22,6 +25,8 @@ watch(
   (open) => {
     if (open) {
       name.value = b.space.name;
+      icon.value = b.space.icon;
+      pickingIcon.value = false;
       color.value = b.space.color;
       translucency.value = b.space.translucency ?? 0;
     }
@@ -34,6 +39,7 @@ function publish(create = false) {
     name: name.value,
     color: color.value,
     translucency: translucency.value,
+    icon: icon.value ?? null,
   });
 }
 function save(create = false) {
@@ -64,10 +70,8 @@ function save(create = false) {
           <Icon name="close" />
         </button>
       </header>
-      <label
-        >工作区名称<input v-model="name" aria-label="工作区名称" maxlength="40"
-      /></label>
-      <div class="swatches" aria-label="工作区颜色">
+      <SpaceIdentityEditor v-model:name="name" v-model:icon="icon" v-model:picking="pickingIcon" />
+      <div v-show="!pickingIcon" class="swatches" aria-label="工作区颜色">
         <button
           v-for="c in colors"
           :key="c"

@@ -114,6 +114,42 @@ describe("Zigzag settings port", () => {
     });
     expect(space).not.toHaveProperty("clearGlass");
     state = reduce(state, {
+      type: "spaceUpdate",
+      id: space.id,
+      name: "研究",
+      color: "mint",
+      translucency: 0.5,
+      icon: "rocket",
+    });
+    expect(state.spaces.find((item) => item.id === space.id)?.icon).toBeUndefined();
+    state = reduce(state, {
+      type: "spaceUpdate",
+      id: space.id,
+      name: "研究",
+      color: "mint",
+      translucency: 0.5,
+      icon: "🚀",
+    });
+    expect(state.spaces.find((item) => item.id === space.id)?.icon).toBe("🚀");
+    state = reduce(state, {
+      type: "spaceUpdate",
+      id: space.id,
+      name: "研究",
+      color: "mint",
+      translucency: 0.5,
+      icon: "⭐",
+    });
+    expect(state.spaces.find((item) => item.id === space.id)?.icon).toBe("⭐");
+    state = reduce(state, {
+      type: "spaceUpdate",
+      id: space.id,
+      name: "研究",
+      color: "mint",
+      translucency: 0.5,
+      icon: null,
+    });
+    expect(state.spaces.find((item) => item.id === space.id)).not.toHaveProperty("icon");
+    state = reduce(state, {
       type: "spaceReorder",
       id: space.id,
       before: "personal",

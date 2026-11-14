@@ -7,6 +7,7 @@ import { savedPage, samePinnedUrl } from "../../lib/bookmarks";
 import { tabsToDismiss } from "../../lib/command";
 import { tabDisplayTitle } from "../../lib/tab-meta";
 import Icon from "../common/Icon.vue";
+import SpaceGlyph from "../common/SpaceGlyph.vue";
 const b = useBrowser();
 const menu = computed(() => b.contextMenu?.tab ? { ...b.contextMenu, tab: b.contextMenu.tab } : undefined);
 const edit = ref(false), editTitle = ref(""), editUrl = ref("");
@@ -221,7 +222,7 @@ function act(type: string, extra = {}) {
             role="menuitem"
             @click="act('move', { spaceId: s.id })"
           >
-            {{ s.name }}
+            <SpaceGlyph v-if="s.icon" :icon="s.icon" :size="14" />{{ s.name }}
           </button>
           <hr />
           <button role="menuitem" @click="menu.tab.bookmarkId ? (b.send({ type: 'bookmarkUnload', id: menu.tab.bookmarkId }), closeMenu()) : act('close')">

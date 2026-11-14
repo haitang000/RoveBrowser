@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useBrowser } from "../../stores/browser";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
+import SpaceGlyph from "../common/SpaceGlyph.vue";
 import { isSettingsUrl, searchUrl } from "../../lib/settings";
 import {
   commandContext,
@@ -274,7 +275,7 @@ onBeforeUnmount(() => {
             @pointermove="point($event, index)"
             @click="run(index)"
           >
-            <Favicon v-if="rowUrl(item)" :url="rowUrl(item)" /><Icon v-else :name="item.icon" :size="18" />
+            <SpaceGlyph v-if="item.glyph" :icon="item.glyph" :size="16" /><Favicon v-else-if="rowUrl(item)" :url="rowUrl(item)" /><Icon v-else :name="item.icon" :size="18" />
             <span class="result-title">{{ item.title }}</span>
             <span class="result-detail">{{ item.detail }}</span>
             <span v-if="index === selected" class="result-action">{{ item.action }} <kbd>↵</kbd></span>

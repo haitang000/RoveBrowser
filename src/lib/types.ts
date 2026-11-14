@@ -6,6 +6,8 @@ export interface Space {
   color: SpaceColor;
   /** 0 is solid. Absent means solid. */
   translucency?: number;
+  /** One emoji. Absent: the switcher shows its number. */
+  icon?: string;
   /** The tab this space was showing when the user left it; restored on switch back. */
   activeTab?: string;
 }

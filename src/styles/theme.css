@@ -384,15 +384,21 @@ kbd {
   opacity: 0;
 }
 .space-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 26px;
   font-weight: 300;
   letter-spacing: -0.6px;
   min-width: 0;
+  margin: 0;
+  line-height: 1.2;
+}
+.space-name > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin: 0;
-  line-height: 1.2;
 }
 .tab-row,
 .new-tab {
@@ -608,6 +614,9 @@ kbd {
 }
 .space-key:hover {
   background: var(--selected);
+}
+.space-key:not(.current) .space-emoji {
+  opacity: 0.55;
 }
 .space-keys-tracking .space-key {
   background: color-mix(in srgb, var(--selected) calc(var(--space-share) * 100%), var(--field));
@@ -1256,6 +1265,93 @@ hr {
   outline: 2px solid var(--quiet);
   outline-offset: 2px;
 }
+.space-glyph {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.space-emoji {
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: calc(var(--glyph, 16px) * 0.8);
+  line-height: 1;
+}
+.space-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.space-name-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 8px 0 4px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+.space-name-input input,
+.settings-space-editor .space-name-input input,
+.settings-panel .space-name-input input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.space-icon-trigger {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--ink);
+}
+.space-icon-trigger:hover,
+.space-icon-trigger[aria-pressed="true"] {
+  background: var(--hover);
+}
+.icon-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 30px);
+  gap: 4px;
+}
+.icon-grid button {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+}
+.icon-grid button:hover,
+.icon-grid button[aria-pressed="true"] {
+  background: var(--selected);
+}
+.icon-results {
+  max-height: 200px;
+  overflow: auto;
+  align-content: start;
+}
+.icon-empty {
+  grid-column: 1 / -1;
+  margin: 28px 0;
+  text-align: center;
+  color: var(--tertiary);
+  font-size: 12px;
+}
 .settings-actions {
   display: flex;
   justify-content: space-between;
@@ -1327,6 +1423,9 @@ hr {
   min-height: 80px;
 }
 .desk-space h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 26px;
   font-weight: 300;
   letter-spacing: -0.6px;

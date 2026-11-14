@@ -344,6 +344,14 @@
   border: 1px solid var(--edge);
   border-radius: 6px;
 }
+.settings-space-editor .space-name-input input {
+  height: 28px;
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
 .settings-space-editor .swatches {
   gap: 7px;
 }

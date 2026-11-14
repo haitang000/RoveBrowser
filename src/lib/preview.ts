@@ -7,6 +7,7 @@ import { tabsToDismiss } from "./command";
 import { sameOrigin } from "./favicon";
 import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type SettingsPane, type Settings } from "./settings";
 import { nowSeconds, tabIsFaded } from "./tab-meta";
+import { cleanIcon } from "./space-icon";
 import { ONBOARDING_STEPS, saveOnboardingSites } from "./onboarding";
 export function initialState(): BrowserState {
   return upgradeLibrary({
@@ -252,11 +253,13 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     case "spaceCreate": {
       if (s.spaces.length >= 16) throw Error("最多创建 16 个工作区");
       const id = crypto.randomUUID();
+      const icon = cleanIcon(c.icon);
       s.spaces.push({
         id,
         name: String(c.name).slice(0, 40) || "Untitled",
         color: (c.color as any) || "sage",
         translucency: Number(c.translucency) > .005 ? Math.min(1, Number(c.translucency)) : undefined,
+        ...(icon ? { icon } : {}),
       });
       if (!c.background) return reduce(s, { type: "space", id });
       break;
@@ -268,6 +271,9 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         space.color = c.color as any;
         const amount = Number(c.translucency);
         space.translucency = amount > 0.005 ? Math.min(1, amount) : undefined;
+        const icon = cleanIcon(c.icon);
+        if (icon) space.icon = icon;
+        else delete space.icon;
       }
       break;
     }

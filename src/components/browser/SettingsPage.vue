@@ -18,6 +18,8 @@ import {
 } from "../../lib/settings";
 import type { Space, SpaceColor } from "../../lib/types";
 import Icon from "../common/Icon.vue";
+import SpaceGlyph from "../common/SpaceGlyph.vue";
+import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 const props = defineProps<{ tabId: string; url: string }>();
 const b = useBrowser(),
   query = ref(""),
@@ -28,6 +30,8 @@ const notice = ref(""),
   folder = ref(b.settings.downloadFolder);
 const editing = ref<string>(),
   spaceName = ref(""),
+  spaceIcon = ref<string>(),
+  pickingIcon = ref(false),
   spaceColor = ref<SpaceColor>("sky"),
   translucency = ref(0);
 const pending = ref<{
@@ -420,6 +424,8 @@ function action(row: Row) {
 function editSpace(space?: Space) {
   editing.value = space?.id || "new";
   spaceName.value = space?.name || "";
+  spaceIcon.value = space?.icon;
+  pickingIcon.value = false;
   spaceColor.value = space?.color || "sky";
   translucency.value = space?.translucency || 0;
 }
@@ -434,6 +440,7 @@ function saveSpace() {
     name: spaceName.value.trim(),
     color: spaceColor.value,
     translucency: translucency.value,
+    icon: spaceIcon.value ?? null,
     background: true,
   });
   editing.value = undefined;
@@ -655,9 +662,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 @dragover.prevent
                 @drop.prevent="dropSpace($event, space.id)"
               >
-                <span class="space-color-tile" :data-color="space.color"
-                  ><Icon name="spaces" :size="18"
-                /></span>
+                <span class="space-color-tile" :data-color="space.color">
+                  <SpaceGlyph v-if="space.icon" :icon="space.icon" :size="16" />
+                  <Icon v-else name="spaces" :size="18" />
+                </span>
                 <div class="setting-description">
                   <strong>{{ space.name }}</strong>
                   <p>
@@ -787,14 +795,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
           </button>
         </header>
         <form @submit.prevent="saveSpace">
-          <label
-            >工作区名称<input
-              v-model="spaceName"
-              aria-label="工作区名称"
-              maxlength="40"
-              autofocus
-          /></label>
-          <div class="swatches" aria-label="工作区颜色">
+          <SpaceIdentityEditor v-model:name="spaceName" v-model:icon="spaceIcon" v-model:picking="pickingIcon" />
+          <div v-show="!pickingIcon" class="swatches" aria-label="工作区颜色">
             <button
               v-for="color in colors"
               :key="color.id"

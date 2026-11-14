@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
+import SpaceGlyph from "../common/SpaceGlyph.vue";
 const b = useBrowser();
 defineProps<{ swipeShares?: Record<string, number> | null }>();
 </script>
@@ -51,7 +52,7 @@ defineProps<{ swipeShares?: Record<string, number> | null }>();
           b.dragging = false;
         "
       >
-        {{ i + 1 }}
+        <SpaceGlyph v-if="s.icon" :icon="s.icon" :size="12" /><span v-else>{{ i + 1 }}</span>
       </button>
     </div>
     <button

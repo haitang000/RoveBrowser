@@ -56,6 +56,9 @@ pub struct Space {
     /// restores it instead of the space's first tab; absent in an older session.
     #[serde(default, rename = "activeTab", skip_serializing_if = "Option::is_none")]
     pub active_tab: Option<String>,
+    /// One emoji, shown beside the name and in the switcher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -278,7 +281,13 @@ pub enum Command {
     #[serde(rename = "space")]
     SwitchSpace { id: String },
     #[serde(rename = "spaceCreate")]
-    CreateSpace { name: String, color: String, #[serde(default)] background: bool, #[serde(default)] translucency: f64 },
+    CreateSpace {
+        name: String,
+        color: String,
+        #[serde(default)] background: bool,
+        #[serde(default)] translucency: f64,
+        #[serde(default)] icon: Option<String>,
+    },
     #[serde(rename = "spaceUpdate")]
     UpdateSpace {
         id: String,
@@ -286,6 +295,8 @@ pub enum Command {
         color: String,
         #[serde(default)]
         translucency: f64,
+        #[serde(default)]
+        icon: Option<String>,
     },
     #[serde(rename = "borderless")]
     Borderless,
@@ -488,6 +499,15 @@ pub(crate) fn favorite_url(input: &str) -> Result<String, String> {
     }
     Ok(url.to_string())
 }
+fn clean_icon(icon: &Option<String>) -> Result<Option<String>, String> {
+    let Some(icon) = icon else { return Ok(None) };
+    let icon = icon.trim();
+    if icon.is_empty() { return Ok(None) }
+    if icon.chars().count() > 48 || icon.chars().any(|c| c.is_control()) {
+        return Err("图标无效".into());
+    }
+    Ok(Some(icon.to_string()))
+}
 pub fn valid_color(c: &str) -> bool {
     matches!(
         c,
@@ -530,6 +550,7 @@ impl Default for State {
                 color: c.to_string(),
                 translucency: None,
                 active_tab: None,
+                icon: None,
             })
             .collect(),
             tabs: vec![],
@@ -1060,7 +1081,7 @@ impl State {
                     self.enter_space(id)?;
                 }
             }
-            Command::CreateSpace { name, color, background, translucency } => {
+            Command::CreateSpace { name, color, background, translucency, icon } => {
                 if name.trim().is_empty() { return Err("请输入工作区名称".into()); }
                 if !valid_color(color) {
                     return Err("未知工作区颜色".into());
@@ -1075,6 +1096,7 @@ impl State {
                     color: color.clone(),
                     translucency: (0.005..=1.0).contains(translucency).then_some(*translucency),
                     active_tab: None,
+                    icon: clean_icon(icon)?,
                 });
                 if !background { self.active_space = id; self.new_tab("")?; }
             }
@@ -1083,16 +1105,19 @@ impl State {
                 name,
                 color,
                 translucency,
+                icon,
             } => {
                 if !valid_color(color) {
                     return Err("未知工作区颜色".into());
                 }
+                let icon = clean_icon(icon)?;
                 if let Some(s) = self.spaces.iter_mut().find(|s| &s.id == id) {
                     if !name.trim().is_empty() {
                         s.name = name.chars().take(40).collect()
                     }
                     s.color = color.clone();
                     s.translucency = (0.005..=1.0).contains(translucency).then_some(*translucency);
+                    s.icon = icon;
                 }
             }
             Command::Borderless => self.borderless = !self.borderless,
@@ -1513,8 +1538,34 @@ mod tests {
                 name: state.spaces[0].name.clone(),
                 color: state.spaces[0].color.clone(),
                 translucency: 0.0,
+                icon: Some("🚀".into()),
             })
             .unwrap();
         assert_eq!(state.spaces[0].translucency, None);
+        assert_eq!(state.spaces[0].icon.as_deref(), Some("🚀"));
+        let saved = serde_json::to_value(&state).unwrap();
+        assert_eq!(saved["spaces"][0]["icon"], "🚀");
+        let restored: State = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.spaces[0].icon.as_deref(), Some("🚀"));
+        state
+            .apply(&Command::UpdateSpace {
+                id: state.spaces[0].id.clone(),
+                name: state.spaces[0].name.clone(),
+                color: state.spaces[0].color.clone(),
+                translucency: 0.0,
+                icon: Some("  ".into()),
+            })
+            .unwrap();
+        assert!(state.spaces[0].icon.is_none());
+        assert!(serde_json::to_value(&state).unwrap()["spaces"][0].get("icon").is_none());
+        assert!(state
+            .apply(&Command::UpdateSpace {
+                id: state.spaces[0].id.clone(),
+                name: state.spaces[0].name.clone(),
+                color: state.spaces[0].color.clone(),
+                translucency: 0.0,
+                icon: Some("a\nb".into()),
+            })
+            .is_err());
     }
 }

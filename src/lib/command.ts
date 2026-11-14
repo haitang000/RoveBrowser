@@ -38,8 +38,10 @@ export interface CommandRow {
   icon: string;
   action: string;
   key: string;
+  /** A space's own symbol or emoji, drawn in place of `icon`. */
+  glyph?: string;
 }
-interface Action { id: string; title: string; keywords: string[]; icon: string; }
+interface Action { id: string; title: string; keywords: string[]; icon: string; glyph?: string; }
 export interface CommandContext {
   hasPage: boolean;
   isPinned: boolean;
@@ -51,7 +53,7 @@ export interface CommandContext {
   hasTabsBelow: boolean;
   canReopen: boolean;
   muted: boolean;
-  spaces: { id: string; name: string }[];
+  spaces: { id: string; name: string; icon?: string }[];
   currentSpaceId?: string;
 }
 
@@ -175,8 +177,8 @@ export function contextActions(c: CommandContext): Action[] {
   list.push({ id: "new-space", title: "New Space", keywords: ["new", "space", "create", "add"], icon: "plus" });
   for (const space of c.spaces) if (space.id !== c.currentSpaceId) {
     const name = wordsOf(space.name);
-    list.push({ id: `space:${space.id}`, title: `Switch to ${space.name}`, keywords: ["switch", "go", "space", ...name], icon: "arrow" });
-    if (c.canMove) list.push({ id: `move:${space.id}`, title: `Move to ${space.name}`, keywords: ["move", "tab", "space", "send", ...name], icon: "arrow" });
+    list.push({ id: `space:${space.id}`, title: `Switch to ${space.name}`, keywords: ["switch", "go", "space", ...name], icon: "arrow", glyph: space.icon });
+    if (c.canMove) list.push({ id: `move:${space.id}`, title: `Move to ${space.name}`, keywords: ["move", "tab", "space", "send", ...name], icon: "arrow", glyph: space.icon });
   }
   return list;
 }
@@ -229,7 +231,7 @@ export function commandContext(state: BrowserState, recent: string[]): CommandCo
     hasTabsBelow: active?.bookmarkId ? pages.length > 0 : last >= 0 && pages.length > last + 1,
     canReopen: state.closed.length > 0,
     muted: Boolean(active?.muted),
-    spaces: state.spaces.map((space) => ({ id: space.id, name: space.name })),
+    spaces: state.spaces.map((space) => ({ id: space.id, name: space.name, icon: space.icon })),
     currentSpaceId: state.activeSpace,
   };
 }
@@ -238,8 +240,8 @@ function containsWords(words: string[], ...haystacks: string[]): boolean {
   const joined = haystacks.join(" ").toLowerCase();
   return words.every((word) => joined.includes(word));
 }
-function row(kind: CommandKind, title: string, detail: string, icon: string, action: string, key: string): CommandRow {
-  return { kind, title, detail, icon, action, key };
+function row(kind: CommandKind, title: string, detail: string, icon: string, action: string, key: string, glyph?: string): CommandRow {
+  return { kind, title, detail, icon, action, key, ...(glyph ? { glyph } : {}) };
 }
 export function rankCommands(text: string, input: {
   state: BrowserState;
@@ -273,6 +275,7 @@ export function rankCommands(text: string, input: {
       action.icon,
       "Run",
       `action:${action.id}`,
+      action.glyph,
     ));
   };
   addActions(named);

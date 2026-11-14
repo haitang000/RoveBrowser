@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
+import SpaceGlyph from "../common/SpaceGlyph.vue";
 import { tabDisplayTitle } from "../../lib/tab-meta";
 const b = useBrowser(),
   query = ref(""),
@@ -77,7 +78,8 @@ watch(
           "
         >
           <h2>
-            {{ s.name }} <small>{{ s.tabs.length }} tabs</small>
+            <SpaceGlyph v-if="s.icon" :icon="s.icon" :size="22" />
+            <span>{{ s.name }}</span> <small>{{ s.tabs.length }} tabs</small>
           </h2>
           <div class="desk-cards">
             <button
