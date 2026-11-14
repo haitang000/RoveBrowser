@@ -51,6 +51,22 @@ async function launch() {
   return ui;
 }
 async function send(ui, command) { await ui.evaluate((c) => window.ipc.postMessage(JSON.stringify(c)), command); }
+async function pauseBackground(ui, id, time = 100) {
+  await send(ui, { type: 'space', id });
+  await waitFor(() => ui.locator('.browser-shell').evaluate((shell) => shell.getAnimations().length > 0), 'background transition');
+  return ui.locator('.browser-shell').evaluate(async (shell, time) => {
+    const animation = shell.getAnimations()[0];
+    animation.pause(); await animation.ready; animation.currentTime = time;
+    const style = getComputedStyle(shell), context = document.createElement('canvas').getContext('2d');
+    context.fillStyle = style.backgroundImage === 'none' ? style.backgroundColor : style.getPropertyValue('--frame-gradient-start');
+    context.fillRect(0, 0, 1, 1);
+    return { image: style.backgroundImage, alpha: context.getImageData(0, 0, 1, 1).data[3], grain: Number(getComputedStyle(shell, '::before').opacity) };
+  }, time);
+}
+async function finishBackground(ui) {
+  await ui.locator('.browser-shell').evaluate((shell) => shell.getAnimations().forEach((animation) => animation.finish()));
+  await waitFor(() => ui.locator('.browser-shell').evaluate((shell) => shell.getAnimations().length === 0), 'background settled');
+}
 async function home(ui, name) {
   await waitFor(async () => await ui.locator('.sidebar-header .space-name').textContent() === name, `${name} state broadcast`);
   await waitFor(async () => await ui.locator('.space-settling, .space-tracking').count() === 0, 'settle');
@@ -103,7 +119,10 @@ try {
   pageBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port + 1}`), 'page debugger');
   const personal = await waitFor(() => pageBrowser.contexts().flatMap((c) => c.pages()).find((p) => p.url() === base + '/personal'), 'Personal WebView');
   await personal.locator('h1').waitFor();
-  await personal.evaluate(() => { window.__spaceMarker = 'personal state'; scrollTo(0, 300); });
+  const personalState = await personal.evaluate(() => {
+    window.__spaceMarker = 'personal state'; scrollTo(0, 300);
+    return [window.__spaceMarker, scrollY];
+  });
   for (const [name, deltas] of [
     ['edge', [-12, -28, -42, -38, -30, -22, -16, -11, -7, -4, -2, -1, -0.5, -0.25]],
     ['small', [2, 4, 6, 5.5, 4, 3, 2, 1.5, 1, 0.7, 0.4, 0.2, 0.1, 0.05]],
@@ -154,17 +173,20 @@ try {
   await send(ui, { type: 'new', url: base + '/work' });
   const work = await waitFor(() => pageBrowser.contexts().flatMap((c) => c.pages()).find((p) => p.url() === base + '/work'), 'Work WebView');
   await work.locator('h1').waitFor();
-  await work.evaluate(() => { window.__spaceMarker = 'work state'; scrollTo(0, 450); });
+  const workState = await work.evaluate(() => {
+    window.__spaceMarker = 'work state'; scrollTo(0, 450);
+    return [window.__spaceMarker, scrollY];
+  });
   await swipe(ui, -100);
   await home(ui, 'Personal');
   await ui.getByRole('tab', { name: 'Personal native fixture', exact: true }).waitFor();
-  assert.deepEqual(await personal.evaluate(() => [window.__spaceMarker, scrollY]), ['personal state', 300]);
+  assert.deepEqual(await personal.evaluate(() => [window.__spaceMarker, scrollY]), personalState);
   assert.equal(work.isClosed(), false);
   // Coming back lands on the page Personal was showing, not its first tab.
   assert.equal(await ui.locator('.space-list .tab-row.selected .tab-title').textContent(), 'Personal native fixture');
   await swipe(ui, 100);
   await home(ui, 'Work');
-  assert.deepEqual(await work.evaluate(() => [window.__spaceMarker, scrollY]), ['work state', 450]);
+  assert.deepEqual(await work.evaluate(() => [window.__spaceMarker, scrollY]), workState);
   assert.equal(await ui.locator('.space-list .tab-row.selected .tab-title').textContent(), 'Work native fixture');
   assert.equal(hits.get('/personal'), 1); assert.equal(hits.get('/work'), 1);
   checks.push('双向切换保留两个真实网页控制器、DOM 标记及滚动位置，服务器无重复加载');
@@ -184,6 +206,34 @@ try {
   assert.equal(await ui.locator('.space-track').evaluate((e) => new DOMMatrixReadOnly(getComputedStyle(e).transform).m41), 0);
   await home(ui, 'Personal');
   checks.push('原生 UI 的减少动态效果模式保留切换，不产生列表位移');
+  await ui.emulateMedia({ reducedMotion: 'no-preference' });
+  await ui.evaluate(() => {
+    const original = window.chrome.webview.postMessage.bind(window.chrome.webview);
+    window.__spaceGlass = [];
+    window.chrome.webview.postMessage = (message) => {
+      const command = JSON.parse(message);
+      if (command.type === 'glass') window.__spaceGlass.push(command.enabled);
+      original(message);
+    };
+  });
+  await send(ui, { type: 'spaceUpdate', id: 'personal', name: 'Personal', color: 'sky', hue: 0.6, brightness: 0.12, hue2: 0.9, brightness2: 0.6, angle: 90, translucency: 0.8, grain: 0.8 });
+  await send(ui, { type: 'spaceUpdate', id: 'work', name: 'Work', color: 'sage', hue: 0.1, brightness: 0.3, hue2: 0.4, brightness2: 0.5, angle: 30, translucency: 0.2, grain: 0.2 });
+  await waitFor(() => ui.locator('.browser-shell').evaluate((shell) => getComputedStyle(shell, '::before').opacity === '0.144' && shell.getAnimations().length === 0), 'initial glass look');
+  const glass = await pauseBackground(ui, 'work', 80);
+  assert.ok(glass.image.includes('linear-gradient'));
+  assert.ok(glass.alpha > 102 && glass.alpha < 217);
+  assert.ok(glass.grain > 0.036 && glass.grain < 0.144);
+  const reversed = await pauseBackground(ui, 'personal', 0);
+  assert.equal(reversed.image, glass.image);
+  assert.equal(reversed.grain, glass.grain);
+  await finishBackground(ui);
+  const opaque = await pauseBackground(ui, 'studio');
+  assert.ok(opaque.alpha > 102 && opaque.alpha < 255);
+  assert.equal(await ui.evaluate(() => window.__spaceGlass.at(-1)), true);
+  await ui.screenshot({ path: join(output, 'glass-transition.png') });
+  await finishBackground(ui);
+  await waitFor(() => ui.evaluate(() => window.__spaceGlass.at(-1) === false), 'native blur disabled after opaque frame');
+  checks.push('真实 WebView2 中清透渐变、透明度与颗粒感连续过渡，反向切换从当前画面接续，背景完全不透明后才关闭原生模糊');
   const result = { passed: true, profile, checks, rebounds };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ ...result, rebounds: rebounds.map(({ name, firstSpringMs }) => ({ name, firstSpringMs })) }, null, 2));

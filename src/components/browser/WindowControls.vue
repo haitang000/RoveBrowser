@@ -15,7 +15,9 @@ function report() {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
   const context = canvas.getContext("2d")!;
-  const frame = shell.classList.contains('glass') ? style.backgroundColor : style.getPropertyValue('--frame').trim();
+  const frame = style.backgroundImage === "none"
+    ? style.backgroundColor
+    : style.getPropertyValue("--frame-gradient-start").trim();
   const color = (...fills: string[]) => {
     context.clearRect(0, 0, 1, 1);
     for (const fill of fills) {
@@ -44,12 +46,14 @@ onMounted(() => {
   observer = new ResizeObserver(report);
   if (maximize.value) observer.observe(maximize.value);
   const shell = maximize.value?.closest('.browser-shell');
+  shell?.addEventListener("frame-background-change", report);
   paletteObserver = new MutationObserver(report);
   if (shell) paletteObserver.observe(shell, { attributes: true, attributeFilter: ['class', 'style'] });
   window.addEventListener("resize", report);
   report();
 });
 onBeforeUnmount(() => {
+  maximize.value?.closest('.browser-shell')?.removeEventListener("frame-background-change", report);
   observer?.disconnect();
   paletteObserver?.disconnect();
   window.removeEventListener("resize", report);

@@ -160,7 +160,29 @@ kbd {
   color: var(--tertiary);
   white-space: nowrap;
 }
+/* Typed stops let WAAPI interpolate gradients, including their alpha. */
+@property --frame-gradient-start {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --frame-gradient-end {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --frame-gradient-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 135deg;
+}
+@property --grain-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
 .browser-shell {
+  position: relative;
   height: 100%;
   border-radius: var(--radius-window);
   clip-path: inset(0 round var(--radius-window));
@@ -182,10 +204,9 @@ kbd {
 }
 .browser-shell.custom-frame,
 .browser-shell.custom-frame.glass {
-  position: relative;
   background: var(--shell-bg);
 }
-.browser-shell.custom-frame::before {
+.browser-shell::before {
   content: "";
   position: absolute;
   inset: 0;

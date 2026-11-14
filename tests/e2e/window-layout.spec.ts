@@ -77,7 +77,7 @@ test("legacy frosted spaces use the single clear appearance and caption alpha", 
   state.activeSpace = 'work';
   await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
   await expect.poll(alpha).toBe(255);
-  expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(false);
+  await expect.poll(() => page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(false);
   state.activeSpace = 'personal';
   state.theme = 'dark';
   await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
@@ -86,6 +86,169 @@ test("legacy frosted spaces use the single clear appearance and caption alpha", 
   await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
   await expect(page.locator('.browser-shell')).not.toHaveClass(/glass/);
   await expect.poll(alpha).toBe(255);
+});
+
+async function pauseFrame(page: import("@playwright/test").Page, state: BrowserState, time = 100) {
+  return page.evaluate(async ({ state, time }) => {
+    window.__ERA_RECEIVE__!({ type: "state", state });
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    const shell = document.querySelector<HTMLElement>(".browser-shell")!;
+    const animation = shell.getAnimations()[0]!;
+    animation.pause();
+    await animation.ready;
+    animation.currentTime = time;
+    const style = getComputedStyle(shell);
+    const context = document.createElement("canvas").getContext("2d")!;
+    const rgba = (color: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return [...context.getImageData(0, 0, 1, 1).data];
+    };
+    return {
+      color: rgba(style.backgroundColor),
+      image: style.backgroundImage,
+      start: rgba(style.getPropertyValue("--frame-gradient-start")),
+      end: rgba(style.getPropertyValue("--frame-gradient-end")),
+      grain: Number(getComputedStyle(shell, "::before").opacity),
+      stops: (animation.effect as KeyframeEffect).getKeyframes().map(frame => ({
+        start: rgba(String(frame["--frame-gradient-start"])),
+        end: rgba(String(frame["--frame-gradient-end"])),
+      })),
+      glass: window.__windowTest.glass.at(-1),
+    };
+  }, { state, time });
+}
+
+async function finishFrame(page: import("@playwright/test").Page) {
+  await page.locator(".browser-shell").evaluate(shell => shell.getAnimations().forEach(animation => animation.finish()));
+  await expect.poll(() => page.locator(".browser-shell").evaluate(shell => shell.getAnimations().length)).toBe(0);
+}
+
+for (const custom of [false, true]) {
+  test(`${custom ? "custom" : "named"} glass spaces interpolate alpha and retain the native blur until opaque`, async ({ page }) => {
+    const state = initialState();
+    state.spaces[0]!.translucency = 1;
+    state.spaces[1]!.translucency = 0.45;
+    if (custom) {
+      Object.assign(state.spaces[0]!, { hue: 0.6, brightness: 0.2 });
+      Object.assign(state.spaces[1]!, { hue: 0.3, brightness: 0.4 });
+    }
+    await nativeShell(page, state);
+    state.activeSpace = "work";
+    const betweenGlass = await pauseFrame(page, state);
+    expect(betweenGlass.color[3]).toBeGreaterThan(64);
+    expect(betweenGlass.color[3]).toBeLessThan(169);
+    expect(betweenGlass.glass).toBe(true);
+    await finishFrame(page);
+
+    state.activeSpace = "studio";
+    const toOpaque = await pauseFrame(page, state);
+    expect(toOpaque.color[3]).toBeGreaterThan(169);
+    expect(toOpaque.color[3]).toBeLessThan(255);
+    expect(toOpaque.glass).toBe(true);
+    await finishFrame(page);
+    expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(false);
+
+    state.activeSpace = "personal";
+    const toGlass = await pauseFrame(page, state);
+    expect(toGlass.color[3]).toBeGreaterThan(64);
+    expect(toGlass.color[3]).toBeLessThan(255);
+    expect(toGlass.glass).toBe(true);
+    await finishFrame(page);
+  });
+}
+
+test("glass gradients and grain retarget from the visible frame, including switches to and from solid colors", async ({ page }) => {
+  const state = initialState();
+  Object.assign(state.spaces[0]!, { hue: 0.6, brightness: 0.12, hue2: 0.9, brightness2: 0.6, angle: 90, translucency: 0.8, grain: 0.8 });
+  Object.assign(state.spaces[1]!, { hue: 0.1, brightness: 0.3, hue2: 0.4, brightness2: 0.5, angle: 30, translucency: 0.2, grain: 0.2 });
+  await nativeShell(page, state);
+  state.activeSpace = "work";
+  const between = await pauseFrame(page, state, 80);
+  expect(between.image).toContain("linear-gradient");
+  expect(between.start[3]).toBeGreaterThan(102);
+  expect(between.start[3]).toBeLessThan(217);
+  expect(between.end[3]).toBe(between.start[3]);
+  for (const stop of between.stops) {
+    expect(between.start).not.toEqual(stop.start);
+    expect(between.end).not.toEqual(stop.end);
+  }
+  expect(between.grain).toBeGreaterThan(0.036);
+  expect(between.grain).toBeLessThan(0.144);
+
+  state.activeSpace = "studio";
+  const interrupted = await pauseFrame(page, state, 0);
+  expect(interrupted.image).toBe(between.image);
+  expect(interrupted.grain).toBeCloseTo(between.grain, 5);
+  await finishFrame(page);
+  await expect(page.locator(".browser-shell")).toHaveCSS("background-image", "none");
+  expect(await page.locator(".browser-shell").evaluate(shell => getComputedStyle(shell, "::before").opacity)).toBe("0");
+  expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(false);
+
+  state.activeSpace = "personal";
+  const toGradient = await pauseFrame(page, state);
+  expect(toGradient.image).toContain("linear-gradient");
+  expect(toGradient.start[3]).toBeGreaterThan(102);
+  expect(toGradient.start[3]).toBeLessThan(255);
+  expect(toGradient.grain).toBeGreaterThan(0);
+  expect(toGradient.grain).toBeLessThan(0.144);
+  await finishFrame(page);
+  expect(await page.locator(".browser-shell").evaluate(shell => Number(getComputedStyle(shell, "::before").opacity))).toBeCloseTo(0.144);
+});
+
+test("a quick return to glass cancels the outgoing backdrop shutdown", async ({ page }) => {
+  const state = initialState();
+  state.spaces[0]!.translucency = 1;
+  await nativeShell(page, state);
+  state.activeSpace = "work";
+  const outgoing = await pauseFrame(page, state, 70);
+  state.activeSpace = "personal";
+  const returning = await pauseFrame(page, state, 0);
+  expect(returning.color).toEqual(outgoing.color);
+  await finishFrame(page);
+  expect(await page.evaluate(() => window.__windowTest.glass)).toEqual([true]);
+});
+
+for (const preference of ["system", "app"] as const) {
+  test(`${preference} reduced motion settles an in-progress glass transition and its native backdrop`, async ({ page }) => {
+    const state = initialState();
+    state.spaces[0]!.translucency = 1;
+    await nativeShell(page, state);
+    state.activeSpace = "work";
+    await pauseFrame(page, state);
+    if (preference === "system") await page.emulateMedia({ reducedMotion: "reduce" });
+    else {
+      state.settings!.reduceMotion = true;
+      await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+    }
+    await expect.poll(() => page.locator(".browser-shell").evaluate(shell => shell.getAnimations().length)).toBe(0);
+    expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(false);
+    state.activeSpace = "personal";
+    await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+    await expect(page.locator(".browser-shell")).toHaveClass(/glass/);
+    expect(await page.locator(".browser-shell").evaluate(shell => shell.getAnimations().length)).toBe(0);
+    expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(true);
+  });
+}
+
+test("reduced transparency keeps custom glass gradients opaque", async ({ page }) => {
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-transparency", value: "reduce" }],
+  });
+  const state = initialState();
+  Object.assign(state.spaces[0]!, { hue: 0.6, brightness: 0.12, hue2: 0.9, brightness2: 0.6, translucency: 1 });
+  await nativeShell(page, state);
+  await expect(page.locator(".browser-shell")).not.toHaveClass(/glass/);
+  expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(false);
+  const alpha = await page.locator(".browser-shell").evaluate(shell => {
+    const context = document.createElement("canvas").getContext("2d")!;
+    context.fillStyle = getComputedStyle(shell).getPropertyValue("--frame-gradient-start");
+    context.fillRect(0, 0, 1, 1);
+    return context.getImageData(0, 0, 1, 1).data[3];
+  });
+  expect(alpha).toBe(255);
 });
 
 test("native caption geometry keeps three equal buttons flush with the window edge", async ({ page }) => {

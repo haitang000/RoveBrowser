@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useBrowser } from "./stores/browser";
 import Sidebar from "./components/browser/Sidebar.vue";
 import SidebarResize from "./components/browser/SidebarResize.vue";
@@ -29,9 +29,10 @@ const shownSpace = computed(() => {
   const preview = b.spacePreview;
   return preview && preview.id === b.space?.id ? { ...b.space, ...preview.look } : b.space;
 });
-const painted = computed(() => frameOf(shownSpace.value, b.state.theme, true));
+const painted = computed(() => frameOf(shownSpace.value, b.state.theme, glassAllowed.value));
 const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(shownSpace.value?.translucency) && glassAllowed.value);
 watch(() => b.onboardingOpen, (open) => { document.documentElement.dataset.onboarding = String(open); }, { immediate: true, flush: "sync" });
+const gradient = "linear-gradient(var(--frame-gradient-angle), var(--frame-gradient-start), var(--frame-gradient-end))";
 const shellStyle = computed(() => ({
   ...(glassActive.value
     ? { "--frame-coverage": String(coverage(shownSpace.value?.translucency)) }
@@ -40,23 +41,60 @@ const shellStyle = computed(() => ({
     ? {
         "--frame": painted.value.start,
         "--frame-h": String(painted.value.hue),
-        "--shell-bg": painted.value.background,
-        "--grain-opacity": String(painted.value.grain * 0.18),
+        "--shell-bg": painted.value.end ? gradient : painted.value.background,
+        "--frame-gradient-start": frameColor(painted.value.start),
+        "--frame-gradient-end": frameColor(painted.value.end ?? painted.value.start),
+        "--frame-gradient-angle": `${painted.value.cssAngle}deg`,
       }
     : {}),
+  "--grain-opacity": String(painted.value.grain * 0.18),
 }));
+function frameColor(color: string) {
+  const alpha = glassActive.value ? coverage(shownSpace.value?.translucency) : 1;
+  return `color-mix(in srgb, ${color} ${alpha * 100}%, transparent)`;
+}
 let frameAnimation: Animation | undefined;
+let frameGeneration = 0;
+let nativeGlass: boolean | undefined;
+function syncNativeGlass(enabled: boolean) {
+  if (!b.native || nativeGlass === enabled) return;
+  nativeGlass = enabled;
+  b.send({ type: "glass", enabled });
+}
+function cancelFrameAnimation() {
+  frameGeneration++;
+  frameAnimation?.cancel();
+  frameAnimation = undefined;
+}
+function finishFrameAnimation() {
+  cancelFrameAnimation();
+  syncNativeGlass(glassActive.value);
+  shell.value?.dispatchEvent(new Event("frame-background-change"));
+}
 watch(() => b.settings.reduceMotion, (value) => { document.documentElement.dataset.reduceMotion = String(value); if (value) finishFrameAnimation(); }, { immediate: true });
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
-function finishFrameAnimation() { frameAnimation?.cancel(); frameAnimation = undefined; }
-// ColorView.setColor/CALayer.set: retarget from the color currently on screen.
-// Submit only a background-color effect; the titlebar, list and native page stay live.
+function frameSnapshot(element: HTMLElement) {
+  const style = getComputedStyle(element);
+  const hasGradient = style.backgroundImage !== "none";
+  return {
+    backgroundColor: style.backgroundColor,
+    backgroundImage: style.backgroundImage,
+    "--frame-gradient-start": hasGradient ? style.getPropertyValue("--frame-gradient-start").trim() : style.backgroundColor,
+    "--frame-gradient-end": hasGradient ? style.getPropertyValue("--frame-gradient-end").trim() : style.backgroundColor,
+    "--frame-gradient-angle": style.getPropertyValue("--frame-gradient-angle").trim(),
+    "--grain-opacity": style.getPropertyValue("--grain-opacity").trim(),
+  };
+}
+// Read the presentation before cancelling, including alpha and gradient stops.
+// Only the background changes; chrome and page content remain interactive.
 watch(
   // Saving a width or receiving a tab title must not restart the color tween.
-  () => JSON.stringify([b.state.theme, lookOf(shownSpace.value)]),
-  () => {
+  () => JSON.stringify([b.state.theme, lookOf(shownSpace.value), glassActive.value]),
+  async () => {
     const theme = painted.value.theme ?? b.state.theme;
-    const from = shell.value ? getComputedStyle(shell.value).backgroundColor : undefined;
+    const from = shell.value ? frameSnapshot(shell.value) : undefined;
+    cancelFrameAnimation();
+    const ticket = frameGeneration;
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.color = painted.value.custom ? "custom" : b.space.color;
     if (painted.value.custom) {
@@ -66,12 +104,36 @@ watch(
       document.documentElement.style.removeProperty("--frame");
       document.documentElement.style.removeProperty("--frame-h");
     }
-    finishFrameAnimation();
-    if (!shell.value || !from || painted.value.custom || reducedMotion.matches || b.settings.reduceMotion || glassActive.value) return;
-    const to = getComputedStyle(document.documentElement).getPropertyValue("--frame").trim();
-    frameAnimation = shell.value.animate([{ backgroundColor: from }, { backgroundColor: to }], {
+    // Enable the backdrop before alpha begins changing. Keep it behind an
+    // outgoing glass space until the frame has become completely opaque.
+    if (glassActive.value) syncNativeGlass(true);
+    if (!shell.value || !from || reducedMotion.matches || b.settings.reduceMotion || transparencyReduced.value) {
+      syncNativeGlass(glassActive.value);
+      return;
+    }
+    await nextTick();
+    if (ticket !== frameGeneration || !shell.value) return;
+    const to = frameSnapshot(shell.value);
+    if (JSON.stringify(from) === JSON.stringify(to)) {
+      syncNativeGlass(glassActive.value);
+      return;
+    }
+    const frames: Keyframe[] = [from, to];
+    if (from.backgroundImage !== "none" || to.backgroundImage !== "none") {
+      // A solid is a gradient with identical stops, so transitions to/from a
+      // gradient can interpolate without an opaque overlay or an alpha flash.
+      for (const frame of frames) {
+        frame.backgroundColor = "transparent";
+        frame.backgroundImage = gradient;
+      }
+    }
+    const animation = shell.value.animate(frames, {
       duration: SPACE_SWIPE.backgroundDuration, easing: "ease",
     });
+    frameAnimation = animation;
+    void animation.finished.then(() => {
+      if (ticket === frameGeneration) finishFrameAnimation();
+    }).catch(() => { /* A newer switch owns the background. */ });
   },
   { immediate: true },
 );
@@ -79,9 +141,6 @@ watch(
   [() => b.overlay, () => b.commandOpen],
   ([visible, command]) => b.send({ type: "overlay", visible, command }),
 );
-watch(glassActive, (enabled) => {
-  if (b.native) b.send({ type: "glass", enabled });
-}, { immediate: true });
 function syncTransparency() { transparencyReduced.value = reducedTransparency.matches; }
 const key = (event: KeyboardEvent) => browserKey(b, event);
 function dismissCommand() { if (b.native) b.commandOpen = false; }
