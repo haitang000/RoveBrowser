@@ -57,6 +57,7 @@ windows-installer:
   before_script:
     - |
       $ErrorActionPreference = 'Stop'
+      $ProgressPreference = 'SilentlyContinue'
       [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
       Write-Host "Runner: $env:COMPUTERNAME user=$(whoami) PowerShell=$($PSVersionTable.PSVersion)"
 
@@ -142,7 +143,10 @@ windows-installer:
         if ($hash -ne $env:INNO_SETUP_SHA256) { throw "Inno Setup package checksum mismatch: $hash" }
         $toolRoot = Join-Path $env:TEMP "rove-inno-setup-$env:INNO_SETUP_VERSION"
         if (-not (Test-Path -LiteralPath (Join-Path $toolRoot 'tools\ISCC.exe') -PathType Leaf)) {
-          Expand-Archive -LiteralPath $package -DestinationPath $toolRoot -Force
+          # Windows PowerShell 5.1 only expands archives with a .zip extension.
+          $archive = Join-Path $env:TEMP "tools.innosetup.$env:INNO_SETUP_VERSION.zip"
+          Copy-Item -LiteralPath $package -Destination $archive -Force
+          Expand-Archive -LiteralPath $archive -DestinationPath $toolRoot -Force
         }
         $compiler = Join-Path $toolRoot 'tools\ISCC.exe'
         if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'ISCC.exe is missing from the Inno Setup package.' }
