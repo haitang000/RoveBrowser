@@ -3,13 +3,13 @@
 .space-look {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 .look-presets {
   display: grid;
   grid-template-columns: repeat(9, 24px);
   justify-content: space-between;
   row-gap: 8px;
+  margin-bottom: 16px;
 }
 .look-swatch {
   width: 24px;
@@ -32,6 +32,7 @@
 .color-wheel {
   position: relative;
   height: 200px;
+  margin-bottom: 12px;
   touch-action: none;
   cursor: crosshair;
 }
@@ -60,48 +61,111 @@
   cursor: grab;
 }
 .wheel-knob.selected {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
+  box-shadow: 0 0 0 1.5px var(--ink), 0 1px 3px #0004;
 }
 .look-row {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  column-gap: 12px;
+  min-height: 30px;
+  margin-bottom: 12px;
   font-size: 13px;
-  font-weight: 300;
+  font-weight: 400;
   color: var(--quiet);
 }
-.look-row input[type="range"] {
+.look-row > span:first-child {
+  line-height: 1;
+}
+.look-slider {
+  position: relative;
+  display: block;
+  height: 30px;
+  border-radius: 15px;
+  overflow: hidden;
+  border: 1px solid var(--panel-edge, var(--edge));
+  background: var(--track);
+}
+.look-slider.through {
+  background-color: #e6e6e6;
+  background-image: var(--track), repeating-conic-gradient(#f7f7f7 0% 25%, #d0d0d0 0% 50%);
+  background-size: auto, 10px 10px;
+}
+.look-slider.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='128' height='128' filter='url(%23n)'/></svg>");
+  background-size: 90px;
+  mask-image: linear-gradient(90deg, transparent, #000 72%);
+  opacity: 0.55;
+}
+.look-slider input[type="range"] {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 30px;
   margin: 0;
-  border-radius: 15px;
   appearance: none;
-  border: 1px solid var(--edge);
+  background: transparent;
+  border: 0;
 }
-.look-row input[type="range"]::-webkit-slider-thumb {
+.look-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 30px;
+  background: transparent;
+  border: 0;
+}
+.look-slider input[type="range"]::-webkit-slider-thumb {
   appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #00000014;
+  box-shadow: 0 1px 3px #00000040;
+}
+.look-slider input[type="range"]::-moz-range-track {
+  height: 30px;
+  background: transparent;
+  border: 0;
+}
+.look-slider input[type="range"]::-moz-range-thumb {
   width: 22px;
   height: 22px;
   border-radius: 50%;
   background: #fff;
   border: 1px solid #00000014;
-  box-shadow: 0 1px 3px #0004;
+  box-shadow: 0 1px 3px #00000040;
 }
 .look-fold {
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-height: 28px;
+  margin-bottom: 0;
 }
 .look-disclosure,
 .look-reset {
   font-size: 13px;
   color: var(--quiet);
 }
+.look-disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0;
+}
+.look-disclosure svg {
+  transition: transform 160ms var(--ease-out);
+}
 .look-disclosure[aria-expanded="true"] {
   color: var(--ink);
+}
+.look-disclosure[aria-expanded="true"] svg {
+  transform: rotate(180deg);
 }
 .look-reset:disabled {
   opacity: 0.35;
@@ -109,11 +173,15 @@
 .look-effects {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  margin-top: 8px;
+}
+.look-effects .look-row:last-child {
+  margin-bottom: 0;
 }
 .look-gradient {
-  grid-template-columns: 48px 26px 26px 40px;
+  grid-template-columns: 44px 26px 26px 40px;
   justify-content: start;
+  min-height: 40px;
 }
 .color-chip,
 .direction-dial {
@@ -124,8 +192,7 @@
   position: relative;
 }
 .color-chip.selected {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
+  box-shadow: 0 0 0 1.5px var(--ink);
 }
 .color-chip.add {
   color: var(--quiet);
@@ -133,15 +200,15 @@
 }
 .chip-remove {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 14px;
-  height: 14px;
+  top: -5px;
+  right: -5px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--ink);
   color: var(--panel);
-  font-size: 10px;
-  line-height: 14px;
+  font-size: 9px;
+  line-height: 12px;
   text-align: center;
 }
 .direction-dial {
@@ -149,17 +216,29 @@
   height: 40px;
   cursor: grab;
   touch-action: none;
+  background:
+    radial-gradient(circle, var(--panel) 0 54%, transparent 56%),
+    var(--dial, var(--panel));
 }
-.direction-dial span {
+.dial-ticks {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(from -3deg, var(--quiet) 0 5deg, transparent 5deg 45deg);
+  mask: radial-gradient(circle, transparent 64%, #000 66% 80%, transparent 82%);
+  pointer-events: none;
+}
+.dial-needle {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 12px;
+  width: 11px;
   height: 2px;
-  margin: -1px 0 0 -2px;
+  margin: -1px 0 0 -1px;
   border-radius: 1px;
-  background: #52525b;
+  background: var(--ink);
   transform-origin: 0 50%;
+  pointer-events: none;
 }
 .space-editor-panel {
   position: fixed;
@@ -180,8 +259,32 @@
   border-radius: 14px;
   box-shadow: 0 3px 16px var(--panel-shadow);
 }
-.space-editor-panel .space-name-input {
+.space-editor-panel .space-identity {
+  position: relative;
+  gap: 0;
   margin-bottom: 12px;
+}
+.space-editor-panel .space-identity > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.space-editor-panel .space-name-input {
+  height: 34px;
+  margin: 0;
+  padding: 0 10px 0 4px;
+  background: color-mix(in srgb, var(--ink) 4.5%, transparent);
+  border: 0;
+  border-radius: 8px;
+}
+.space-editor-panel .space-name-input input {
+  height: 30px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  color: var(--ink);
 }
 .space-name.editable {
   cursor: default;

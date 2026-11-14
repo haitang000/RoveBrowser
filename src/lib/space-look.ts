@@ -371,7 +371,9 @@ export function swatchBackground(look: SpaceLook): string {
   const start = paint(baseHue(space), space.brightness ?? look.depth, tintAmount(space));
   const end = space.hue2 == null ? start : paint(space.hue2, space.brightness2 ?? look.depth2, tintAmount2(space));
   const alpha = 1 - 0.45 * look.seeThrough;
-  return `linear-gradient(160deg, ${mix(start, alpha)}, ${mix(end, alpha)})`;
+  const fill = `linear-gradient(160deg, ${mix(start, alpha)}, ${mix(end, alpha)})`;
+  if (look.seeThrough <= 0.005) return fill;
+  return `${fill}, repeating-conic-gradient(#f4f4f4 0% 25%, #d5d5d5 0% 50%)`;
 }
 
 export function commandLook(look: LookFields): Record<string, unknown> {

@@ -1967,7 +1967,13 @@ impl App {
             if make_default { self.command(Command::SystemSettings, event_loop); }
             return;
         }
-        if !self.state.onboarding.completed && !matches!(c,
+        let onboarding_edit = match &c {
+            Command::UpdateSpace { id, .. } => self.state.onboarding.step == crate::onboarding::Step::Spaces && id == &self.state.active_space,
+            Command::Theme => self.state.onboarding.step == crate::onboarding::Step::Spaces,
+            Command::UpdateSettings { .. } => self.state.onboarding.step == crate::onboarding::Step::Search,
+            _ => false,
+        };
+        if !self.state.onboarding.completed && !onboarding_edit && !matches!(c,
             Command::Ready | Command::Presented | Command::Window { .. } | Command::WindowChrome { .. }
             | Command::Layout { .. } | Command::Glass { .. } | Command::PopupReady
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }

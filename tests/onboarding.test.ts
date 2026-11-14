@@ -28,9 +28,11 @@ describe("onboarding favorites", () => {
     state = reduce(state, { type: "onboardingAdvance", step: "hello" });
     expect(() => reduce(state, { type: "onboardingAdvance", step: "hello" })).toThrow();
     state = reduce(state, { type: "onboardingAdvance", step: "bring", skip: true });
+    state = reduce(state, { type: "onboardingAdvance", step: "spaces" });
+    state = reduce(state, { type: "onboardingAdvance", step: "search" });
     const original = structuredClone(state.favorites);
     state = reduce(state, { type: "onboardingAdvance", step: "sites", skip: true, sites: [] });
     expect(state.favorites).toEqual(original);
-    expect(state.onboarding).toEqual({ step: "ads", completed: false });
+    expect(state.onboarding).toEqual({ step: "ready", completed: false });
   });
 });

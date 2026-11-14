@@ -8,24 +8,28 @@ use serde::{Deserialize, Serialize};
 pub enum Step {
     Hello,
     Bring,
+    Spaces,
+    Search,
     Sites,
-    Ads,
+    #[serde(alias = "ads")]
     Ready,
 }
 impl Step {
     fn next(self) -> Self {
         match self {
             Self::Hello => Self::Bring,
-            Self::Bring => Self::Sites,
-            Self::Sites => Self::Ads,
+            Self::Bring => Self::Spaces,
+            Self::Spaces => Self::Search,
+            Self::Search => Self::Sites,
             _ => Self::Ready,
         }
     }
     fn back(self) -> Self {
         match self {
-            Self::Sites => Self::Bring,
-            Self::Ads => Self::Sites,
-            Self::Ready => Self::Ads,
+            Self::Spaces => Self::Bring,
+            Self::Search => Self::Spaces,
+            Self::Sites => Self::Search,
+            Self::Ready => Self::Sites,
             _ => Self::Hello,
         }
     }
@@ -190,6 +194,8 @@ mod tests {
         s.advance_onboarding(Step::Hello, false, &[]).unwrap();
         assert!(s.advance_onboarding(Step::Hello, false, &[]).is_err());
         s.advance_onboarding(Step::Bring, true, &[]).unwrap();
+        s.advance_onboarding(Step::Spaces, false, &[]).unwrap();
+        s.advance_onboarding(Step::Search, false, &[]).unwrap();
         let ids: Vec<_> = SITES.iter().take(9).map(|s| s.0.into()).collect();
         assert!(s.advance_onboarding(Step::Sites, false, &ids).is_err());
         assert!(s.favorites.is_empty());
@@ -201,15 +207,32 @@ mod tests {
             .unwrap();
         let mut s: State = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         s.repair();
-        assert_eq!(s.onboarding.step, Step::Ads);
+        assert_eq!(s.onboarding.step, Step::Ready);
         assert_eq!(s.favorites.len(), 2);
-        s.back_onboarding(Step::Ads).unwrap();
+        s.back_onboarding(Step::Ready).unwrap();
         let id = s.favorites[0].id.clone();
         s.advance_onboarding(Step::Sites, false, &["github".into(), "gmail".into()])
             .unwrap();
         assert_eq!(s.favorites[0].id, id);
-        s.advance_onboarding(Step::Ads, true, &[]).unwrap();
         s.advance_onboarding(Step::Ready, false, &[]).unwrap();
         assert!(s.onboarding.completed);
+    }
+    #[test]
+    fn new_steps_round_trip_and_legacy_ads_resumes_at_ready() {
+        let mut s = State::first_run();
+        for step in [Step::Hello, Step::Bring, Step::Spaces, Step::Search, Step::Sites] {
+            assert_eq!(s.onboarding.step, step);
+            let restored: State = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            assert_eq!(restored.onboarding.step, step);
+            s.advance_onboarding(step, true, &[]).unwrap();
+        }
+        assert_eq!(s.onboarding.step, Step::Ready);
+        assert!(!s.onboarding.completed);
+        let legacy: Onboarding = serde_json::from_str(r#"{"step":"ads","completed":false}"#).unwrap();
+        assert_eq!(legacy.step, Step::Ready);
+        s.back_onboarding(Step::Ready).unwrap();
+        s.back_onboarding(Step::Sites).unwrap();
+        s.back_onboarding(Step::Search).unwrap();
+        assert_eq!(s.onboarding.step, Step::Spaces);
     }
 }

@@ -2,10 +2,12 @@
 // Color wheel, shade, presets and effects, from Zigzag/Sidebar/SpaceEditor.swift.
 // Copyright 2026 Zigao Wang, Apache-2.0. Modified for Rove.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import Icon from "../common/Icon.vue";
 import type { SpaceColor } from "../../lib/types";
 import { paint } from "../../lib/space-color";
 import {
   PRESETS,
+  type SpaceLook,
   applyPreset,
   committed,
   depthAt,
@@ -220,6 +222,11 @@ function dragDial(event: PointerEvent) {
   window.addEventListener("pointermove", drag);
   window.addEventListener("pointerup", end);
 }
+function swatchStyle(look: SpaceLook) {
+  const image = swatchBackground(look);
+  if (look.seeThrough <= 0.005) return { background: image };
+  return { backgroundImage: image, backgroundSize: "auto, 8px 8px" };
+}
 function resetColors() {
   draft.value = useDefaultColors(original.color as SpaceColor, props.dark);
   commit();
@@ -258,7 +265,7 @@ watch(
         :aria-label="look.name"
         :aria-pressed="lookMatches(look, saved())"
         :title="look.name"
-        :style="{ background: swatchBackground(look) }"
+        :style="swatchStyle(look)"
         @click="pickPreset(index)"
       />
     </div>
@@ -287,22 +294,23 @@ watch(
     </div>
     <label class="look-row">
       <span>明暗</span>
-      <input
-        :value="depthAt(draft, draft.selected, dark)"
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        aria-label="明暗"
-        :style="{ background: shadeStops }"
-        @pointerdown="($event.target as HTMLInputElement).dataset.alt = $event.altKey ? '1' : ''"
-        @input="onShade($event, false)"
-        @change="onShade($event, true)"
-      />
+      <span class="look-slider" :style="{ '--track': shadeStops }">
+        <input
+          :value="depthAt(draft, draft.selected, dark)"
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          aria-label="明暗"
+          @pointerdown="($event.target as HTMLInputElement).dataset.alt = $event.altKey ? '1' : ''"
+          @input="onShade($event, false)"
+          @change="onShade($event, true)"
+        />
+      </span>
     </label>
     <div class="look-fold">
       <button type="button" class="look-disclosure" :aria-expanded="effects" @click="effects = !effects">
-        效果
+        <span>效果</span><Icon name="chevronDown" :size="12" />
       </button>
       <button type="button" class="look-reset" :disabled="!canReset" @click="resetColors">恢复默认颜色</button>
     </div>
@@ -338,39 +346,42 @@ watch(
           :aria-valuemin="0"
           :aria-valuemax="360"
           :aria-valuenow="Math.round(draft.angle ?? 45)"
-          :style="{ background: `linear-gradient(${(draft.angle ?? 45) + 90}deg, ${frameColors.first}, ${frameColors.second})` }"
+          :style="{ '--dial': `linear-gradient(${(draft.angle ?? 45) + 90}deg, ${frameColors.first}, ${frameColors.second})` }"
           @pointerdown.prevent="dragDial"
         >
-          <span :style="{ transform: `rotate(${draft.angle ?? 45}deg)` }" />
+          <span class="dial-ticks" />
+          <span class="dial-needle" :style="{ transform: `rotate(${draft.angle ?? 45}deg)` }" />
         </button>
       </div>
       <label class="look-row">
         <span>清透</span>
-        <input
-          :value="draft.translucency ?? 0"
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          aria-label="清透"
-          :style="{ background: clearStops }"
-          @input="setAmount('translucency', Number(($event.target as HTMLInputElement).value), false)"
-          @change="setAmount('translucency', Number(($event.target as HTMLInputElement).value), true)"
-        />
+        <span class="look-slider through" :style="{ '--track': clearStops }">
+          <input
+            :value="draft.translucency ?? 0"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            aria-label="清透"
+            @input="setAmount('translucency', Number(($event.target as HTMLInputElement).value), false)"
+            @change="setAmount('translucency', Number(($event.target as HTMLInputElement).value), true)"
+          />
+        </span>
       </label>
       <label class="look-row">
         <span>颗粒</span>
-        <input
-          :value="draft.grain ?? 0"
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          aria-label="颗粒"
-          :style="{ background: `linear-gradient(90deg, ${frameColors.first}, ${frameColors.second})` }"
-          @input="setAmount('grain', Number(($event.target as HTMLInputElement).value), false)"
-          @change="setAmount('grain', Number(($event.target as HTMLInputElement).value), true)"
-        />
+        <span class="look-slider grain" :style="{ '--track': `linear-gradient(90deg, ${frameColors.first}, ${frameColors.second})` }">
+          <input
+            :value="draft.grain ?? 0"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            aria-label="颗粒"
+            @input="setAmount('grain', Number(($event.target as HTMLInputElement).value), false)"
+            @change="setAmount('grain', Number(($event.target as HTMLInputElement).value), true)"
+          />
+        </span>
       </label>
     </div>
   </div>

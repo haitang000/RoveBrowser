@@ -3,7 +3,7 @@
 import type { BrowserState } from "./types";
 import { sameFavoriteUrl, MAX_FAVORITES } from "./favorites";
 
-export const ONBOARDING_STEPS = ["hello", "bring", "sites", "ads", "ready"] as const;
+export const ONBOARDING_STEPS = ["hello", "bring", "spaces", "search", "sites", "ready"] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export interface OnboardingState { step: OnboardingStep; completed: boolean; imports?: import("./import").ImportReport[] }
 export const ONBOARDING_SITES = [
@@ -47,6 +47,8 @@ export function onboardingPreview(state: BrowserState): BrowserState {
   if (!new URLSearchParams(location.search).has("onboarding")) return state;
   try {
     const saved = JSON.parse(localStorage.getItem(ONBOARDING_PREVIEW_KEY) || "null") as BrowserState | null;
+    // Resume profiles saved by the previous welcome flow at the final choice.
+    if (saved?.onboarding && (saved.onboarding.step as string) === "ads") saved.onboarding.step = "ready";
     if (saved && Array.isArray(saved.spaces) && saved.spaces.length && Array.isArray(saved.tabs) && Array.isArray(saved.favorites) && saved.onboarding && ONBOARDING_STEPS.includes(saved.onboarding.step)) return saved;
   } catch { /* A blocked or damaged preview cache starts a fresh preview. */ }
   return { ...state, favorites: [], pins: [], tabs: state.tabs.filter((t) => t.url === "era://newtab"), onboarding: { step: "hello", completed: false } };

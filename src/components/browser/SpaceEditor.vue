@@ -6,6 +6,7 @@ import { useBrowser } from "../../stores/browser";
 import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 import SpaceLookEditor from "./SpaceLookEditor.vue";
 import { commandLook, type LookFields } from "../../lib/space-look";
+const props = defineProps<{ embedded?: boolean }>();
 const b = useBrowser();
 const panel = ref<HTMLElement>();
 const name = ref(b.space.name);
@@ -33,13 +34,16 @@ function onPointerDown(event: PointerEvent) {
 function onKey(event: KeyboardEvent) {
   if (event.key !== "Escape" || event.isComposing) return;
   event.preventDefault();
+  event.stopPropagation();
   b.closeSpaceEditor();
 }
 onMounted(() => {
   name.value = b.space.name;
   icon.value = b.space.icon;
-  window.addEventListener("pointerdown", onPointerDown, true);
-  window.addEventListener("keydown", onKey, true);
+  if (!props.embedded) {
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKey, true);
+  }
 });
 onBeforeUnmount(() => {
   window.removeEventListener("pointerdown", onPointerDown, true);
@@ -51,10 +55,10 @@ onBeforeUnmount(() => {
   <section
     ref="panel"
     class="space-editor-panel"
-    role="dialog"
-    aria-modal="false"
+    :role="embedded ? 'region' : 'dialog'"
+    :aria-modal="embedded ? undefined : 'false'"
     aria-label="编辑空间"
-    @keydown.esc.stop="b.closeSpaceEditor()"
+    @keydown.esc="!embedded && b.closeSpaceEditor()"
   >
     <SpaceIdentityEditor v-model:name="name" v-model:icon="icon" v-model:picking="picking" @update:name="send()" @update:icon="send()" />
     <SpaceLookEditor
