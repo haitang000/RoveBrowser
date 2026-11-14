@@ -2,7 +2,9 @@
 //! WebView2 owns descendant HWNDs on other threads. Instead of subclassing those
 //! windows, cover the borders/buttons with an almost transparent input surface.
 //! The UI paints the entire background. The root receives WM_NCHITTEST/HTMAXBUTTON and the
-//! system supplies its own Snap menu. No synthetic layout flyout.
+//! system supplies its own Snap menu. The close button is the exception: its hit stays on
+//! this surface. Falling through to the WebView underneath swallows the button release, so
+//! the window never sees WM_CLOSE. No synthetic layout flyout.
 use crate::model::Rect;
 use std::cell::{Cell, RefCell};
 use windows::{
@@ -11,6 +13,7 @@ use windows::{
         Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
         Graphics::Gdi::*,
         UI::{
+            Controls::WM_MOUSELEAVE,
             Input::KeyboardAndMouse::{
                 ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TME_NONCLIENT,
                 TRACKMOUSEEVENT,
@@ -109,11 +112,19 @@ struct State {
     layer: RefCell<Option<CaptionBitmap>>,
     #[cfg(test)]
     paint_count: Cell<usize>,
+    #[cfg(test)]
+    close_count: Cell<usize>,
 }
 pub struct Caption {
     root: HWND,
     ui: HWND,
     state: Box<State>,
+}
+fn message_point(lparam: LPARAM) -> POINT {
+    POINT {
+        x: (lparam.0 as u16 as i16) as i32,
+        y: ((lparam.0 >> 16) as u16 as i16) as i32,
+    }
 }
 fn contains(r: RECT, p: POINT) -> bool {
     p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom
@@ -200,6 +211,8 @@ impl Caption {
             layer: RefCell::new(None),
             #[cfg(test)]
             paint_count: Cell::new(0),
+            #[cfg(test)]
+            close_count: Cell::new(0),
         });
         // This same-thread owned surface covers only the borders/buttons. Its
         // HTTRANSPARENT result lets the root receive real non-client input before
@@ -419,6 +432,33 @@ impl Drop for Caption {
         }
     }
 }
+fn resize_owns_close(s: &State, point: POINT) -> bool {
+    let Ok(root) = (unsafe { GetParent(s.surface.get()) }) else {
+        return false;
+    };
+    if unsafe { IsZoomed(root).as_bool() } {
+        return false;
+    }
+    let mut bounds = RECT::default();
+    unsafe { GetClientRect(s.surface.get(), &mut bounds) }.is_ok()
+        && resize_hit(bounds, point, s.scale.get()).is_some()
+}
+unsafe fn command_root(s: &State, hwnd: HWND) -> HWND {
+    if hwnd == s.surface.get() {
+        GetParent(hwnd).unwrap_or(hwnd)
+    } else {
+        hwnd
+    }
+}
+unsafe fn issue_button(root: HWND, button: Button) {
+    if button == Button::Close {
+        // winit turns WM_CLOSE into CloseRequested, the same path Alt+F4 uses.
+        let _ = PostMessageW(Some(root), WM_CLOSE, WPARAM(0), LPARAM(0));
+        return;
+    }
+    let command = button.command(IsZoomed(root).as_bool());
+    let _ = PostMessageW(Some(root), WM_SYSCOMMAND, WPARAM(command as usize), LPARAM(0));
+}
 unsafe extern "system" fn procedure(
     hwnd: HWND,
     msg: u32,
@@ -471,6 +511,16 @@ unsafe extern "system" fn procedure(
         }
         WM_NCHITTEST => {
             if hwnd == s.surface.get() {
+                let mut point = message_point(lparam);
+                // WebView2 covers the caption and takes the mouse release when this
+                // hit falls through. Keep the close click on the surface. Resize
+                // edges still fall through so the root can return HTTOP/HTRIGHT.
+                if ScreenToClient(hwnd, &mut point).as_bool()
+                    && !resize_owns_close(s, point)
+                    && button_at(s.rect.get(), point) == Some(Button::Close)
+                {
+                    return LRESULT(HTCLIENT as isize);
+                }
                 return LRESULT(HTTRANSPARENT as isize);
             }
             // Sign extension is required for monitors left/above the primary screen.
@@ -525,11 +575,42 @@ unsafe extern "system" fn procedure(
                 return LRESULT(0);
             }
         }
-        WM_MOUSEMOVE if hwnd != s.surface.get() && s.pressed.get().is_some() => {
-            let point = POINT {
-                x: (lparam.0 as u16 as i16) as i32,
-                y: ((lparam.0 >> 16) as u16 as i16) as i32,
+        WM_MOUSEMOVE if hwnd == s.surface.get() => {
+            let point = message_point(lparam);
+            let hot = if s.pressed.get().is_some() {
+                s.pressed
+                    .get()
+                    .filter(|button| contains(button.rect(s.rect.get()), point))
+            } else if !resize_owns_close(s, point) && button_at(s.rect.get(), point) == Some(Button::Close) {
+                Some(Button::Close)
+            } else {
+                None
             };
+            set_hot(s, hot);
+            let mut track = TRACKMOUSEEVENT {
+                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            let _ = TrackMouseEvent(&mut track);
+            return LRESULT(0);
+        }
+        WM_MOUSELEAVE if hwnd == s.surface.get() && s.pressed.get().is_none() => {
+            set_hot(s, None);
+            return LRESULT(0);
+        }
+        WM_LBUTTONDOWN if hwnd == s.surface.get() => {
+            let point = message_point(lparam);
+            if button_at(s.rect.get(), point) == Some(Button::Close) {
+                s.pressed.set(Some(Button::Close));
+                set_hot(s, Some(Button::Close));
+                let _ = SetCapture(hwnd);
+                return LRESULT(0);
+            }
+        }
+        WM_MOUSEMOVE if hwnd != s.surface.get() && s.pressed.get().is_some() => {
+            let point = message_point(lparam);
             let hot = s
                 .pressed
                 .get()
@@ -537,27 +618,29 @@ unsafe extern "system" fn procedure(
             set_hot(s, hot);
             return LRESULT(0);
         }
-        WM_LBUTTONUP | WM_NCLBUTTONUP if hwnd != s.surface.get() && s.pressed.get().is_some() => {
+        WM_LBUTTONUP | WM_NCLBUTTONUP
+            if s.pressed.get().is_some() && (hwnd != s.surface.get() || msg == WM_LBUTTONUP) =>
+        {
             let button = s.pressed.take().unwrap();
-            let mut point = POINT::default();
-            let inside = GetCursorPos(&mut point).is_ok()
-                && ScreenToClient(hwnd, &mut point).as_bool()
-                && contains(button.rect(s.rect.get()), point);
+            let mut point = message_point(lparam);
+            if msg == WM_NCLBUTTONUP && !ScreenToClient(hwnd, &mut point).as_bool() {
+                point = POINT { x: i32::MIN, y: i32::MIN };
+            }
+            let inside = contains(button.rect(s.rect.get()), point);
             set_hot(s, inside.then_some(button));
             let _ = ReleaseCapture();
             if inside {
-                let command = button.command(IsZoomed(hwnd).as_bool());
-                let _ = SendMessageW(
-                    hwnd,
-                    WM_SYSCOMMAND,
-                    Some(WPARAM(command as usize)),
-                    Some(LPARAM(0)),
-                );
+                issue_button(command_root(s, hwnd), button);
             }
             return LRESULT(0);
         }
         WM_CAPTURECHANGED => {
             s.pressed.set(None);
+        }
+        #[cfg(test)]
+        WM_CLOSE if hwnd != s.surface.get() => {
+            s.close_count.set(s.close_count.get() + 1);
+            return LRESULT(0);
         }
         WM_NCACTIVATE if hwnd != s.surface.get() => {
             // Keep winit's activation/focus handling; -1 asks DefWindowProc to
@@ -994,6 +1077,102 @@ mod tests {
         assert_eq!(button_at(r, POINT { x: 1234, y: 12 }), Some(Button::Close));
         assert_eq!(button_at(r, POINT { x: 1280, y: 12 }), None);
         assert_eq!(button_at(r, POINT { x: 1210, y: 32 }), None);
+    }
+    #[test]
+    fn surface_close_click_posts_wm_close_without_falling_through() {
+        unsafe {
+            let root = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!("Close click"),
+                WS_POPUP,
+                -1600,
+                80,
+                800,
+                600,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let ui = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!("UI"),
+                WS_CHILD,
+                0,
+                0,
+                800,
+                600,
+                Some(root),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let caption = Caption::new(root, ui).unwrap();
+            caption
+                .update(
+                    Rect {
+                        x: 708.,
+                        y: 0.,
+                        width: 46.,
+                        height: 32.,
+                        ..Rect::default()
+                    },
+                    800.,
+                    [212, 228, 251, 255],
+                    [228, 239, 253, 255],
+                    [40, 40, 40, 255],
+                    1.,
+                )
+                .unwrap();
+            let close = Button::Close.rect(caption.state.rect.get());
+            let center = POINT {
+                x: (close.left + close.right) / 2,
+                y: (close.top + close.bottom) / 2,
+            };
+            let mut screen = center;
+            assert!(ClientToScreen(caption.state.surface.get(), &mut screen).as_bool());
+            let coords = LPARAM((((screen.y as u16 as u32) << 16) | screen.x as u16 as u32) as isize);
+            assert_eq!(
+                SendMessageW(caption.state.surface.get(), WM_NCHITTEST, None, Some(coords)).0,
+                HTCLIENT as isize,
+                "close clicks must stay on the caption surface"
+            );
+            let maximize = Button::Maximize.rect(caption.state.rect.get());
+            let mut max_screen = POINT {
+                x: (maximize.left + maximize.right) / 2,
+                y: (maximize.top + maximize.bottom) / 2,
+            };
+            assert!(ClientToScreen(caption.state.surface.get(), &mut max_screen).as_bool());
+            let max_coords =
+                LPARAM((((max_screen.y as u16 as u32) << 16) | max_screen.x as u16 as u32) as isize);
+            assert_eq!(
+                SendMessageW(caption.state.surface.get(), WM_NCHITTEST, None, Some(max_coords)).0,
+                HTTRANSPARENT as isize,
+                "maximize still falls through so Windows can show Snap layouts"
+            );
+            let client = LPARAM((((center.y as u16 as u32) << 16) | center.x as u16 as u32) as isize);
+            SendMessageW(caption.state.surface.get(), WM_LBUTTONDOWN, None, Some(client));
+            SendMessageW(caption.state.surface.get(), WM_LBUTTONUP, None, Some(LPARAM(0)));
+            let mut message = MSG::default();
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            assert_eq!(caption.state.close_count.get(), 0, "releasing outside cancels close");
+            SendMessageW(caption.state.surface.get(), WM_LBUTTONDOWN, None, Some(client));
+            SendMessageW(caption.state.surface.get(), WM_LBUTTONUP, None, Some(client));
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            assert_eq!(caption.state.close_count.get(), 1);
+            let _ = DestroyWindow(ui);
+            let _ = DestroyWindow(root);
+        }
     }
     #[test]
     fn real_hwnd_hit_testing_preserves_the_full_ui_background_at_each_dpi() {
