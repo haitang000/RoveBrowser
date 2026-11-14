@@ -8,6 +8,7 @@ import {
   downloadStatus,
   formatBytes,
   isActiveDownload,
+  isFinalizingDownload,
 } from "../src/lib/downloads";
 import type { DownloadItem } from "../src/lib/types";
 
@@ -41,6 +42,8 @@ describe("download sizes", () => {
     expect(downloadFraction(item({ received: 50, total: 100 }))).toBe(0.5);
     expect(downloadFraction(item({ received: 300, total: 100 }))).toBe(1);
     expect(downloadPercent(item({ received: 200, total: 300 }))).toBe(67);
+    expect(downloadPercent(item({ received: 999, total: 1000 }))).toBe(99);
+    expect(downloadPercent(item({ received: 1000, total: 1000 }))).toBe(100);
   });
 });
 
@@ -60,6 +63,17 @@ describe("download rows", () => {
     expect(downloadStatus(item({ state: "failed", failure: "网络已断开" }))).toBe("失败 · 网络已断开");
     expect(downloadStatus(item({ state: "failed" }))).toBe("下载失败");
     expect(downloadStatus(item({ state: "cancelled" }))).toBe("已取消");
+  });
+  it("keeps a full transfer active until the engine confirms completion", () => {
+    const pending = item({ received: 4096, total: 4096 });
+    expect(downloadStatus(pending)).toBe("正在检查或等待确认 · 4 KB");
+    expect(isFinalizingDownload(pending)).toBe(true);
+    expect(isFinalizingDownload({ ...pending, state: "paused" })).toBe(false);
+    expect(isFinalizingDownload({ ...pending, total: 0 })).toBe(false);
+    expect(isFinalizingDownload({ ...pending, received: 4000 })).toBe(false);
+    expect(isActiveDownload(pending)).toBe(true);
+    expect(clearableDownloads([pending])).toEqual([]);
+    expect(downloadStatus({ ...pending, state: "finished", exists: true })).toBe("已完成 · 4 KB");
   });
   it("clear keeps running and paused rows and counts only active downloads", () => {
     const items = [

@@ -16,8 +16,32 @@ import assert from 'node:assert/strict';
 const execFileAsync = promisify(execFile);
 
 const smallText = 'Rove downloads fixture\n'.repeat(1200);
+const fastText = 'Fast known-length download\n';
+// Serve an actual unsigned PE executable, like the installer in the reported
+// case. Renaming text to .exe does not exercise the executable download path.
+const executable = await readFile(resolve(process.env.ERA_SMOKE_EXE || 'native/target/debug/rove.exe'));
 const slowSize = 3 * 1024 * 1024;
 const server = createServer((req, res) => {
+  if (req.url === '/fixture.exe') {
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': 'attachment; filename="fixture.exe"',
+      'Content-Length': String(executable.length),
+    });
+    res.end(executable);
+    return;
+  }
+  if (req.url === '/fast.txt' || req.url === '/empty.bin') {
+    const empty = req.url === '/empty.bin';
+    const body = empty ? '' : fastText;
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="${empty ? 'empty.bin' : 'fast.txt'}"`,
+      'Content-Length': String(Buffer.byteLength(body)),
+    });
+    res.end(body);
+    return;
+  }
   if (req.url === '/small.txt') {
     res.writeHead(200, {
       'Content-Type': 'text/plain',
@@ -47,6 +71,9 @@ const server = createServer((req, res) => {
   res.end(
     '<!doctype html><title>Downloads fixture</title><h1>Downloads fixture</h1>' +
       '<a id="small" href="/small.txt" download>small</a> ' +
+      '<a id="fast" href="/fast.txt" download>fast</a> ' +
+      '<a id="empty" href="/empty.bin" download>empty</a> ' +
+      '<a id="exe" href="/fixture.exe" download>exe</a> ' +
       '<a id="slow" href="/slow.bin" download>slow</a>',
   );
 });
@@ -197,6 +224,43 @@ try {
   }, 'two small files on disk');
   checks.push('同名下载自动改名为 "small (1).txt"');
 
+  // Very short known-length downloads may finish around handler registration.
+  // Check both native state and the popup's actions, including zero-byte files.
+  for (const selector of ['#fast', '#fast', '#fast', '#empty']) {
+    const known = new Set((await items()).map((entry) => entry.id));
+    await panel().getByRole('button', { name: '关闭下载面板' }).click();
+    await page.click(selector);
+    const done = await waitFor(async () => (await items()).find(
+      (entry) => !known.has(entry.id) && entry.state === 'finished',
+    ), `${selector} reaches completed state`);
+    const expected = selector === '#empty' ? '' : fastText;
+    assert.equal(done.total, Buffer.byteLength(expected));
+    assert.equal(done.received, done.total);
+    assert.equal(done.exists, true);
+    assert.equal(await readFile(done.path, 'utf8'), expected);
+    const row = panel().locator('.download-row', { hasText: done.filename });
+    await row.getByRole('button', { name: '打开文件', exact: true }).waitFor();
+    assert.equal(await row.locator('[role="progressbar"]').count(), 0);
+    // A late click from an old row must not turn a completed download active.
+    await send({ type: 'downloadAction', id: done.id, action: 'pause' });
+    await waitFor(async () => (await items()).find((entry) => entry.id === done.id)?.state === 'finished', 'late pause preserves completion');
+  }
+  checks.push('连续快速下载和零字节文件均转为已完成，可打开文件且不残留进度条');
+
+  await panel().getByRole('button', { name: '关闭下载面板' }).click();
+  await page.click('#exe');
+  const exe = await waitFor(async () => (await items()).find(
+    (entry) => entry.filename === 'fixture.exe' && entry.state === 'finished',
+  ), 'real executable reaches completed state');
+  assert.equal(exe.received, executable.length);
+  assert.equal(exe.total, executable.length);
+  assert.equal(exe.exists, true);
+  assert.deepEqual(await readFile(exe.path), executable);
+  const exeRow = panel().locator('.download-row', { hasText: 'fixture.exe' });
+  await exeRow.getByRole('button', { name: '打开文件', exact: true }).waitFor();
+  assert.equal(await exeRow.locator('[role="progressbar"]').count(), 0);
+  checks.push('真实未签名 EXE 下载后转为已完成，字节内容一致且不残留进度条（不执行文件）');
+
   // Pause holds the received byte count, Resume continues it.
   await page.click('#slow');
   await waitFor(async () => {
@@ -220,6 +284,20 @@ try {
     const names = await readdir(downloadsDir);
     return !names.includes('slow.bin');
   }, 'partial file removed');
+
+  // Also let a known-length transfer run through its final bytes to completion.
+  await panel().getByRole('button', { name: '关闭下载面板' }).click();
+  await page.click('#slow');
+  const complete = await waitFor(async () => (await items()).find(
+    (entry) => entry.filename === 'slow.bin' && entry.state === 'finished',
+  ), 'known-length download completes after its final bytes');
+  assert.equal(complete.received, slowSize);
+  assert.equal(complete.total, slowSize);
+  assert.deepEqual(await readFile(complete.path), Buffer.alloc(slowSize, 7));
+  await panel().locator('.download-row.finished', { hasText: 'slow.bin' })
+    .getByRole('button', { name: '打开文件', exact: true }).waitFor();
+  checks.push('已知大小的大文件经过最后字节后进入已完成，文件内容完整');
+
   await panel().getByRole('button', { name: '更多下载操作' }).click();
   await panel().getByRole('menuitem', { name: '清除已结束的下载' }).click();
   await waitFor(async () => (await rows().count()) === 0, 'clear finished downloads');

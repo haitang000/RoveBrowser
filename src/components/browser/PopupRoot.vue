@@ -44,6 +44,7 @@ function report() {
   };
   // Keep the Peek hole covered until a leaving modal has painted its final frame.
   const modal = Boolean(document.querySelector(".command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer"));
+  const downloads = Boolean(document.querySelector(".downloads-layer"));
   const content = document.querySelector<HTMLElement>(".peek-content");
   const cutout = !modal && b.peek && b.peekPhase === "open" && content ? { ...rect(content), corners: [12, 12, 12, 12] } : null;
   const regions = Array.from(surfaces, (element) => {
@@ -52,13 +53,13 @@ function report() {
     // room or the clip cuts it into a square-cornered halo.
     return surfaceRegion(bounds, shadowBleed(element.className));
   });
-  const next = JSON.stringify({ regions, cutout });
+  const next = JSON.stringify({ regions, cutout, downloads });
   const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
   const focus = Boolean(active && active !== focusKey);
   focusKey = active;
   if (next !== last || focus) {
     last = next;
-    b.send({ type: "popupLayer", regions, cutout, focus });
+    b.send({ type: "popupLayer", regions, cutout, focus, downloads });
   }
   if (focus) {
     const selector = active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : ".context-menu input, .context-menu button";

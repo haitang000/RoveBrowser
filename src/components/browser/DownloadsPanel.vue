@@ -2,7 +2,7 @@
 // State/actions belong to the host; the surface also runs in the native popup.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { clearableDownloads, downloadFraction, downloadStatus, isActiveDownload } from "../../lib/downloads";
+import { clearableDownloads, downloadFraction, downloadPercent, downloadStatus, isActiveDownload, isFinalizingDownload } from "../../lib/downloads";
 import Icon from "../common/Icon.vue";
 import DownloadFileIcon from "./DownloadFileIcon.vue";
 
@@ -31,6 +31,8 @@ const position = computed(() => {
 function resize() { viewport.value = { width: innerWidth, height: innerHeight }; }
 function act(action: string, id?: string) {
   menuOpen.value = false;
+  // Release the native popup so WebView2's security prompt can receive input.
+  if (action === "review") b.closeDownloads();
   b.downloadAction(action, id);
 }
 function close() { b.closeDownloads(); }
@@ -114,10 +116,11 @@ watch(() => b.downloadsFocus, async () => {
             <div class="download-body">
               <span class="download-name" :title="item.filename">{{ item.filename }}</span>
               <div v-if="isActiveDownload(item)" class="download-bar" :class="{ indeterminate: !item.total }"
-                role="progressbar" :aria-label="`${item.filename} 下载进度`" :aria-valuenow="item.total > 0 ? Math.round(downloadFraction(item) * 100) : undefined" :aria-valuemin="0" :aria-valuemax="100" :aria-valuetext="downloadStatus(item)">
+                role="progressbar" :aria-label="`${item.filename} 下载进度`" :aria-valuenow="item.total > 0 ? downloadPercent(item) : undefined" :aria-valuemin="0" :aria-valuemax="100" :aria-valuetext="downloadStatus(item)">
                 <span :style="{ transform: `scaleX(${item.total > 0 ? downloadFraction(item) : 0.3})` }" />
               </div>
               <span class="download-meta" :class="{ caution: item.state === 'failed' }" :title="downloadStatus(item)">{{ downloadStatus(item) }}</span>
+              <button v-if="isFinalizingDownload(item)" class="download-open" @click="act('review', item.id)">查看下载提示</button>
               <button v-if="item.state === 'finished' && item.exists" class="download-open" @click="act('open', item.id)">打开文件</button>
             </div>
             <div class="download-actions">

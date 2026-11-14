@@ -381,7 +381,11 @@ pub enum Command {
     #[serde(rename = "popupState")]
     PopupState { popup: serde_json::Value },
     #[serde(rename = "popupLayer")]
-    PopupLayer { regions: Vec<Rect>, cutout: Option<Rect>, focus: bool },
+    PopupLayer {
+        regions: Vec<Rect>, cutout: Option<Rect>, focus: bool,
+        #[serde(default)]
+        downloads: bool,
+    },
     #[serde(rename = "window")]
     Window { action: String },
     #[serde(rename = "history")]
@@ -413,7 +417,7 @@ pub enum Command {
     /// Restore the batch the last Clear/Close Others/Close Below removed.
     #[serde(rename = "undoBatch")]
     UndoBatch,
-    /// Downloads panel row action: pause, resume, cancel, open, reveal, remove,
+    /// Downloads panel row action: review, pause, resume, cancel, open, reveal, remove,
     /// clearFinished or openFolder.
     #[serde(rename = "downloadAction")]
     DownloadAction {

@@ -61,6 +61,38 @@ test("downloads panel opens from the sidebar and lists every state", async ({
   await expect(active.getByTitle("取消下载")).toBeVisible();
 });
 
+test("the final bytes and engine completion have distinct states", async ({ page }) => {
+  await page.getByRole("button", { name: "下载", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "下载" });
+  const row = panel.locator(".download-row");
+  const pending = download({ received: 999, total: 1000 });
+  await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }), pending);
+  await expect(row).toContainText("99%");
+  await expect(row.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "99");
+  await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }), { ...pending, received: 1000 });
+  await expect(row).toContainText("正在检查或等待确认");
+  await expect(row.getByRole("button", { name: "查看下载提示", exact: true })).toBeVisible();
+  await expect(row.getByRole("button", { name: "打开文件", exact: true })).toHaveCount(0);
+  await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }),
+    { ...pending, received: 1000, state: "finished", exists: true });
+  await expect(row).toContainText("已完成");
+  await expect(row.getByRole("progressbar")).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "打开文件", exact: true })).toBeVisible();
+});
+
+test("an executable waiting for confirmation can reveal the native prompt without being marked complete", async ({ page }) => {
+  const pending = download({ filename: "setup.exe", received: 1000, total: 1000 });
+  await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }), pending);
+  await page.getByRole("button", { name: "下载", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "下载" });
+  await panel.getByRole("button", { name: "查看下载提示", exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await expect(panel).toContainText("正在检查或等待确认");
+  await expect(panel.getByRole("button", { name: "打开文件", exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "取消下载", exact: true })).toBeVisible();
+});
+
 test("downloads replace the command panel and the actions menu supports the keyboard", async ({ page }) => {
   await page.keyboard.press("Control+l");
   await expect(page.locator(".command-panel")).toBeVisible();

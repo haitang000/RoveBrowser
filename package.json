@@ -27,6 +27,7 @@
     "test:native:site-controls": "node scripts/native-site-controls-smoke.mjs",
     "test:native:clear-menu": "node scripts/native-clear-menu-smoke.mjs",
     "test:native:downloads": "node scripts/native-downloads-smoke.mjs",
+    "test:native:download-review": "node scripts/native-download-review-smoke.mjs",
     "test:native:sleep": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-sleep-smoke.mjs"
   },
   "dependencies": {

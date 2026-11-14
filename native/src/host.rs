@@ -16,13 +16,13 @@ use std::{
 };
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler,
-    DownloadStartingEventHandler, FaviconChangedEventHandler,
+    DownloadStartingEventHandler, FaviconChangedEventHandler, IsDefaultDownloadDialogOpenChangedEventHandler,
     IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
         ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_3,
-        ICoreWebView2_4,
+        ICoreWebView2_4, ICoreWebView2_9,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED,
@@ -51,7 +51,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
     event::WindowEvent,
-    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     platform::windows::WindowAttributesExtWindows,
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::{Icon, Window, WindowId},
@@ -134,6 +134,8 @@ enum Event {
     },
     /// A new download joined the list: the UI reveals the panel on it.
     DownloadStarted(String),
+    /// The native download hub auto-opened; show it only after an explicit review.
+    DownloadDialogOpened(String),
     /// Zigzag `TabSleep`: every tick, background pages nobody has seen for a
     /// while give their memory back.
     SleepTick,
@@ -255,6 +257,7 @@ struct PageShared {
     downloads_open: Rc<Cell<bool>>,
     downloads: Rc<RefCell<Downloads>>,
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+    download_sources: Rc<RefCell<HashMap<String, String>>>,
 }
 /// Tabs removed together by Clear or Close Others/Below, with the active tab
 /// before the batch so the Undo toast can put everything back as it was.
@@ -290,6 +293,12 @@ struct App {
     downloads: Rc<RefCell<Downloads>>,
     /// Live WebView2 operations for pause/resume/cancel; dropped on completion.
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+    /// The originating page owns the built-in security/retention prompt.
+    download_sources: Rc<RefCell<HashMap<String, String>>>,
+    next_download_poll: Option<Instant>,
+    download_popup_visible: bool,
+    pending_download_review: Option<String>,
+    download_review_source: Option<String>,
     downloads_open: Rc<Cell<bool>>,
     popup: Option<WebView>,
     popup_state: serde_json::Map<String, serde_json::Value>,
@@ -397,6 +406,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         undo_batch: None,
         downloads,
         download_ops: Rc::new(RefCell::new(HashMap::new())),
+        download_sources: Rc::new(RefCell::new(HashMap::new())),
+        next_download_poll: None,
+        download_popup_visible: false,
+        pending_download_review: None,
+        download_review_source: None,
         downloads_open: Rc::new(Cell::new(false)),
         popup: None,
         popup_state: serde_json::Map::new(),
@@ -829,6 +843,8 @@ impl App {
         self.toast(&format!("已恢复 {count} 个标签"), None);
     }
     fn publish_downloads(&self) {
+        self.download_sources.borrow_mut()
+            .retain(|id, _| self.download_ops.borrow().contains_key(id));
         let items = self.downloads.borrow_mut().publish_items();
         self.emit(json!({"type":"downloads","items":items}));
     }
@@ -837,6 +853,23 @@ impl App {
         if let Err(error) = self.storage.save_downloads(&items) {
             self.error(error);
         }
+    }
+    fn refresh_downloads(&mut self) {
+        // COM calls can dispatch callbacks. Never hold a RefCell borrow while
+        // querying an operation or releasing its last reference.
+        let operations: Vec<_> = self.download_ops.borrow().iter()
+            .map(|(id, operation)| (id.clone(), operation.clone()))
+            .collect();
+        let mut persist = false;
+        for (id, operation) in operations {
+            if let Ok(changed) = sync_download(&operation, &id, &self.downloads, &self.download_ops) {
+                persist |= changed;
+            }
+        }
+        if persist {
+            self.save_downloads();
+        }
+        self.publish_downloads();
     }
     /// A cancelled or failed download leaves a partial file; Zigzag discards it
     /// when the row goes, so Clear never leaves hidden debris behind.
@@ -892,6 +925,43 @@ impl App {
         let Some(id) = id else { return };
         let operation = self.download_ops.borrow().get(&id).cloned();
         match action {
+            "review" => {
+                if self.download_popup_visible {
+                    // Opening the native prompt before the leaving popup hands
+                    // focus back would immediately dismiss the native prompt.
+                    self.pending_download_review = Some(id);
+                    return;
+                }
+                let source = self.download_sources.borrow().get(&id).cloned();
+                let Some(source) = source else {
+                    self.error("这个下载已结束或来源页面已关闭");
+                    return;
+                };
+                if self.pages.contains_key(&source) {
+                    self.state.activate(&source);
+                    self.publish();
+                    self.save();
+                    if let Err(error) = self.sync() {
+                        self.error(error);
+                        return;
+                    }
+                }
+                let page = self.pages.get(&source).or_else(|| self.peek.as_ref()
+                    .filter(|peek| peek.tab.id == source).map(|peek| &peek.page));
+                let Some(page) = page else {
+                    self.error("下载来源页面已关闭");
+                    return;
+                };
+                self.download_review_source = Some(source);
+                let _ = page.view.focus();
+                let result = unsafe {
+                    page.view.webview().cast::<ICoreWebView2_9>()
+                        .and_then(|view| view.OpenDefaultDownloadDialog())
+                };
+                if let Err(error) = result {
+                    self.error(format!("无法显示下载提示：{error}"));
+                }
+            }
             "pause" => {
                 if let Some(operation) = &operation {
                     if let Err(error) = unsafe { operation.Pause() } {
@@ -899,7 +969,9 @@ impl App {
                         return;
                     }
                 }
-                if let Some(item) = self.downloads.borrow_mut().get_mut(&id) {
+                if let Some(item) = self.downloads.borrow_mut().get_mut(&id)
+                    .filter(|item| item.is_active())
+                {
                     item.state = DownloadState::Paused;
                 }
                 self.save_downloads();
@@ -921,7 +993,9 @@ impl App {
                     self.error(format!("无法继续下载：{error}"));
                     return;
                 }
-                if let Some(item) = self.downloads.borrow_mut().get_mut(&id) {
+                if let Some(item) = self.downloads.borrow_mut().get_mut(&id)
+                    .filter(|item| item.is_active())
+                {
                     item.state = DownloadState::InProgress;
                 }
                 self.save_downloads();
@@ -931,7 +1005,8 @@ impl App {
                 if let Some(operation) = &operation {
                     let _ = unsafe { operation.Cancel() };
                 }
-                if self.downloads.borrow_mut().get(&id).is_some() {
+                let active = self.downloads.borrow().get(&id).is_some_and(DownloadItem::is_active);
+                if active {
                     self.downloads
                         .borrow_mut()
                         .finish(&id, DownloadState::Cancelled, None);
@@ -1011,6 +1086,7 @@ impl App {
             downloads_open: self.downloads_open.clone(),
             downloads: self.downloads.clone(),
             download_ops: self.download_ops.clone(),
+            download_sources: self.download_sources.clone(),
         };
         register_page_events(
             &view,
@@ -2319,8 +2395,9 @@ impl App {
                 }
                 return;
             }
-            Command::PopupLayer { regions, cutout, focus } => {
+            Command::PopupLayer { regions, cutout, focus, downloads } => {
                 if regions.len() > 16 || !regions.iter().all(|r| r.valid()) || cutout.is_some_and(|r| !r.valid()) { return; }
+                self.download_popup_visible = downloads;
                 if let (Some(popup), Some(window)) = (&self.popup, &self.window) {
                     let result = WindowClip::popup(popup.hwnd(), &regions, cutout, window.scale_factor());
                     if result.is_ok() && focus { let _ = popup.focus(); }
@@ -2329,6 +2406,11 @@ impl App {
                 if regions.is_empty() {
                     if let Some(page) = self.page() { let _ = page.focus(); }
                     else if let Some(ui) = &self.ui { let _ = ui.focus(); }
+                }
+                if !downloads {
+                    if let Some(id) = self.pending_download_review.take() {
+                        self.download_action(Some(id), "review");
+                    }
                 }
                 return;
             }
@@ -2821,9 +2903,24 @@ impl ApplicationHandler<Event> for App {
                 self.publish_downloads();
             }
             Event::DownloadStarted(id) => {
+                self.download_review_source = None;
+                // A small/cached download may already be complete by the time
+                // its handlers are registered; events do not replay old states.
+                self.refresh_downloads();
                 self.save_downloads();
-                self.publish_downloads();
                 self.emit(json!({"type":"downloadStarted","id":id}));
+            }
+            Event::DownloadDialogOpened(source) => {
+                if self.download_review_source.as_ref() != Some(&source) {
+                    let page = self.pages.get(&source).or_else(|| self.peek.as_ref()
+                        .filter(|peek| peek.tab.id == source).map(|peek| &peek.page));
+                    if let Some(page) = page {
+                        // Keep the native entry and its security decision alive;
+                        // only hide the duplicate auto-opening surface.
+                        let _ = unsafe { page.view.webview().cast::<ICoreWebView2_9>()
+                            .and_then(|view| view.CloseDefaultDownloadDialog()) };
+                    }
+                }
             }
             Event::Command(c) => self.command(c, Some(event_loop)),
             Event::PeekRequest(source, url, point) => {
@@ -3078,6 +3175,23 @@ impl ApplicationHandler<Event> for App {
             _ => {}
         }
     }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.download_ops.borrow().is_empty() {
+            let now = Instant::now();
+            if self.next_download_poll.is_none_or(|due| now >= due) {
+                // StateChanged is the fast path; reconcile the actual engine
+                // state as well so a missed notification cannot strand a row.
+                self.refresh_downloads();
+                self.next_download_poll = Some(Instant::now() + Duration::from_secs(1));
+            }
+        }
+        if self.download_ops.borrow().is_empty() {
+            self.next_download_poll = None;
+            event_loop.set_control_flow(ControlFlow::Wait);
+        } else if let Some(due) = self.next_download_poll {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(due));
+        }
+    }
     fn exiting(&mut self, _: &ActiveEventLoop) {
         self.glass_backdrop = None;
         self.save();
@@ -3143,6 +3257,8 @@ fn register_page_events(
     }
     let download_downloads = shared.downloads.clone();
     let download_ops = shared.download_ops.clone();
+    let download_sources = shared.download_sources.clone();
+    let download_source = id.clone();
     let download_proxy = proxy.clone();
     let download = DownloadStartingEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
@@ -3161,6 +3277,10 @@ fn register_page_events(
                     while destination.exists() { destination = PathBuf::from(&folder).join(format!("{stem} ({index}){ext}")); index += 1; }
                     args.SetResultFilePath(&HSTRING::from(destination.as_os_str()))?;
                 }
+                // Wry's default handler sets Handled=true before ours. Restore
+                // the native entry so uncommon EXEs can receive a Keep/Discard
+                // decision. Hiding that entry strands them at full byte count.
+                args.SetHandled(false)?;
                 // Track every download Zigzag-style: a row appears at once and
                 // the panel is revealed; progress and state arrive by events.
                 let mut path_pointer = PWSTR::null();
@@ -3193,6 +3313,7 @@ fn register_page_events(
                     exists: false,
                 });
                 download_ops.borrow_mut().insert(id.clone(), operation.clone());
+                download_sources.borrow_mut().insert(id.clone(), download_source.clone());
                 track_download(
                     &operation,
                     id.clone(),
@@ -3206,6 +3327,19 @@ fn register_page_events(
         Ok(())
     }));
     unsafe { view.webview().cast::<ICoreWebView2_4>()?.add_DownloadStarting(&download, &mut token)?; }
+    let dialog_proxy = proxy.clone();
+    let dialog_source = id.clone();
+    let dialog = IsDefaultDownloadDialogOpenChangedEventHandler::create(Box::new(move |sender, _| {
+        let Some(sender) = sender else { return Ok(()) };
+        let mut open = BOOL::default();
+        unsafe { sender.cast::<ICoreWebView2_9>()?.IsDefaultDownloadDialogOpen(&mut open)?; }
+        if open.as_bool() {
+            let _ = dialog_proxy.send_event(Event::DownloadDialogOpened(dialog_source.clone()));
+        }
+        Ok(())
+    }));
+    unsafe { view.webview().cast::<ICoreWebView2_9>()?
+        .add_IsDefaultDownloadDialogOpenChanged(&dialog, &mut token)?; }
     let p = proxy.clone();
     let source_id = id.clone();
     let popup = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
@@ -3366,6 +3500,86 @@ fn register_page_events(
     }
     Ok(())
 }
+/// Reconciles one operation using its current state, both for notifications and
+/// the watchdog. Receiving every byte does not imply COMPLETED: WebView2 may
+/// still be checking or renaming the file.
+fn sync_download(
+    operation: &ICoreWebView2DownloadOperation,
+    id: &str,
+    downloads: &RefCell<Downloads>,
+    ops: &RefCell<HashMap<String, ICoreWebView2DownloadOperation>>,
+) -> windows::core::Result<bool> {
+    let current = downloads.borrow().get(id).cloned();
+    let Some(current) = current.filter(DownloadItem::is_active) else {
+        return Ok(false);
+    };
+    unsafe {
+        let mut code = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+        operation.State(&mut code)?;
+        let mut received = current.received as i64;
+        let _ = operation.BytesReceived(&mut received);
+        let mut total = current.total as i64;
+        let _ = operation.TotalBytesToReceive(&mut total);
+        let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
+        if code == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
+            operation.InterruptReason(&mut reason)?;
+        }
+        let path = if code == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+            let mut pointer = PWSTR::null();
+            operation.ResultFilePath(&mut pointer).ok()
+                .map(|_| take_pwstr(pointer))
+        } else {
+            None
+        };
+        let mut downloads = downloads.borrow_mut();
+        // A COM getter above may have dispatched the terminal callback already.
+        let Some(current) = downloads.get(id).filter(|item| item.is_active()).map(|item| item.state)
+        else {
+            return Ok(false);
+        };
+        downloads.set_progress(id, received.max(0) as u64, total.max(0) as u64);
+        let next = if code == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+            if let Some(path) = path.filter(|path| !path.is_empty()) {
+                if let Some(item) = downloads.get_mut(id) {
+                    item.path = path;
+                    if let Some(name) = FilePath::new(&item.path).file_name() {
+                        item.filename = name.to_string_lossy().into_owned();
+                    }
+                }
+            }
+            downloads.finish(id, DownloadState::Finished, None);
+            DownloadState::Finished
+        } else if code == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
+            if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED {
+                downloads.finish(id, DownloadState::Cancelled, None);
+                DownloadState::Cancelled
+            } else if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED {
+                if let Some(item) = downloads.get_mut(id) {
+                    item.state = DownloadState::Paused;
+                }
+                DownloadState::Paused
+            } else {
+                downloads.finish(
+                    id, DownloadState::Failed,
+                    Some(crate::downloads::interrupt_reason_text(reason)),
+                );
+                DownloadState::Failed
+            }
+        } else {
+            if let Some(item) = downloads.get_mut(id) {
+                item.state = DownloadState::InProgress;
+            }
+            DownloadState::InProgress
+        };
+        drop(downloads);
+        if !next.is_active() {
+            let removed = ops.borrow_mut().remove(id);
+            drop(removed);
+        }
+        Ok(next != current)
+    }
+}
+
 /// Attaches Zigzag's state machine to one WebView2 download: progress ticks are
 /// coalesced for the UI, and the operation is forgotten once it can no longer
 /// be paused or resumed.
@@ -3381,68 +3595,10 @@ fn track_download(
     let state_proxy = proxy.clone();
     let state_id = id.clone();
     let state = StateChangedEventHandler::create(Box::new(move |sender, _| {
-        unsafe {
         let Some(sender) = sender else { return Ok(()) };
-        let mut code = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
-        sender.State(&mut code)?;
-        let mut received = 0i64;
-        let _ = sender.BytesReceived(&mut received);
-        let mut total = 0i64;
-        let _ = sender.TotalBytesToReceive(&mut total);
-        if let Some(item) = state_downloads.borrow_mut().get_mut(&state_id) {
-            item.received = received.max(0) as u64;
-            if total > 0 {
-                item.total = total as u64;
-            }
-        }
-        if code == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
-            let mut path_pointer = PWSTR::null();
-            if sender.ResultFilePath(&mut path_pointer).is_ok() {
-                let path = take_pwstr(path_pointer);
-                if let Some(item) = state_downloads.borrow_mut().get_mut(&state_id) {
-                    if !path.is_empty() {
-                        item.path = path;
-                        if let Some(name) = FilePath::new(&item.path).file_name() {
-                            item.filename = name.to_string_lossy().into_owned();
-                        }
-                    }
-                }
-            }
-            state_downloads
-                .borrow_mut()
-                .finish(&state_id, DownloadState::Finished, None);
-            state_ops.borrow_mut().remove(&state_id);
-            let _ = state_proxy.send_event(Event::DownloadsChanged { persist: true });
-        } else if code == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
-            let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
-            let _ = sender.InterruptReason(&mut reason);
-            let current = state_downloads.borrow().get(&state_id).map(|item| item.state);
-            if current == Some(DownloadState::Cancelled) || reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED {
-                state_downloads
-                    .borrow_mut()
-                    .finish(&state_id, DownloadState::Cancelled, None);
-                state_ops.borrow_mut().remove(&state_id);
-            } else if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED
-                || current == Some(DownloadState::Paused)
-            {
-                // Pausing interrupts the operation underneath; the row keeps its
-                // bytes and turns into "paused" until Resume.
-                if let Some(item) = state_downloads.borrow_mut().get_mut(&state_id) {
-                    item.state = DownloadState::Paused;
-                }
-            } else {
-                let failure = crate::downloads::interrupt_reason_text(reason);
-                state_downloads
-                    .borrow_mut()
-                    .finish(&state_id, DownloadState::Failed, Some(failure));
-                state_ops.borrow_mut().remove(&state_id);
-            }
-            let _ = state_proxy.send_event(Event::DownloadsChanged { persist: true });
-        } else {
-            let _ = state_proxy.send_event(Event::DownloadsChanged { persist: false });
-        }
+        let persist = sync_download(&sender, &state_id, &state_downloads, &state_ops)?;
+        let _ = state_proxy.send_event(Event::DownloadsChanged { persist });
         Ok(())
-        }
     }));
     let mut token = 0;
     unsafe { operation.add_StateChanged(&state, &mut token)?; }
@@ -3485,6 +3641,9 @@ fn peek_target(name: &str) -> Option<Option<Point>> {
     });
     Some(point)
 }
+#[cfg(test)]
+#[path = "download_tests.rs"]
+mod download_tests;
 #[cfg(test)]
 mod motion_tests {
     use super::*;

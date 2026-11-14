@@ -22,13 +22,22 @@ export function downloadFraction(item: Pick<DownloadItem, "received" | "total">)
 }
 
 export function downloadPercent(item: Pick<DownloadItem, "received" | "total">): number {
-  return Math.round(downloadFraction(item) * 100);
+  const percent = Math.round(downloadFraction(item) * 100);
+  return item.received < item.total ? Math.min(99, percent) : percent;
+}
+
+/** All bytes arrived, but the engine may still need a scan or user decision. */
+export function isFinalizingDownload(item: Pick<DownloadItem, "state" | "received" | "total">): boolean {
+  return item.state === "inProgress" && item.total > 0 && item.received >= item.total;
 }
 
 /** The line under the file name, in Zigzag's plain words. */
 export function downloadStatus(item: DownloadItem): string {
   switch (item.state) {
     case "inProgress":
+      if (isFinalizingDownload(item)) {
+        return `正在检查或等待确认 · ${formatBytes(item.received)}`;
+      }
       return item.total > 0
         ? `${downloadPercent(item)}% · ${formatBytes(item.received)} / ${formatBytes(item.total)}`
         : `正在下载 · ${formatBytes(item.received)}`;

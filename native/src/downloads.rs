@@ -113,7 +113,7 @@ impl Downloads {
         self.items.iter_mut().find(|item| item.id == id)
     }
     pub fn set_progress(&mut self, id: &str, received: u64, total: u64) {
-        if let Some(item) = self.get_mut(id) {
+        if let Some(item) = self.get_mut(id).filter(|item| item.is_active()) {
             item.received = received;
             if total > 0 {
                 item.total = total;
@@ -297,6 +297,21 @@ mod tests {
         assert_eq!(done.received, 100);
         assert_eq!(done.total, 100);
         assert!(done.finished.is_some());
+    }
+    #[test]
+    fn full_progress_waits_for_completion_and_late_bytes_cannot_change_finished_items() {
+        let mut downloads = Downloads::default();
+        downloads.insert(item("file", DownloadState::InProgress, 1));
+        downloads.set_progress("file", 100, 100);
+        assert_eq!(downloads.get("file").unwrap().state, DownloadState::InProgress);
+        assert!(downloads.get("file").unwrap().finished.is_none());
+
+        downloads.finish("file", DownloadState::Finished, None);
+        downloads.get_mut("file").unwrap().exists = true;
+        downloads.set_progress("file", 90, 200);
+        let done = downloads.get("file").unwrap();
+        assert_eq!((done.received, done.total), (100, 100));
+        assert!(done.exists);
     }
     #[test]
     fn interrupt_reasons_are_plain_words() {
