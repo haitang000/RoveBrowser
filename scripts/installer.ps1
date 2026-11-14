@@ -54,7 +54,9 @@ if (-not $SkipBuild) {
 if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
     throw 'Release executable not found. Run npm run installer without -SkipBuild first.'
 }
-$icon = Get-ChildItem -Path (Join-Path $targetRoot 'build\rove-*\out\icon.ico') |
+# Cargo 1.100+ nests build-script output as build\<package>\<hash>\out;
+# older releases use build\<package>-<hash>\out, so search both layouts.
+$icon = Get-ChildItem -Path (Join-Path $targetRoot 'build') -Recurse -Filter 'icon.ico' -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 if (-not $icon) { throw 'Build-generated application icon not found.' }
 

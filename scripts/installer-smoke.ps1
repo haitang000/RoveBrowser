@@ -10,7 +10,9 @@ $profile = Join-Path $testRoot 'profile'
 $payload = Join-Path $projectRoot "release\Rove-$version-windows-x64"
 $oldPayload = Join-Path $projectRoot 'release\Rove-0.1.0-beta5-windows-x64'
 $targetRoot = Join-Path $projectRoot 'native\target\x86_64-pc-windows-msvc\release'
-$icon = Get-ChildItem -Path (Join-Path $targetRoot 'build\rove-*\out\icon.ico') | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+# Cargo 1.100+ nests build-script output as build\<package>\<hash>\out;
+# older releases use build\<package>-<hash>\out, so search both layouts.
+$icon = Get-ChildItem -Path (Join-Path $targetRoot 'build') -Recurse -Filter 'icon.ico' -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 $bootstrapper = Join-Path $projectRoot 'build\installer\dependencies\MicrosoftEdgeWebview2Setup.exe'
 $checks = [ordered]@{}
 New-Item -ItemType Directory -Force -Path $testRoot,$profile | Out-Null
