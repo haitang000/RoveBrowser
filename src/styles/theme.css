@@ -1460,6 +1460,42 @@ hr {
   color: var(--tertiary);
   font-size: 12px;
 }
+.icon-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 4.5%, transparent);
+  color: var(--tertiary);
+}
+.icon-search input,
+.settings-panel .icon-search input,
+.settings-space-editor .icon-search input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  appearance: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.icon-search:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+.icon-search input:focus-visible {
+  outline: none;
+}
 .settings-actions {
   display: flex;
   justify-content: space-between;

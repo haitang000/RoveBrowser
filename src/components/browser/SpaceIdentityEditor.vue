@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 import {
   SPACE_EMOJIS,
@@ -129,19 +130,22 @@ function onEsc(event: KeyboardEvent) {
           <SpaceGlyph :icon="item.emoji" :size="18" />
         </button>
       </div>
-      <input
-        :value="field"
-        type="text"
-        aria-label="搜索或输入表情"
-        placeholder="搜索或输入表情"
-        autocomplete="off"
-        spellcheck="false"
-        @input="onInput"
-        @compositionstart="composing = true"
-        @compositionend="composing = false; onInput($event)"
-        @keydown.enter="onEnter"
-        @keydown.esc="onEsc"
-      />
+      <div class="icon-search">
+        <Icon name="search" :size="14" />
+        <input
+          :value="field"
+          type="text"
+          aria-label="搜索或输入表情"
+          placeholder="搜索或输入表情"
+          autocomplete="off"
+          spellcheck="false"
+          @input="onInput"
+          @compositionstart="composing = true"
+          @compositionend="composing = false; onInput($event)"
+          @keydown.enter="onEnter"
+          @keydown.esc="onEsc"
+        />
+      </div>
     </div>
   </div>
 </template>
