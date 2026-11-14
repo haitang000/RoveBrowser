@@ -8,6 +8,7 @@ mod downloads;
 mod default_browser;
 mod favicon;
 mod find;
+mod frame;
 mod glass;
 mod host;
 mod model;

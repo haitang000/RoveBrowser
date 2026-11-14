@@ -14,7 +14,7 @@
   --address-height: 30px;
   --bottom-height: 34px;
   --titlebar-height: 32px;
-  /* Restored native windows clip this strip for resizing. Maximized and the UI preview stay at 0. */
+  /* Restored native windows reserve this strip for resizing. Maximized and the UI preview stay at 0. */
   --chrome-inset: 0px;
   --titlebar-block: calc(var(--titlebar-height) + var(--chrome-inset));
   --card-inset: 8px;

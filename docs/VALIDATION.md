@@ -1,5 +1,15 @@
 # 实际验证记录
 
+## 渐变外框白边与原生圆角（Issue #21，2026-11-14）
+
+[Issue #21](https://github.com/haitang000/RoveBrowser/issues/21) 的白色描边来自原生标题栏绘制路径：外壳 WebView 的四周 6px 缩放区域被裁掉，原生层再用单一主题底色补齐，无法延续工作区的渐变和颗粒。现在 WebView 保持完整背景，原生边缘只以 1/255 的黑色透明度保留输入命中；标题栏图标和悬停色独立合成，关闭按钮悬停仍为不透明红色，避免暗色模式下白色图标与白色悬停使用不同透明度时相互混淆。
+
+Windows 11 使用 `DWMWA_WINDOW_CORNER_PREFERENCE / DWMWCP_ROUND` 请求系统圆角，并用 `DWMWA_BORDER_COLOR / DWMWA_COLOR_NONE` 关闭系统描边。根窗口不再安装 GDI 区域或额外阴影窗口；外壳 CSS 不重复裁切。透明模糊层和标题栏悬停层使用一致的圆角尺寸。Windows 10 或不支持该属性时保留 12px GDI 圆角与兼容阴影，最大化清除区域、还原重新安装。原生方案和兼容条件依据 [Microsoft 圆角说明](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-rounded-corners) 与 [DWM 属性说明](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)。
+
+验证通过：前端生产构建、86 项前端单测、84 项 Rust 测试、Clippy（`-D warnings`）、Debug 构建、10 项窗口布局 E2E 和 36 项完整原生 WebView2 冒烟测试。回归覆盖 100%/125%/150%/200% DPI 的四边四角缩放命中、按钮悬停像素、相同 RGB 的不同透明度、完整 UI 背景、DWM 路径无根窗口区域，以及强制兼容路径的最大化/还原。同步修复了 E2E 所依赖的 JSON 模块导入声明和一个多元素选择器。
+
+computer-use 在 Windows 11 26200、独立临时 profile 中检查了渐变四边、圆角、最大化/还原和深色玻璃画面；测试窗口已退出，用户原有窗口未改动。Windows 10 兼容路径通过真实 HWND/GDI 测试，本轮没有 Windows 10 实机视觉验证。原生冒烟结果位于 `test-results/native-smoke.json`。
+
 ## 网站图标清晰度修复（2026-11-12）
 
 用户反馈缓存的网站图标过于模糊。根因是 `native/src/favicon.rs` 把 WebView2 返回的 favicon PNG 交给 `image` crate 的 `thumbnail(64, 64)`：`thumbnail` 不限制放大，16/32px 位图会被插值拉到 64px 再缓存；界面以 16–18px（本机 200% 缩放下 32–36 设备像素）显示时再缩小一次，图标明显发虚。WebView2 自己的 favicon 库只保存 16×16 和 32×32 两种位图，因此把缓存拉到 64 没有任何细节收益。

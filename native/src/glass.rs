@@ -128,6 +128,7 @@ pub struct Backdrop {
 // A separate click-through sibling is visible through them, like our shadow.
 struct Surface {
     root: HWND,
+    radius: f64,
     window: HWND,
     enabled: Cell<bool>,
     updating: Cell<bool>,
@@ -166,7 +167,7 @@ impl Surface {
                 corner.X = if IsZoomed(self.root).as_bool() {
                     0.
                 } else {
-                    (crate::host::WINDOW_RADIUS * GetDpiForWindow(self.root) as f64 / 96.) as f32
+                    (self.radius * GetDpiForWindow(self.root) as f64 / 96.) as f32
                 };
                 corner.Y = corner.X;
                 geometry.SetCornerRadius(corner)?;
@@ -228,7 +229,7 @@ unsafe extern "system" fn procedure(
     result
 }
 impl Backdrop {
-    pub fn new(root: HWND) -> Result<Self> {
+    pub fn new(root: HWND, radius: f64) -> Result<Self> {
         let mut bounds = RECT::default();
         unsafe {
             GetWindowRect(root, &mut bounds)?;
@@ -258,6 +259,7 @@ impl Backdrop {
         };
         let mut surface = Box::new(Surface {
             root,
+            radius,
             window: hwnd,
             enabled: Cell::new(false),
             updating: Cell::new(false),
@@ -365,7 +367,7 @@ mod tests {
                 None,
                 None,
             )?);
-            let backdrop = Backdrop::new(root.0)?;
+            let backdrop = Backdrop::new(root.0, 8.)?;
             let surface = backdrop.surface.window;
             backdrop.set_enabled(true)?;
             assert!(!IsWindowVisible(surface).as_bool());

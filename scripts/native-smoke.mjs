@@ -98,13 +98,16 @@ try{
   await ui.evaluate(()=>document.fonts.ready);
   assert(await ui.evaluate(()=>[...document.fonts].some(f=>f.family.includes('Inter Variable')&&f.status==='loaded')));
   checks.push('原生 UI 从内嵌资源加载 Inter 字体');
-  const frameRadius=()=>ui.locator('.browser-shell').evaluate(e=>getComputedStyle(e).borderTopLeftRadius);
-  assert.equal(await frameRadius(),'12px');
+  const frameRadius=()=>ui.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--radius-window').trim());
+  const restoredRadius=await frameRadius();
+  assert(['8px','12px'].includes(restoredRadius));
+  assert.equal(await ui.locator('.browser-shell').evaluate(e=>getComputedStyle(e).clipPath),'none');
+  assert.equal(await ui.locator('.browser-shell').evaluate(e=>getComputedStyle(e).borderTopLeftRadius),'0px');
   await send(ui,{type:'window',action:'maximize'});
   await waitFor(async()=>await frameRadius()==='0px','maximized square frame');
   await send(ui,{type:'window',action:'maximize'});
-  await waitFor(async()=>await frameRadius()==='12px','restored rounded frame');
-  checks.push('整个原生窗口 12px 圆角，最大化恢复直角，还原恢复圆角');
+  await waitFor(async()=>await frameRadius()===restoredRadius,'restored rounded frame');
+  checks.push('宿主选择 8px 原生圆角或 12px 兼容圆角；最大化/还原同步窗口状态，UI 不重复裁切背景');
   await send(ui,{type:'navigate',url:base+'/first'})
   let web=await site();await web.waitForSelector('h1');assert.equal(await web.title(),'First fixture');checks.push('真实 WebView2 加载与标题')
   assert.equal(await ui.locator('.favorites-heading, .favorites-panel').count(),0);

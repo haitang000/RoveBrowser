@@ -1,7 +1,7 @@
 //! Native resize borders and caption buttons, including the Windows 11 Snap flyout.
 //! WebView2 owns descendant HWNDs on other threads. Instead of subclassing those
-//! windows, remove the borders/buttons from the UI HWND region and draw them in an
-//! input-transparent owned surface. The root receives WM_NCHITTEST/HTMAXBUTTON and the
+//! windows, cover the borders/buttons with an almost transparent input surface.
+//! The UI paints the entire background. The root receives WM_NCHITTEST/HTMAXBUTTON and the
 //! system supplies its own Snap menu. No synthetic layout flyout.
 use crate::model::Rect;
 use std::cell::{Cell, RefCell};
@@ -92,12 +92,12 @@ struct Anchor {
 }
 #[derive(Clone, Copy)]
 struct Palette {
-    background: [u8; 4],
+    input: [u8; 4],
     hover: [u8; 4],
     foreground: [u8; 4],
 }
 struct State {
-    shadow: crate::shadow::Shadow,
+    frame: crate::frame::WindowFrame,
     surface: Cell<HWND>,
     rect: Cell<RECT>,
     anchor: Cell<Option<Anchor>>,
@@ -184,14 +184,14 @@ fn color(c: [u8; 4]) -> COLORREF {
 impl Caption {
     pub fn new(root: HWND, ui: HWND) -> Result<Self> {
         let state = Box::new(State {
-            shadow: crate::shadow::Shadow::new(root)?,
+            frame: crate::frame::WindowFrame::new(root)?,
             surface: Cell::new(HWND::default()),
             rect: Cell::new(RECT::default()),
             anchor: Cell::new(None),
             palette: Cell::new(Palette {
-                background: [212, 228, 251, 255],
-                hover: [228, 239, 253, 255],
-                foreground: [50, 55, 62, 255],
+                input: input_marker([255, 255, 255, 98], [0, 0, 0, 158]),
+                hover: [255, 255, 255, 98],
+                foreground: [0, 0, 0, 158],
             }),
             hot: Cell::new(None),
             pressed: Cell::new(None),
@@ -277,7 +277,7 @@ impl Caption {
         &self,
         rect: Rect,
         viewport_width: f64,
-        background: [u8; 4],
+        _background: [u8; 4],
         hover: [u8; 4],
         foreground: [u8; 4],
         scale: f64,
@@ -300,16 +300,16 @@ impl Caption {
             height: rect.height,
         }));
         self.state.palette.set(Palette {
-            background,
+            // A unique RGB marker distinguishes untouched input pixels from
+            // glyphs/hover ink after GDI (which does not preserve alpha).
+            input: input_marker(hover, foreground),
             hover,
             foreground,
         });
         self.refresh(scale)
     }
     pub fn refresh(&self, scale: f64) -> Result<()> {
-        self.state
-            .shadow
-            .refresh(scale, crate::host::WINDOW_RADIUS)?;
+        self.state.frame.refresh(self.root, scale)?;
         let mut client = RECT::default();
         unsafe {
             GetClientRect(self.ui, &mut client)?;
@@ -352,8 +352,8 @@ impl Caption {
                 right: (client.right - border).max(border),
                 bottom: (client.bottom - border).max(border),
             })?;
-            // Paint all three controls on the same surface. Leaving minimize/
-            // close in WebView2 would clip their hover fill at the resize inset.
+            // Include all three controls in the input/ink surface, including
+            // the portions that overlap the resize strip.
             let button = Region::new(button_bounds(rect))?;
             let surface = Region::new(client)?;
             unsafe {
@@ -363,15 +363,16 @@ impl Caption {
                 {
                     return Err(Error::from_thread());
                 }
-                let outline = Region::new(client)?;
-                if GetWindowRgn(self.root, outline.0).0 != 0 {
-                    if CombineRgn(Some(surface.0), Some(surface.0), Some(outline.0), RGN_AND).0 == 0
-                    {
-                        return Err(Error::from_thread());
-                    }
+                // This owned overlay is not clipped by its owner's DWM frame.
+                // Limit hover fills to the same outline, also on the fallback.
+                let radius = if border == 0 { 0 } else { (self.radius() * scale).round() as i32 };
+                let outline = Region(CreateRoundRectRgn(0, 0, client.right + 1, client.bottom + 1, radius * 2, radius * 2));
+                if outline.0.0.is_null() || CombineRgn(Some(surface.0), Some(surface.0), Some(outline.0), RGN_AND).0 == 0 {
+                    return Err(Error::from_thread());
                 }
             }
-            interior.install(self.ui)?;
+            // Keep the WebView full size so gradients/grain continue all the
+            // way to the frame and underneath the transparent caption ink.
             surface.install(self.state.surface.get())?;
             self.state.cut.set(Some(key));
         }
@@ -402,6 +403,9 @@ impl Caption {
             );
         }
         Ok(())
+    }
+    pub fn radius(&self) -> f64 {
+        self.state.frame.radius()
     }
 }
 impl Drop for Caption {
@@ -559,12 +563,12 @@ unsafe extern "system" fn procedure(
             // Keep winit's activation/focus handling; -1 asks DefWindowProc to
             // update activation without repainting the standard non-client frame.
             let result = DefSubclassProc(hwnd, msg, wparam, LPARAM(-1));
-            let _ = s.shadow.refresh(s.scale.get(), crate::host::WINDOW_RADIUS);
+            let _ = s.frame.refresh(hwnd, s.scale.get());
             return result;
         }
         WM_SIZE if hwnd != s.surface.get() => {
             let result = DefSubclassProc(hwnd, msg, wparam, lparam);
-            let _ = s.shadow.refresh(s.scale.get(), crate::host::WINDOW_RADIUS);
+            let _ = s.frame.refresh(hwnd, s.scale.get());
             let _ = RedrawWindow(
                 Some(s.surface.get()),
                 None,
@@ -575,7 +579,7 @@ unsafe extern "system" fn procedure(
         }
         WM_WINDOWPOSCHANGED | WM_SHOWWINDOW if hwnd != s.surface.get() => {
             let result = DefSubclassProc(hwnd, msg, wparam, lparam);
-            let _ = s.shadow.refresh(s.scale.get(), crate::host::WINDOW_RADIUS);
+            let _ = s.frame.refresh(hwnd, s.scale.get());
             position_surface(hwnd, s);
             return result;
         }
@@ -676,12 +680,33 @@ impl Drop for CaptionBitmap {
         }
     }
 }
+fn input_marker(hover: [u8; 4], foreground: [u8; 4]) -> [u8; 4] {
+    // Neither real color can equal all three candidates.
+    (1..=3).map(|r| [r, 0, 0, 1])
+        .find(|c| c[..3] != hover[..3] && c[..3] != foreground[..3]).unwrap()
+}
+fn glyph_marker(palette: Palette) -> [u8; 4] {
+    (4..=6).map(|r| [r, 0, 0, 255])
+        .find(|c| c[..3] != palette.hover[..3]).unwrap()
+}
+fn bitmap_rgb(c: [u8; 4]) -> u32 {
+    (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32
+}
 fn premultiply(pixel: u32, palette: Palette) -> u32 {
-    let rgb = pixel & 0x00ff_ffff;
-    let alpha = [palette.background, palette.hover, palette.foreground]
-        .into_iter()
-        .find(|c| rgb == ((c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32))
-        .map_or(255, |c| c[3] as u32);
+    let mut rgb = pixel & 0x00ff_ffff;
+    if rgb == bitmap_rgb(palette.input) {
+        // Alpha zero makes layered HWNDs pass input through to WebView2. One
+        // alpha unit keeps native hits without painting a solid frame over it.
+        return 0x0100_0000;
+    }
+    // Dark mode uses white for both hover and glyphs at different opacities.
+    // A separate glyph marker preserves those independent alpha values.
+    let alpha = if rgb == bitmap_rgb(glyph_marker(palette)) {
+        rgb = bitmap_rgb(palette.foreground);
+        palette.foreground[3] as u32
+    } else if rgb == bitmap_rgb(palette.hover) {
+        palette.hover[3] as u32
+    } else { 255 };
     let channel = |shift: u32| (((rgb >> shift) & 255u32) * alpha + 127) / 255;
     alpha << 24 | channel(16) << 16 | channel(8) << 8 | channel(0)
 }
@@ -775,7 +800,7 @@ unsafe fn position_surface(root: HWND, s: &State) {
     }
 }
 unsafe fn paint_surface(dc: HDC, bounds: RECT, s: &State, maximized: bool) {
-    let brush = CreateSolidBrush(color(s.palette.get().background));
+    let brush = CreateSolidBrush(color(s.palette.get().input));
     let _ = FillRect(dc, &bounds, brush);
     let _ = DeleteObject(brush.into());
     for button in Button::ALL {
@@ -791,7 +816,7 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
     } else if hot {
         p.hover
     } else {
-        p.background
+        p.input
     };
     let brush = CreateSolidBrush(color(background));
     let _ = FillRect(dc, &r, brush);
@@ -802,7 +827,7 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
         color(if hot && button == Button::Close {
             [255; 4]
         } else {
-            p.foreground
+            glyph_marker(p)
         }),
     );
     let old_pen = SelectObject(dc, pen.into());
@@ -842,6 +867,17 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shared_ink_colors_preserve_distinct_hover_glyph_and_input_alpha() {
+        let palette = Palette {
+            input: input_marker([255, 255, 255, 13], [255, 255, 255, 168]),
+            hover: [255, 255, 255, 13],
+            foreground: [255, 255, 255, 168],
+        };
+        assert_eq!(premultiply(bitmap_rgb(palette.input), palette), 0x0100_0000);
+        assert_eq!(premultiply(bitmap_rgb(palette.hover), palette), 0x0d0d_0d0d);
+        assert_eq!(premultiply(bitmap_rgb(glyph_marker(palette)), palette), 0xa8a8_a8a8);
+    }
     #[test]
     fn maximized_windows_drop_the_resize_strip() {
         assert_eq!(chrome_inset(false), RESIZE_BORDER);
@@ -960,7 +996,7 @@ mod tests {
         assert_eq!(button_at(r, POINT { x: 1210, y: 32 }), None);
     }
     #[test]
-    fn real_hwnd_hit_testing_and_ui_hole_follow_dpi() {
+    fn real_hwnd_hit_testing_preserves_the_full_ui_background_at_each_dpi() {
         struct TestWindow(HWND);
         impl Drop for TestWindow {
             fn drop(&mut self) {
@@ -1005,9 +1041,7 @@ mod tests {
             let caption = Caption::new(root.0, ui).unwrap();
             caption.refresh(1.).unwrap();
             let initial_region = CreateRectRgn(0, 0, 0, 0);
-            assert_ne!(GetWindowRgn(ui, initial_region).0, 0);
-            assert!(!PtInRegion(initial_region, 3, 300).as_bool());
-            assert!(PtInRegion(initial_region, 400, 300).as_bool());
+            assert_eq!(GetWindowRgn(ui, initial_region).0, 0, "keep the gradient underneath the input surface");
             let _ = DeleteObject(initial_region.into());
             caption
                 .update(
@@ -1041,11 +1075,7 @@ mod tests {
                     HTMAXBUTTON as isize
                 );
                 let region = CreateRectRgn(0, 0, 0, 0);
-                assert_ne!(GetWindowRgn(ui, region).0, 0);
-                assert!(
-                    !PtInRegion(region, (r.left + r.right) / 2, (r.top + r.bottom) / 2).as_bool()
-                );
-                assert!(PtInRegion(region, 20, 20).as_bool());
+                assert_eq!(GetWindowRgn(ui, region).0, 0);
                 let _ = DeleteObject(region.into());
                 // Real HWND routing must expose every edge/corner to USER32,
                 // while all three caption controls share the native paint surface.
@@ -1064,7 +1094,7 @@ mod tests {
                 ];
                 let ui_region = CreateRectRgn(0, 0, 0, 0);
                 let surface_region = CreateRectRgn(0, 0, 0, 0);
-                assert_ne!(GetWindowRgn(ui, ui_region).0, 0);
+                assert_eq!(GetWindowRgn(ui, ui_region).0, 0);
                 assert_ne!(
                     GetWindowRgn(caption.state.surface.get(), surface_region).0,
                     0
@@ -1079,15 +1109,12 @@ mod tests {
                         hit as isize,
                         "scale={scale}, x={x}, y={y}"
                     );
-                    assert!(!PtInRegion(ui_region, x, y).as_bool());
                     assert!(PtInRegion(surface_region, x, y).as_bool());
                 }
-                assert!(PtInRegion(ui_region, border, 300).as_bool());
                 assert!(!PtInRegion(surface_region, border, 300).as_bool());
                 for button in Button::ALL {
                     let rect = button.rect(r);
                     let (x, y) = ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
-                    assert!(!PtInRegion(ui_region, x, y).as_bool());
                     assert!(PtInRegion(surface_region, x, y).as_bool());
                     let mut point = POINT { x, y };
                     assert!(ClientToScreen(root.0, &mut point).as_bool());
@@ -1098,7 +1125,6 @@ mod tests {
                         button.hit() as isize
                     );
                 }
-                assert!(PtInRegion(ui_region, button_bounds(r).left - 1, 20).as_bool());
                 assert_hover_pixels(&caption, surface_region);
                 for button in Button::ALL {
                     SendMessageW(
@@ -1143,12 +1169,10 @@ mod tests {
             assert!(IsZoomed(root.0).as_bool());
             caption.refresh(2.).unwrap();
             let region = CreateRectRgn(0, 0, 0, 0);
-            assert_ne!(GetWindowRgn(ui, region).0, 0);
-            assert!(PtInRegion(region, 1, 300).as_bool());
+            assert_eq!(GetWindowRgn(ui, region).0, 0);
             let _ = SetWindowLongPtrW(root.0, GWL_STYLE, style);
             caption.refresh(2.).unwrap();
-            assert_ne!(GetWindowRgn(ui, region).0, 0);
-            assert!(!PtInRegion(region, 1, 300).as_bool());
+            assert_eq!(GetWindowRgn(ui, region).0, 0);
             let _ = DeleteObject(region.into());
             assert_stable_hover(&caption);
             assert_translucent_pixels(&caption);
@@ -1192,8 +1216,8 @@ mod tests {
         let s = &caption.state;
         for (alpha, expected) in [(64, 0x4032190a), (128, 0x80643214), (255, 0xffc86428)] {
             s.palette.set(Palette {
-                background: [200, 100, 40, alpha],
-                hover: [100, 200, 100, 128],
+                input: input_marker([200, 100, 40, alpha], [40, 40, 40, 255]),
+                hover: [200, 100, 40, alpha],
                 foreground: [40, 40, 40, 255],
             });
             caption.refresh(2.).unwrap();
@@ -1203,13 +1227,13 @@ mod tests {
                 *bitmap.bits.add((y * bitmap.size.cx + x) as usize)
             };
             let r = Button::Maximize.rect(s.rect.get());
-            assert_eq!(read((r.left + r.right) / 2, 1), expected);
-            assert_eq!(read(1, 100), expected);
+            assert_eq!(read((r.left + r.right) / 2, 1), 0x0100_0000);
+            assert_eq!(read(1, 100), 0x0100_0000);
             // Changing hover reuses the backing bitmap and preserves per-pixel
             // alpha, while the close affordance stays fully opaque red.
             let bits = s.layer.borrow().as_ref().unwrap().bits;
             set_hot(s, Some(Button::Maximize));
-            assert_eq!(read((r.left + r.right) / 2, 1), 0x80326432);
+            assert_eq!(read((r.left + r.right) / 2, 1), expected);
             assert_eq!(s.layer.borrow().as_ref().unwrap().bits, bits);
             set_hot(s, Some(Button::Close));
             let close = Button::Close.rect(s.rect.get());
@@ -1218,7 +1242,7 @@ mod tests {
         }
         // A white glass tint must not thin the close button's white glyph.
         s.palette.set(Palette {
-            background: [255, 255, 255, 64],
+            input: input_marker([255, 255, 255, 128], [40, 40, 40, 255]),
             hover: [255, 255, 255, 128],
             foreground: [40, 40, 40, 255],
         });
@@ -1258,8 +1282,8 @@ mod tests {
         assert!(!IsWindowVisible(s.surface.get()).as_bool());
     }
 
-    // Render through the actual native surface's region. The regression was
-    // visible only at the top/right resize strips, outside WebView2's region.
+    // Render through the actual native surface's region, including the top and
+    // right resize strips. Its input pixels must preserve the WebView below.
     unsafe fn assert_hover_pixels(caption: &Caption, region: HRGN) {
         let dc = CreateCompatibleDC(None);
         assert!(!dc.0.is_null());
@@ -1307,7 +1331,7 @@ mod tests {
                         s.palette.get().hover
                     }
                 } else {
-                    s.palette.get().background
+                    s.palette.get().input
                 });
                 // Both samples lie in the portions formerly cut off by the 6px border.
                 assert_eq!(

@@ -60,8 +60,6 @@ use wry::{
 };
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../dist");
-// Keep the standalone UI preview's --radius-window default in sync.
-pub(crate) const WINDOW_RADIUS: f64 = 12.;
 // Match theme.css --surface, including the empty frame before a document paints.
 fn app_icon() -> Result<Icon, Box<dyn std::error::Error>> {
     let image = image::load_from_memory(include_bytes!("../assets/icon.png"))?.into_rgba8();
@@ -273,7 +271,6 @@ struct App {
     popup_state: serde_json::Map<String, serde_json::Value>,
     ui: Option<WebView>,
     window: Option<Window>,
-    window_clip: WindowClip,
     context: WebContext,
     state: State,
     storage: Storage,
@@ -365,7 +362,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         popup_state: serde_json::Map::new(),
         ui: None,
         window: None,
-        window_clip: WindowClip::default(),
         context: WebContext::new(Some(data.join("WebView2"))),
         state,
         storage,
@@ -406,19 +402,10 @@ impl App {
         let Some(window) = &self.window else {
             return Ok(());
         };
-        let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
-            return Err("无法获取 Windows 窗口句柄".into());
-        };
         let maximized = window.is_maximized();
-        self.window_clip.apply_window(
-            HWND(handle.hwnd.get() as *mut _),
-            WINDOW_RADIUS,
-            window.scale_factor(),
-            maximized,
-        )?;
         if self.ready {
             if let Some(ui) = &self.ui {
-                let radius = if maximized { 0. } else { WINDOW_RADIUS };
+                let radius = if maximized { 0. } else { self.caption.as_ref().map_or(12., |c| c.radius()) };
                 let inset = crate::caption::chrome_inset(maximized);
                 ui.evaluate_script(&format!(
                     "document.documentElement.style.setProperty('--radius-window', '{radius}px');document.documentElement.style.setProperty('--chrome-inset', '{inset}px')"
@@ -439,7 +426,7 @@ impl App {
         let hwnd = HWND(handle.hwnd.get() as *mut _);
         crate::glass::clear_system_backdrop(hwnd);
         if self.glass && self.glass_backdrop.is_none() {
-            match crate::glass::Backdrop::new(hwnd) {
+            match crate::glass::Backdrop::new(hwnd, self.caption.as_ref().map_or(12., |c| c.radius())) {
                 Ok(backdrop) => self.glass_backdrop = Some(backdrop),
                 // Keep real clear transparency when Composition is unavailable.
                 Err(error) => eprintln!("Rove background blur: {error}"),

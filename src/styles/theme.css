@@ -166,6 +166,17 @@ kbd {
   clip-path: inset(0 round var(--radius-window));
   background: var(--frame);
 }
+/* The native compositor (or Windows 10 region) owns the outer outline. A CSS
+   curve would clip the gradient a second time and expose a fringe underneath. */
+:root[data-native] .browser-shell {
+  border-radius: 0;
+  clip-path: none;
+}
+/* Native caption ink shares the shell's live background. Keep only one set of
+   glyphs while retaining the DOM buttons for layout and accessibility. */
+:root[data-native] .window-controls svg {
+  visibility: hidden;
+}
 .browser-shell.glass {
   background: color-mix(in srgb, var(--frame) calc(var(--frame-coverage) * 100%), transparent);
 }

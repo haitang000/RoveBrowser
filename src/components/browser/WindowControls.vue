@@ -29,8 +29,8 @@ function report() {
     maximize: { x: r.x, y: r.y, width: r.width, height: r.height },
     viewportWidth: innerWidth,
     background: color(frame),
-    hover: color(frame, style.getPropertyValue("--hover").trim()),
-    foreground: color(frame, style.getPropertyValue("--icon").trim()),
+    hover: color(style.getPropertyValue("--hover").trim()),
+    foreground: color(style.getPropertyValue("--icon").trim()),
   });
 }
 watch(

@@ -1,7 +1,7 @@
 // Space icons follow Zigzag's icon picker, using emoji throughout: a short
 // grid, or any emoji found by Unicode's name. Copyright 2026 Zigao Wang,
 // Apache-2.0. Names come from Unicode emoji-test.
-import rawEmoji from "./emoji-index.json";
+import rawEmoji from "./emoji-index.json" with { type: "json" };
 
 export interface SpaceEmoji {
   emoji: string;

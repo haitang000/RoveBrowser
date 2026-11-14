@@ -6,7 +6,7 @@ declare global {
   interface Window {
     __windowTest: {
       layout?: Layout;
-      chrome?: { maximize: Rect; viewportWidth: number; background: number[] };
+      chrome?: { maximize: Rect; viewportWidth: number; background: number[]; hover: number[]; foreground: number[] };
       glass: boolean[];
       presented?: { theme?: string; width: number; fonts: string };
       samples: { expected: number; reported: number }[];
@@ -115,6 +115,25 @@ test("native caption geometry keeps three equal buttons flush with the window ed
   }
 });
 
+test("native gradients fill the outer frame and caption ink retains its own alpha", async ({ page }) => {
+  const state = initialState();
+  Object.assign(state.spaces[0]!, { hue: 0.62, brightness: 0.18, hue2: 0.95, brightness2: 0.58, angle: 125 });
+  await nativeShell(page, state);
+  const shell = page.locator('.browser-shell');
+  await expect(shell).toHaveCSS('clip-path', 'none');
+  await expect(shell).toHaveCSS('border-radius', '0px');
+  expect(await shell.evaluate(e => getComputedStyle(e).backgroundImage)).toContain('linear-gradient');
+  await expect(page.locator('.window-controls svg').first()).toHaveCSS('visibility', 'hidden');
+  // Native hover and glyphs are layered over the live gradient, so neither
+  // may arrive precomposited onto the space's single fallback color.
+  await expect.poll(() => page.evaluate(() => window.__windowTest.chrome?.foreground[3])).toBe(158);
+  expect(await page.evaluate(() => window.__windowTest.chrome?.hover[3])).toBe(97);
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+  await expect.poll(() => page.evaluate(() => window.__windowTest.chrome?.foreground[3])).toBe(168);
+  expect(await page.evaluate(() => window.__windowTest.chrome?.hover[3])).toBe(13);
+});
+
 test("restored chrome inset keeps the address field below the resize strip", async ({ page }) => {
   await nativeShell(page, initialState());
   await page.setViewportSize({ width: 1280, height: 820 });
@@ -146,7 +165,7 @@ test("restored chrome inset keeps the address field below the resize strip", asy
   for (const button of buttons) expect(Math.abs(button.iconCenter - addressCenter)).toBeLessThan(1);
   await page.evaluate(() => document.documentElement.style.setProperty("--chrome-inset", "0px"));
   expect(await place(".titlebar")).toMatchObject({ y: 0, height: 32 });
-  expect((await place(".window-controls button"))!.height).toBe(32);
+  expect((await page.locator(".window-controls button").first().boundingBox())!.height).toBe(32);
   expect((await place(".address-field"))!.y).toBeGreaterThanOrEqual(0);
   expect((await place(".address-field"))!.y).toBeLessThan(6);
 });
