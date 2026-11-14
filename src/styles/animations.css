@@ -52,6 +52,56 @@
   opacity: 0;
   transform: translateX(-6px) scale(0.98);
 }
+.page-enter-active,
+.page-leave-active,
+.settings-pane-enter-active,
+.settings-pane-leave-active {
+  transition:
+    opacity var(--motion-standard) var(--ease-out),
+    transform var(--motion-standard) var(--ease-out);
+}
+.page-enter-active:not(.settings-page),
+.settings-pane-enter-active {
+  position: relative;
+  z-index: 1;
+}
+.settings-page.page-enter-active {
+  z-index: 1;
+}
+.page-leave-active,
+.settings-pane-leave-active {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+}
+.page-enter-from,
+.settings-pane-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.page-leave-to,
+.settings-pane-leave-to {
+  opacity: 0;
+}
+.webview-slot[data-page-dir="1"] .page-enter-from,
+.settings-scroll[data-page-dir="1"] .settings-pane-enter-from {
+  transform: translateX(18px);
+}
+.webview-slot[data-page-dir="1"] .page-leave-to,
+.settings-scroll[data-page-dir="1"] .settings-pane-leave-to {
+  opacity: 0;
+  transform: translateX(-14px);
+}
+.webview-slot[data-page-dir="-1"] .page-enter-from,
+.settings-scroll[data-page-dir="-1"] .settings-pane-enter-from {
+  transform: translateX(-18px);
+}
+.webview-slot[data-page-dir="-1"] .page-leave-to,
+.settings-scroll[data-page-dir="-1"] .settings-pane-leave-to {
+  opacity: 0;
+  transform: translateX(14px);
+}
 .loading .tab-picture {
   animation: loading 1s ease-in-out infinite;
 }
@@ -68,7 +118,7 @@
   animation-iteration-count: 1 !important;
   scroll-behavior: auto !important;
 }
-:root[data-reduce-motion=true] :is(.panel-enter-from .command-panel,.panel-leave-to .command-panel,.tab-enter-from,.tab-leave-to) { transform: none; }
+:root[data-reduce-motion=true] :is(.panel-enter-from .command-panel,.panel-leave-to .command-panel,.tab-enter-from,.tab-leave-to,.page-enter-from,.page-leave-to,.settings-pane-enter-from,.settings-pane-leave-to) { transform: none; }
 :root[data-reduce-motion=true] .tab-move { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -82,7 +132,11 @@
   .panel-enter-from .command-panel,
   .panel-leave-to .command-panel,
   .tab-enter-from,
-  .tab-leave-to {
+  .tab-leave-to,
+  .page-enter-from,
+  .page-leave-to,
+  .settings-pane-enter-from,
+  .settings-pane-leave-to {
     transform: none;
   }
   .tab-move {

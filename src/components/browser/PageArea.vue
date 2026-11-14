@@ -13,6 +13,7 @@ import Icon from "../common/Icon.vue";
 import Peek from "./Peek.vue";
 import SettingsPage from "./SettingsPage.vue";
 import { isSettingsUrl } from "../../lib/settings";
+import { pageDirection, type PageDirection } from "../../lib/page-motion";
 const b = useBrowser(),
   primary = ref<HTMLElement>(),
   secondary = ref<HTMLElement>(),
@@ -36,6 +37,34 @@ watch([() => b.active?.id, () => b.active?.splitWith], () => {
   finishResize?.();
   resizing.value = false;
 });
+const primaryDir = ref<PageDirection>(0);
+const secondaryDir = ref<PageDirection>(0);
+const spaceTabs = () => b.state.tabs.filter((tab) => tab.spaceId === b.space.id);
+function moveDirection(
+  next: string,
+  prev: string | undefined,
+  tabs: { id: string }[],
+) {
+  const [space, id, url] = next.split("\u0000");
+  const [prevSpace, prevId, prevUrl] = (prev ?? next).split("\u0000");
+  if (id !== prevId || space !== prevSpace)
+    return pageDirection(tabs, prevId, id, space !== prevSpace);
+  return url === prevUrl ? undefined : 0;
+}
+watch(
+  () => [b.space.id, b.active?.id ?? "", b.active?.url ?? ""].join("\u0000"),
+  (next, prev) => {
+    const dir = moveDirection(next, prev, spaceTabs());
+    if (dir !== undefined) primaryDir.value = dir;
+  },
+);
+watch(
+  () => [b.space.id, other.value?.id ?? "", other.value?.url ?? ""].join("\u0000"),
+  (next, prev) => {
+    const dir = moveDirection(next, prev, spaceTabs());
+    if (dir !== undefined) secondaryDir.value = dir;
+  },
+);
 function layout() {
   if (!primary.value || !container.value) return;
   const card = container.value.getBoundingClientRect();
@@ -154,10 +183,12 @@ function split(e: DragEvent) {
           <Icon name="pin" :size="13" />
         </button>
       </div>
-      <div ref="primary" class="webview-slot">
-        <SettingsPage v-if="b.active && isSettingsUrl(b.active.url)" :key="b.active.id" :tab-id="b.active.id" :url="b.active.url" />
+      <div ref="primary" class="webview-slot" :data-page-dir="primaryDir">
+        <Transition name="page">
+        <SettingsPage v-if="b.active && isSettingsUrl(b.active.url)" :key="`settings:${b.active.id}`" :tab-id="b.active.id" :url="b.active.url" />
         <div
           v-else-if="b.active?.url === 'era://newtab' || !b.active"
+          :key="`newtab:${b.active?.id || 'empty'}`"
           class="new-tab-page"
         >
           <div class="new-tab-content">
@@ -173,12 +204,13 @@ function split(e: DragEvent) {
             ><span v-if="b.shortcutLabel('desk')"><kbd>{{ b.shortcutLabel('desk') }}</kbd> All tabs</span>
           </div>
         </div>
-        <div v-else-if="!b.native" class="preview-page">
+        <div v-else-if="!b.native" :key="`preview:${b.active.id}:${b.active.url}`" class="preview-page">
           <Icon name="globe" :size="28" />
           <h2>{{ b.active.title }}</h2>
           <p>在 Windows 应用中打开真实网页</p>
           <small>{{ b.active.url }}</small>
         </div>
+        </Transition>
       </div>
     </div>
     <template v-if="other"
@@ -205,16 +237,19 @@ function split(e: DragEvent) {
             <Icon name="close" :size="13" />
           </button>
         </div>
-        <div ref="secondary" class="webview-slot">
-          <SettingsPage v-if="isSettingsUrl(other.url)" :key="other.id" :tab-id="other.id" :url="other.url" />
+        <div ref="secondary" class="webview-slot" :data-page-dir="secondaryDir">
+          <Transition name="page">
+          <SettingsPage v-if="isSettingsUrl(other.url)" :key="`settings:${other.id}`" :tab-id="other.id" :url="other.url" />
           <div
             v-else-if="other.url === 'era://newtab' || !b.native"
+            :key="`preview:${other.id}:${other.url}`"
             class="preview-page"
           >
             <Icon name="globe" :size="28" />
             <h2>{{ other.title }}</h2>
             <small>{{ other.url }}</small>
           </div>
+          </Transition>
         </div>
       </div></template
     >

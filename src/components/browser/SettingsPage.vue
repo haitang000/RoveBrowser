@@ -22,6 +22,7 @@ import SpaceGlyph from "../common/SpaceGlyph.vue";
 import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 import SpaceLookEditor from "./SpaceLookEditor.vue";
 import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } from "../../lib/space-look";
+import { paneDirection } from "../../lib/page-motion";
 const props = defineProps<{ tabId: string; url: string }>();
 const b = useBrowser(),
   query = ref(""),
@@ -69,6 +70,15 @@ function trapFocus(event: KeyboardEvent) {
   }
 }
 const pane = computed(() => settingsPane(props.url));
+const paneDir = ref<0 | 1 | -1>(0);
+watch(pane, (next, prev) => {
+  paneDir.value = paneDirection(
+    SETTINGS_PANES.map((item) => item.id),
+    prev,
+    next,
+  );
+  if (scroll.value) scroll.value.scrollTop = 0;
+});
 const searching = computed(() => !!query.value.trim());
 const words = computed(() =>
   query.value
@@ -540,8 +550,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               @keydown.esc.stop="query = ''"
           /></label>
         </header>
-        <div ref="scroll" class="settings-scroll">
-          <div class="settings-content">
+        <div ref="scroll" class="settings-scroll" :data-page-dir="paneDir">
+          <Transition name="settings-pane">
+          <div :key="pane" class="settings-content">
             <p
               v-if="notice || b.dataStatus"
               class="settings-feedback"
@@ -754,6 +765,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               没有找到与“{{ query.trim() }}”匹配的设置。
             </p>
           </div>
+          </Transition>
         </div>
       </div>
     </div>

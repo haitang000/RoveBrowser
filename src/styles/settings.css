@@ -105,6 +105,7 @@
   outline-offset: 2px;
 }
 .settings-scroll {
+  position: relative;
   flex: 1;
   overflow: auto;
   overscroll-behavior: contain;
