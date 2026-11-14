@@ -66,12 +66,7 @@ export function isSeeThrough(value: number | null | undefined): boolean {
   return seeThrough(value) > 0.005;
 }
 
-/** How much of the space color covers the blurred desktop. Clear thins further than frosted. */
-export function coverage(value: number | null | undefined, clear: boolean): number {
-  return 1 - (clear ? 0.75 : 0.5) * seeThrough(value);
-}
-
-/** Nil means clear. Unavailable clear glass, including reduced transparency, stays frosted. */
-export function usesClearGlass(clearGlass: boolean | null | undefined, allowed: boolean): boolean {
-  return allowed && clearGlass !== false;
+/** The single clear appearance keeps a thin color wash over the softened backdrop. */
+export function coverage(value: number | null | undefined): number {
+  return 1 - 0.75 * seeThrough(value);
 }

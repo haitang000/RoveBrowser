@@ -1284,22 +1284,6 @@ hr {
   padding: 0;
   accent-color: var(--ink);
 }
-.glass-switch {
-  display: flex;
-  gap: 6px;
-  margin-top: 12px;
-}
-.glass-switch button {
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 6px;
-  border: 1px solid var(--edge);
-  background: var(--control);
-}
-.glass-switch button[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--surface);
-}
 .settings-note {
   font-size: 11px;
   color: var(--tertiary);

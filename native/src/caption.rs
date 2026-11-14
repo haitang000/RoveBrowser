@@ -1,20 +1,16 @@
 //! Native resize borders and caption buttons, including the Windows 11 Snap flyout.
 //! WebView2 owns descendant HWNDs on other threads. Instead of subclassing those
 //! windows, remove the borders/buttons from the UI HWND region and draw them in an
-//! input-transparent child. The root receives WM_NCHITTEST/HTMAXBUTTON and the
+//! input-transparent owned surface. The root receives WM_NCHITTEST/HTMAXBUTTON and the
 //! system supplies its own Snap menu. No synthetic layout flyout.
 use crate::model::Rect;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use windows::{
     core::{w, Error, Result},
     Win32::{
-        Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
         Graphics::Gdi::*,
         UI::{
-            Controls::{
-                BeginBufferedPaint, BufferedPaintInit, BufferedPaintUnInit, EndBufferedPaint,
-                BPBF_COMPATIBLEBITMAP,
-            },
             Input::KeyboardAndMouse::{
                 ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TME_NONCLIENT,
                 TRACKMOUSEEVENT,
@@ -33,22 +29,6 @@ const RESIZE_CORNER: f64 = 12.;
 // while tracking caption hover even when the window has no standard frame.
 const WM_NCUAHDRAWCAPTION: u32 = 0x00ae;
 const WM_NCUAHDRAWFRAME: u32 = 0x00af;
-struct BufferedPainting;
-impl BufferedPainting {
-    fn new() -> Result<Self> {
-        unsafe {
-            BufferedPaintInit()?;
-        }
-        Ok(Self)
-    }
-}
-impl Drop for BufferedPainting {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = BufferedPaintUnInit();
-        }
-    }
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Button {
     Minimize,
@@ -107,12 +87,11 @@ struct Anchor {
 }
 #[derive(Clone, Copy)]
 struct Palette {
-    background: [u8; 3],
-    hover: [u8; 3],
-    foreground: [u8; 3],
+    background: [u8; 4],
+    hover: [u8; 4],
+    foreground: [u8; 4],
 }
 struct State {
-    _painting: BufferedPainting,
     shadow: crate::shadow::Shadow,
     surface: Cell<HWND>,
     rect: Cell<RECT>,
@@ -122,6 +101,9 @@ struct State {
     pressed: Cell<Option<Button>>,
     scale: Cell<f64>,
     cut: Cell<Option<[i32; 7]>>,
+    layer: RefCell<Option<CaptionBitmap>>,
+    #[cfg(test)]
+    paint_count: Cell<usize>,
 }
 pub struct Caption {
     root: HWND,
@@ -191,36 +173,39 @@ impl Drop for Region {
         }
     }
 }
-fn color(c: [u8; 3]) -> COLORREF {
+fn color(c: [u8; 4]) -> COLORREF {
     COLORREF(c[0] as u32 | ((c[1] as u32) << 8) | ((c[2] as u32) << 16))
 }
 impl Caption {
     pub fn new(root: HWND, ui: HWND) -> Result<Self> {
         let state = Box::new(State {
-            _painting: BufferedPainting::new()?,
             shadow: crate::shadow::Shadow::new(root)?,
             surface: Cell::new(HWND::default()),
             rect: Cell::new(RECT::default()),
             anchor: Cell::new(None),
             palette: Cell::new(Palette {
-                background: [212, 228, 251],
-                hover: [228, 239, 253],
-                foreground: [50, 55, 62],
+                background: [212, 228, 251, 255],
+                hover: [228, 239, 253, 255],
+                foreground: [50, 55, 62, 255],
             }),
             hot: Cell::new(None),
             pressed: Cell::new(None),
             scale: Cell::new(1.),
             cut: Cell::new(None),
+            layer: RefCell::new(None),
+            #[cfg(test)]
+            paint_count: Cell::new(0),
         });
-        // This same-thread paint surface covers only the borders/buttons. Its
+        // This same-thread owned surface covers only the borders/buttons. Its
         // HTTRANSPARENT result lets the root receive real non-client input before
         // WebView2 can capture the pointer; no asynchronous drag IPC is needed.
+        // A top-level layered surface remains visible over a non-redirected root.
         let surface = unsafe {
             CreateWindowExW(
-                WS_EX_NOACTIVATE,
+                WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
                 w!("STATIC"),
                 w!(""),
-                WS_CHILD,
+                WS_POPUP,
                 0,
                 0,
                 0,
@@ -287,9 +272,9 @@ impl Caption {
         &self,
         rect: Rect,
         viewport_width: f64,
-        background: [u8; 3],
-        hover: [u8; 3],
-        foreground: [u8; 3],
+        background: [u8; 4],
+        hover: [u8; 4],
+        foreground: [u8; 4],
         scale: f64,
     ) -> Result<()> {
         if !rect.valid()
@@ -373,21 +358,37 @@ impl Caption {
                 {
                     return Err(Error::from_thread());
                 }
+                let outline = Region::new(client)?;
+                if GetWindowRgn(self.root, outline.0).0 != 0 {
+                    if CombineRgn(Some(surface.0), Some(surface.0), Some(outline.0), RGN_AND).0 == 0
+                    {
+                        return Err(Error::from_thread());
+                    }
+                }
             }
             interior.install(self.ui)?;
             surface.install(self.state.surface.get())?;
             self.state.cut.set(Some(key));
         }
         unsafe {
+            let mut window_bounds = RECT::default();
+            GetWindowRect(self.root, &mut window_bounds)?;
             SetWindowPos(
                 self.state.surface.get(),
-                Some(HWND_TOP),
-                0,
-                0,
+                None,
+                window_bounds.left,
+                window_bounds.top,
                 client.right,
                 client.bottom,
-                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                SWP_NOACTIVATE | SWP_NOZORDER,
             )?;
+            paint_layered(
+                self.state.surface.get(),
+                client,
+                &self.state,
+                IsZoomed(self.root).as_bool(),
+            )?;
+            position_surface(self.root, &self.state);
             let _ = RedrawWindow(
                 Some(self.state.surface.get()),
                 None,
@@ -570,6 +571,7 @@ unsafe extern "system" fn procedure(
         WM_WINDOWPOSCHANGED | WM_SHOWWINDOW if hwnd != s.surface.get() => {
             let result = DefSubclassProc(hwnd, msg, wparam, lparam);
             let _ = s.shadow.refresh(s.scale.get(), crate::host::WINDOW_RADIUS);
+            position_surface(hwnd, s);
             return result;
         }
         WM_PAINT => {
@@ -577,16 +579,19 @@ unsafe extern "system" fn procedure(
                 return DefSubclassProc(hwnd, msg, wparam, lparam);
             }
             let mut paint = PAINTSTRUCT::default();
-            let dc = BeginPaint(hwnd, &mut paint);
+            let _ = BeginPaint(hwnd, &mut paint);
             let mut r = RECT::default();
             let _ = GetClientRect(hwnd, &mut r);
-            paint_buffered(
-                dc,
-                paint.rcPaint,
+            // A non-redirected root has no GDI backing store. Present this
+            // owned surface explicitly, preserving the shell's alpha and hits.
+            if let Err(error) = paint_layered(
+                hwnd,
                 r,
                 s,
-                IsZoomed(GetAncestor(hwnd, GA_ROOT)).as_bool(),
-            );
+                GetParent(hwnd).is_ok_and(|root| IsZoomed(root).as_bool()),
+            ) {
+                eprintln!("Rove caption: {error}");
+            }
             let _ = EndPaint(hwnd, &paint);
             return LRESULT(0);
         }
@@ -605,24 +610,163 @@ unsafe extern "system" fn procedure(
 unsafe fn set_hot(s: &State, hot: Option<Button>) {
     let previous = s.hot.replace(hot);
     if previous != hot {
-        for button in [previous, hot].into_iter().flatten() {
-            let rect = button.rect(s.rect.get());
-            let _ = InvalidateRect(Some(s.surface.get()), Some(&rect), false);
+        let mut bounds = RECT::default();
+        if GetClientRect(s.surface.get(), &mut bounds).is_ok() {
+            let maximized = GetParent(s.surface.get()).is_ok_and(|root| IsZoomed(root).as_bool());
+            if let Err(error) = paint_layered(s.surface.get(), bounds, s, maximized) {
+                eprintln!("Rove caption: {error}");
+            }
         }
     }
 }
-unsafe fn paint_buffered(dc: HDC, dirty: RECT, bounds: RECT, s: &State, maximized: bool) {
-    if dirty.right <= dirty.left || dirty.bottom <= dirty.top {
-        return;
+// GDI writes RGB without usable alpha. Keep a reusable top-down DIB for the
+// native borders/buttons, then supply premultiplied pixels to the compositor.
+struct CaptionBitmap {
+    dc: HDC,
+    bitmap: HBITMAP,
+    previous: HGDIOBJ,
+    bits: *mut u32,
+    size: SIZE,
+}
+impl CaptionBitmap {
+    unsafe fn new(size: SIZE) -> Result<Self> {
+        let dc = CreateCompatibleDC(None);
+        if dc.0.is_null() {
+            return Err(Error::from_thread());
+        }
+        let mut result = Self {
+            dc,
+            bitmap: HBITMAP::default(),
+            previous: HGDIOBJ::default(),
+            bits: std::ptr::null_mut(),
+            size,
+        };
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: size.cx,
+                biHeight: -size.cy,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits = std::ptr::null_mut();
+        result.bitmap = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0)?;
+        result.previous = SelectObject(dc, result.bitmap.into());
+        result.bits = bits.cast();
+        Ok(result)
     }
-    let mut buffer_dc = HDC::default();
-    let buffer = BeginBufferedPaint(dc, &dirty, BPBF_COMPATIBLEBITMAP, None, &mut buffer_dc);
-    if buffer == 0 {
-        paint_surface(dc, bounds, s, maximized);
+}
+impl Drop for CaptionBitmap {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.bitmap.0.is_null() {
+                let _ = SelectObject(self.dc, self.previous);
+                let _ = DeleteObject(self.bitmap.into());
+            }
+            let _ = DeleteDC(self.dc);
+        }
+    }
+}
+fn premultiply(pixel: u32, palette: Palette) -> u32 {
+    let rgb = pixel & 0x00ff_ffff;
+    let alpha = [palette.background, palette.hover, palette.foreground]
+        .into_iter()
+        .find(|c| rgb == ((c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32))
+        .map_or(255, |c| c[3] as u32);
+    let channel = |shift: u32| (((rgb >> shift) & 255u32) * alpha + 127) / 255;
+    alpha << 24 | channel(16) << 16 | channel(8) << 8 | channel(0)
+}
+unsafe fn paint_layered(hwnd: HWND, bounds: RECT, s: &State, maximized: bool) -> Result<()> {
+    let size = SIZE {
+        cx: bounds.right,
+        cy: bounds.bottom,
+    };
+    if size.cx <= 0 || size.cy <= 0 {
+        return Ok(());
+    }
+    let mut layer = s.layer.borrow_mut();
+    if layer
+        .as_ref()
+        .is_none_or(|b| b.size.cx != size.cx || b.size.cy != size.cy)
+    {
+        *layer = Some(CaptionBitmap::new(size)?);
+    }
+    let bitmap = layer.as_ref().unwrap();
+    paint_surface(bitmap.dc, bounds, s, maximized);
+    let _ = GdiFlush();
+    let pixels = std::slice::from_raw_parts_mut(bitmap.bits, size.cx as usize * size.cy as usize);
+    let border = s.cut.get().map_or(0, |key| key[6]);
+    let buttons = button_bounds(s.rect.get());
+    let opaque_close =
+        (s.hot.get() == Some(Button::Close)).then(|| Button::Close.rect(s.rect.get()));
+    let palette = s.palette.get();
+    // Only the perimeter and caption buttons belong to this HWND's region.
+    // Leave interior pixels at alpha zero; hover work scales with the perimeter.
+    for y in 0..size.cy {
+        let mut ranges = if y < border || y >= size.cy - border {
+            [0..size.cx, 0..0, 0..0]
+        } else {
+            [0..border, size.cx - border..size.cx, 0..0]
+        };
+        if y >= border && y < size.cy - border && y >= buttons.top && y < buttons.bottom {
+            // Exclude the two edge strips already covered above.
+            ranges[2] = buttons.left.max(border)..buttons.right.min(size.cx - border);
+        }
+        for x in ranges.into_iter().flatten() {
+            let pixel = &mut pixels[(y * size.cx + x) as usize];
+            *pixel = if opaque_close.is_some_and(|r| contains(r, POINT { x, y })) {
+                0xff00_0000 | (*pixel & 0x00ff_ffff)
+            } else {
+                premultiply(*pixel, palette)
+            };
+        }
+    }
+    let mut root_bounds = RECT::default();
+    GetWindowRect(GetParent(hwnd)?, &mut root_bounds)?;
+    let position = POINT {
+        x: root_bounds.left,
+        y: root_bounds.top,
+    };
+    UpdateLayeredWindow(
+        hwnd,
+        None,
+        Some(&position),
+        Some(&size),
+        Some(bitmap.dc),
+        Some(&POINT::default()),
+        COLORREF(0),
+        Some(&BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        }),
+        ULW_ALPHA,
+    )?;
+    #[cfg(test)]
+    s.paint_count.set(s.paint_count.get() + 1);
+    Ok(())
+}
+unsafe fn position_surface(root: HWND, s: &State) {
+    if !IsWindowVisible(root).as_bool() || IsIconic(root).as_bool() {
+        let _ = ShowWindow(s.surface.get(), SW_HIDE);
     } else {
-        // Present background and glyphs together, never a cleared intermediate frame.
-        paint_surface(buffer_dc, bounds, s, maximized);
-        let _ = EndBufferedPaint(buffer, true);
+        let mut bounds = RECT::default();
+        if GetWindowRect(root, &mut bounds).is_ok() {
+            let _ = SetWindowPos(
+                s.surface.get(),
+                None,
+                bounds.left,
+                bounds.top,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
+        }
     }
 }
 unsafe fn paint_surface(dc: HDC, bounds: RECT, s: &State, maximized: bool) {
@@ -638,7 +782,7 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
     let p = s.palette.get();
     let hot = s.hot.get() == Some(button);
     let background = if hot && button == Button::Close {
-        [196, 43, 28]
+        [196, 43, 28, 255]
     } else if hot {
         p.hover
     } else {
@@ -651,7 +795,7 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
         PS_SOLID,
         (s.scale.get().round() as i32).max(1),
         color(if hot && button == Button::Close {
-            [255; 3]
+            [255; 4]
         } else {
             p.foreground
         }),
@@ -865,9 +1009,9 @@ mod tests {
                         ..Rect::default()
                     },
                     800.,
-                    [212, 228, 251],
-                    [228, 239, 253],
-                    [40, 40, 40],
+                    [212, 228, 251, 255],
+                    [228, 239, 253, 255],
+                    [40, 40, 40, 255],
                     1.,
                 )
                 .unwrap();
@@ -997,50 +1141,12 @@ mod tests {
             assert!(!PtInRegion(region, 1, 300).as_bool());
             let _ = DeleteObject(region.into());
             assert_stable_hover(&caption);
+            assert_translucent_pixels(&caption);
         }
     }
 
     unsafe fn assert_stable_hover(caption: &Caption) {
-        unsafe extern "system" fn count_paints(
-            hwnd: HWND,
-            msg: u32,
-            wparam: WPARAM,
-            lparam: LPARAM,
-            _: usize,
-            data: usize,
-        ) -> LRESULT {
-            if msg == WM_PAINT {
-                let paints = &*(data as *const Cell<usize>);
-                paints.set(paints.get() + 1);
-            }
-            DefSubclassProc(hwnd, msg, wparam, lparam)
-        }
-        struct PaintCounter {
-            hwnd: HWND,
-            paints: Box<Cell<usize>>,
-        }
-        impl Drop for PaintCounter {
-            fn drop(&mut self) {
-                unsafe {
-                    let _ = RemoveWindowSubclass(self.hwnd, Some(count_paints), SUBCLASS + 2);
-                }
-            }
-        }
-        let counter = PaintCounter {
-            hwnd: caption.state.surface.get(),
-            paints: Box::new(Cell::new(0)),
-        };
-        assert!(SetWindowSubclass(
-            counter.hwnd,
-            Some(count_paints),
-            SUBCLASS + 2,
-            (&*counter.paints as *const Cell<usize>) as usize
-        )
-        .as_bool());
-        // A visible off-screen HWND exercises WM_PAINT dispatch, unlike a
-        // hidden test window where USER32 can silently discard redraw requests.
-        let _ = ShowWindow(caption.root, SW_SHOWNOACTIVATE);
-        let _ = UpdateWindow(counter.hwnd);
+        let counter = &caption.state.paint_count;
         for button in Button::ALL {
             SendMessageW(
                 caption.root,
@@ -1048,8 +1154,7 @@ mod tests {
                 Some(WPARAM(button.hit() as usize)),
                 None,
             );
-            let _ = UpdateWindow(counter.hwnd);
-            let paints = counter.paints.get();
+            let paints = counter.get();
             assert!(paints > 0);
             for _ in 0..100 {
                 SendMessageW(
@@ -1060,20 +1165,87 @@ mod tests {
                 );
             }
             assert_eq!(
-                counter.paints.get(),
+                counter.get(),
                 paints,
                 "stationary hover must not force repaint: {button:?}"
             );
-            assert!(!GetUpdateRect(counter.hwnd, None, false).as_bool());
             // Leaving repaints once to clear hover, then stays idle as well.
             SendMessageW(caption.root, WM_NCMOUSELEAVE, None, None);
-            let _ = UpdateWindow(counter.hwnd);
-            assert!(counter.paints.get() > paints);
-            let paints = counter.paints.get();
+            assert!(counter.get() > paints);
+            let paints = counter.get();
             SendMessageW(caption.root, WM_NCMOUSELEAVE, None, None);
-            let _ = UpdateWindow(counter.hwnd);
-            assert_eq!(counter.paints.get(), paints);
+            assert_eq!(counter.get(), paints);
         }
+    }
+
+    unsafe fn assert_translucent_pixels(caption: &Caption) {
+        let s = &caption.state;
+        for (alpha, expected) in [(64, 0x4032190a), (128, 0x80643214), (255, 0xffc86428)] {
+            s.palette.set(Palette {
+                background: [200, 100, 40, alpha],
+                hover: [100, 200, 100, 128],
+                foreground: [40, 40, 40, 255],
+            });
+            caption.refresh(2.).unwrap();
+            let read = |x: i32, y: i32| {
+                let layer = s.layer.borrow();
+                let bitmap = layer.as_ref().unwrap();
+                *bitmap.bits.add((y * bitmap.size.cx + x) as usize)
+            };
+            let r = Button::Maximize.rect(s.rect.get());
+            assert_eq!(read((r.left + r.right) / 2, 1), expected);
+            assert_eq!(read(1, 100), expected);
+            // Changing hover reuses the backing bitmap and preserves per-pixel
+            // alpha, while the close affordance stays fully opaque red.
+            let bits = s.layer.borrow().as_ref().unwrap().bits;
+            set_hot(s, Some(Button::Maximize));
+            assert_eq!(read((r.left + r.right) / 2, 1), 0x80326432);
+            assert_eq!(s.layer.borrow().as_ref().unwrap().bits, bits);
+            set_hot(s, Some(Button::Close));
+            let close = Button::Close.rect(s.rect.get());
+            assert_eq!(read(close.right - 1, 1), 0xffc42b1c);
+            set_hot(s, None);
+        }
+        // A white glass tint must not thin the close button's white glyph.
+        s.palette.set(Palette {
+            background: [255, 255, 255, 64],
+            hover: [255, 255, 255, 128],
+            foreground: [40, 40, 40, 255],
+        });
+        set_hot(s, Some(Button::Close));
+        let close = Button::Close.rect(s.rect.get());
+        let side = (7.5 * s.scale.get()).round() as i32;
+        let x = (close.left + close.right - side) / 2;
+        let y = (close.top + close.bottom - side) / 2;
+        {
+            let layer = s.layer.borrow();
+            let bitmap = layer.as_ref().unwrap();
+            assert_eq!(
+                *bitmap.bits.add((y * bitmap.size.cx + x) as usize),
+                0xffff_ffff
+            );
+        }
+        set_hot(s, None);
+        // The owned surface follows moves without relying on a DOM resize.
+        SetWindowPos(
+            caption.root,
+            None,
+            -1200,
+            120,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
+        )
+        .unwrap();
+        let _ = ShowWindow(caption.root, SW_SHOWNOACTIVATE);
+        let mut root = RECT::default();
+        let mut surface = RECT::default();
+        GetWindowRect(caption.root, &mut root).unwrap();
+        GetWindowRect(s.surface.get(), &mut surface).unwrap();
+        assert_eq!(surface, root);
+        assert!(IsWindowVisible(s.surface.get()).as_bool());
+        let _ = ShowWindow(caption.root, SW_HIDE);
+        assert!(!IsWindowVisible(s.surface.get()).as_bool());
     }
 
     // Render through the actual native surface's region. The regression was
@@ -1115,12 +1287,12 @@ mod tests {
             } else {
                 SendMessageW(caption.root, WM_NCMOUSELEAVE, None, None);
             }
-            paint_buffered(dc, button_bounds(s.rect.get()), bounds, s, false);
+            paint_surface(dc, bounds, s, false);
             for button in Button::ALL {
                 let r = button.rect(s.rect.get());
                 let expected = color(if hot == Some(button) {
                     if button == Button::Close {
-                        [196, 43, 28]
+                        [196, 43, 28, 255]
                     } else {
                         s.palette.get().hover
                     }

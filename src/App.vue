@@ -16,17 +16,17 @@ import OnboardingPage from "./components/browser/OnboardingPage.vue";
 import Icon from "./components/common/Icon.vue";
 import { browserKey } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
-import { coverage, isSeeThrough, usesClearGlass } from "./lib/page-frame";
+import { coverage, isSeeThrough } from "./lib/page-frame";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
 const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
 const transparencyReduced = ref(reducedTransparency.matches);
-const glassAllowed = computed(() => !transparencyReduced.value && !b.glassBlocked);
+const glassAllowed = computed(() => !transparencyReduced.value);
 const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(b.space?.translucency) && glassAllowed.value);
 watch(() => b.onboardingOpen, (open) => { document.documentElement.dataset.onboarding = String(open); }, { immediate: true, flush: "sync" });
 const shellStyle = computed(() => ({
   ...(glassActive.value
-    ? { "--frame-coverage": String(coverage(b.space?.translucency, usesClearGlass(b.space?.clearGlass, true))) }
+    ? { "--frame-coverage": String(coverage(b.space?.translucency)) }
     : {}),
 }));
 let frameAnimation: Animation | undefined;

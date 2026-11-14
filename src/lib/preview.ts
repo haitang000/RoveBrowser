@@ -257,7 +257,6 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         name: String(c.name).slice(0, 40) || "Untitled",
         color: (c.color as any) || "sage",
         translucency: Number(c.translucency) > .005 ? Math.min(1, Number(c.translucency)) : undefined,
-        clearGlass: c.clearGlass === false ? false : undefined,
       });
       if (!c.background) return reduce(s, { type: "space", id });
       break;
@@ -269,7 +268,6 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         space.color = c.color as any;
         const amount = Number(c.translucency);
         space.translucency = amount > 0.005 ? Math.min(1, amount) : undefined;
-        space.clearGlass = c.clearGlass === false ? false : undefined;
       }
       break;
     }

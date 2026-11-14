@@ -52,9 +52,6 @@ pub struct Space {
     /// How much of the desktop shows through the frame, 0 or absent when solid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translucency: Option<f64>,
-    /// False selects frosted glass. Absent or true selects clear glass.
-    #[serde(default, rename = "clearGlass", skip_serializing_if = "Option::is_none")]
-    pub clear_glass: Option<bool>,
     /// The tab this space was showing when the user left it. Switching back
     /// restores it instead of the space's first tab; absent in an older session.
     #[serde(default, rename = "activeTab", skip_serializing_if = "Option::is_none")]
@@ -212,9 +209,9 @@ pub enum Command {
         maximize: Rect,
         #[serde(rename = "viewportWidth")]
         viewport_width: f64,
-        background: [u8; 3],
-        hover: [u8; 3],
-        foreground: [u8; 3],
+        background: [u8; 4],
+        hover: [u8; 4],
+        foreground: [u8; 4],
     },
     #[serde(rename = "new")]
     New {
@@ -281,7 +278,7 @@ pub enum Command {
     #[serde(rename = "space")]
     SwitchSpace { id: String },
     #[serde(rename = "spaceCreate")]
-    CreateSpace { name: String, color: String, #[serde(default)] background: bool, #[serde(default)] translucency: f64, #[serde(default, rename = "clearGlass")] clear_glass: Option<bool> },
+    CreateSpace { name: String, color: String, #[serde(default)] background: bool, #[serde(default)] translucency: f64 },
     #[serde(rename = "spaceUpdate")]
     UpdateSpace {
         id: String,
@@ -289,9 +286,6 @@ pub enum Command {
         color: String,
         #[serde(default)]
         translucency: f64,
-        #[serde(default)]
-        #[serde(rename = "clearGlass")]
-        clear_glass: Option<bool>,
     },
     #[serde(rename = "borderless")]
     Borderless,
@@ -535,7 +529,6 @@ impl Default for State {
                 name: n.to_string(),
                 color: c.to_string(),
                 translucency: None,
-                clear_glass: None,
                 active_tab: None,
             })
             .collect(),
@@ -1067,7 +1060,7 @@ impl State {
                     self.enter_space(id)?;
                 }
             }
-            Command::CreateSpace { name, color, background, translucency, clear_glass } => {
+            Command::CreateSpace { name, color, background, translucency } => {
                 if name.trim().is_empty() { return Err("请输入工作区名称".into()); }
                 if !valid_color(color) {
                     return Err("未知工作区颜色".into());
@@ -1081,7 +1074,6 @@ impl State {
                     name: name.trim().chars().take(40).collect(),
                     color: color.clone(),
                     translucency: (0.005..=1.0).contains(translucency).then_some(*translucency),
-                    clear_glass: (*clear_glass == Some(false)).then_some(false),
                     active_tab: None,
                 });
                 if !background { self.active_space = id; self.new_tab("")?; }
@@ -1091,7 +1083,6 @@ impl State {
                 name,
                 color,
                 translucency,
-                clear_glass,
             } => {
                 if !valid_color(color) {
                     return Err("未知工作区颜色".into());
@@ -1102,7 +1093,6 @@ impl State {
                     }
                     s.color = color.clone();
                     s.translucency = (0.005..=1.0).contains(translucency).then_some(*translucency);
-                    s.clear_glass = (*clear_glass == Some(false)).then_some(false);
                 }
             }
             Command::Borderless => self.borderless = !self.borderless,
@@ -1505,12 +1495,12 @@ mod tests {
         assert!(state.borderless);
         state.borderless = false;
         state.spaces[0].translucency = Some(0.7);
-        state.spaces[0].clear_glass = Some(false);
-        let json = serde_json::to_value(&state).unwrap();
+        let mut json = serde_json::to_value(&state).unwrap();
+        json["spaces"][0]["clearGlass"] = serde_json::json!(false);
         let back: State = serde_json::from_value(json.clone()).unwrap();
         assert!(!back.borderless);
         assert_eq!(back.spaces[0].translucency, Some(0.7));
-        assert_eq!(back.spaces[0].clear_glass, Some(false));
+        assert!(serde_json::to_value(&back).unwrap()["spaces"][0].get("clearGlass").is_none());
         let mut legacy = json;
         legacy.as_object_mut().unwrap().remove("borderless");
         let restored: State = serde_json::from_value(legacy).unwrap();
@@ -1523,10 +1513,8 @@ mod tests {
                 name: state.spaces[0].name.clone(),
                 color: state.spaces[0].color.clone(),
                 translucency: 0.0,
-                clear_glass: None,
             })
             .unwrap();
         assert_eq!(state.spaces[0].translucency, None);
-        assert_eq!(state.spaces[0].clear_glass, None);
     }
 }

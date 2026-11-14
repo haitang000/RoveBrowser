@@ -7,21 +7,22 @@ import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 const b = useBrowser();
 const maximize = ref<HTMLButtonElement>();
 let observer: ResizeObserver;
+let paletteObserver: MutationObserver;
 function report() {
   if (!b.native || !maximize.value) return;
-  const r = maximize.value.getBoundingClientRect(),
-    style = getComputedStyle(document.documentElement);
+  const shell = maximize.value.closest('.browser-shell')!;
+  const r = maximize.value.getBoundingClientRect(), style = getComputedStyle(shell);
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
   const context = canvas.getContext("2d")!;
-  const frame = style.getPropertyValue("--frame").trim();
+  const frame = shell.classList.contains('glass') ? style.backgroundColor : style.getPropertyValue('--frame').trim();
   const color = (...fills: string[]) => {
     context.clearRect(0, 0, 1, 1);
     for (const fill of fills) {
       context.fillStyle = fill;
       context.fillRect(0, 0, 1, 1);
     }
-    return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    return [...context.getImageData(0, 0, 1, 1).data];
   };
   b.send({
     type: "windowChrome",
@@ -33,7 +34,7 @@ function report() {
   });
 }
 watch(
-    () => [b.state.theme, b.space.color, b.space.translucency, b.space.clearGlass, b.onboardingOpen],
+    () => [b.state.theme, b.space.color, b.space.translucency, b.onboardingOpen],
   async () => {
     await nextTick();
     report();
@@ -42,11 +43,15 @@ watch(
 onMounted(() => {
   observer = new ResizeObserver(report);
   if (maximize.value) observer.observe(maximize.value);
+  const shell = maximize.value?.closest('.browser-shell');
+  paletteObserver = new MutationObserver(report);
+  if (shell) paletteObserver.observe(shell, { attributes: true, attributeFilter: ['class', 'style'] });
   window.addEventListener("resize", report);
   report();
 });
 onBeforeUnmount(() => {
   observer?.disconnect();
+  paletteObserver?.disconnect();
   window.removeEventListener("resize", report);
 });
 </script>

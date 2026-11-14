@@ -6,7 +6,6 @@ import {
   pageArea,
   pageRadii,
   splitGap,
-  usesClearGlass,
 } from "../src/lib/page-frame";
 
 const frame = {
@@ -54,25 +53,18 @@ describe("page frame from BrowserRootView", () => {
   });
 });
 
-describe("glass coverage from SpaceInfo", () => {
+describe("clear frame coverage", () => {
   it("stays solid until see-through is perceptible", () => {
     expect(isSeeThrough(0)).toBe(false);
     expect(isSeeThrough(0.005)).toBe(false);
     expect(isSeeThrough(0.006)).toBe(true);
-    expect(coverage(0, true)).toBe(1);
+    expect(coverage(0)).toBe(1);
   });
-
-  it("thins the wash to a half for frosted glass and further for clear glass", () => {
-    expect(coverage(1, false)).toBeCloseTo(0.5);
-    expect(coverage(1, true)).toBeCloseTo(0.25);
-    expect(coverage(0.5, false)).toBeCloseTo(0.75);
-    expect(coverage(0.5, true)).toBeCloseTo(0.625);
-    expect(coverage(2, false)).toBeCloseTo(0.5);
-  });
-
-  it("treats an unset glass style as clear, and frosted when clear glass is unavailable", () => {
-    expect(usesClearGlass(undefined, true)).toBe(true);
-    expect(usesClearGlass(false, true)).toBe(false);
-    expect(usesClearGlass(undefined, false)).toBe(false);
+  it("keeps the same thin color wash for every clear space", () => {
+    expect(coverage(1)).toBeCloseTo(0.25);
+    expect(coverage(0.5)).toBeCloseTo(0.625);
+    expect(coverage(2)).toBeCloseTo(0.25);
+    expect(coverage(-1)).toBe(1);
+    expect(coverage(Number.NaN)).toBe(1);
   });
 });

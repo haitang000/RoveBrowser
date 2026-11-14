@@ -6,8 +6,7 @@ import Icon from "../common/Icon.vue";
 const b = useBrowser(),
   name = ref(""),
   color = ref<SpaceColor>("sky"),
-  translucency = ref(0),
-  clearGlass = ref(true);
+  translucency = ref(0);
 const colors: SpaceColor[] = [
   "sky",
   "sage",
@@ -25,7 +24,6 @@ watch(
       name.value = b.space.name;
       color.value = b.space.color;
       translucency.value = b.space.translucency ?? 0;
-      clearGlass.value = b.space.clearGlass !== false;
     }
   },
 );
@@ -36,7 +34,6 @@ function publish(create = false) {
     name: name.value,
     color: color.value,
     translucency: translucency.value,
-    clearGlass: clearGlass.value,
   });
 }
 function save(create = false) {
@@ -89,22 +86,18 @@ function save(create = false) {
         ><button class="primary-button" @click="save()">保存</button>
       </div>
       <label class="glass-control"
-        >通透
+        >清透
         <input
           v-model.number="translucency"
           type="range"
           min="0"
           max="1"
           step="0.01"
-          aria-label="通透"
+          aria-label="清透"
           @input="publish()"
         />
       </label>
-      <div v-if="translucency > 0.005" class="glass-switch" role="group" aria-label="玻璃">
-        <button type="button" :aria-pressed="clearGlass" @click="clearGlass = true; publish()">清透</button>
-        <button type="button" :aria-pressed="!clearGlass" @click="clearGlass = false; publish()">磨砂</button>
-      </div>
-      <p class="settings-note">通透时，工作区颜色罩在模糊的桌面之上。清透更薄，磨砂更实。</p>
+      <p class="settings-note">清透背景带轻微模糊，界面和网页保持清晰。</p>
       <hr />
       <button class="theme-button" @click="b.send({ type: 'theme' })">
         <Icon :name="b.state.theme === 'light' ? 'moon' : 'sun'" />{{

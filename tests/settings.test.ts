@@ -111,8 +111,8 @@ describe("Zigzag settings port", () => {
     expect(space).toMatchObject({
       name: "研究",
       translucency: 0.5,
-      clearGlass: false,
     });
+    expect(space).not.toHaveProperty("clearGlass");
     state = reduce(state, {
       type: "spaceReorder",
       id: space.id,

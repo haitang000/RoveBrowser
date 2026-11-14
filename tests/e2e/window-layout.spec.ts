@@ -6,7 +6,8 @@ declare global {
   interface Window {
     __windowTest: {
       layout?: Layout;
-      chrome?: { maximize: Rect; viewportWidth: number };
+      chrome?: { maximize: Rect; viewportWidth: number; background: number[] };
+      glass: boolean[];
       presented?: { theme?: string; width: number; fonts: string };
       samples: { expected: number; reported: number }[];
       overlays: boolean[];
@@ -22,7 +23,7 @@ async function nativeShell(page: import("@playwright/test").Page, state: Browser
   await page.addInitScript((state) => {
     window.__ERA_NATIVE__ = true;
     window.__ERA_INITIAL_STATE__ = state;
-    window.__windowTest = { samples: [], overlays: [], layoutCount: 0, popupUpdates: 0 };
+    window.__windowTest = { samples: [], overlays: [], glass: [], layoutCount: 0, popupUpdates: 0 };
     window.ipc = {
       postMessage(message) {
         const command = JSON.parse(message);
@@ -33,6 +34,9 @@ async function nativeShell(page: import("@playwright/test").Page, state: Browser
         if (command.type === "popupState" && command.popup?.popupArea) window.__windowTest.popupUpdates++;
         if (command.type === "overlay") window.__windowTest.overlays.push(command.visible);
         if (command.type === "windowChrome") window.__windowTest.chrome = command;
+        if (command.type === "glass") {
+          window.__windowTest.glass.push(command.enabled);
+        }
         if (command.type === "presented") {
           window.__windowTest.presented = {
             theme: document.documentElement.dataset.theme,
@@ -59,6 +63,29 @@ test("first render restores the native theme and collapsed sidebar before showin
     .toBe((await page.locator(".page-pane > .webview-slot").first().boundingBox())!.x);
   await expect(page.getByRole("navigation", { name: "网页导航" })).toBeVisible();
   await expect(page.getByRole("button", { name: "搜索或输入地址", exact: true })).toBeVisible();
+});
+
+test("legacy frosted spaces use the single clear appearance and caption alpha", async ({ page }) => {
+  const state = initialState();
+  const space = state.spaces[0]!;
+  Object.assign(space, { translucency: 1, clearGlass: false });
+  await nativeShell(page, state);
+  const alpha = () => page.evaluate(() => window.__windowTest.chrome?.background[3]);
+  await expect(page.locator('.browser-shell')).toHaveClass(/glass/);
+  await expect.poll(alpha).toBe(64);
+  expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(true);
+  state.activeSpace = 'work';
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
+  await expect.poll(alpha).toBe(255);
+  expect(await page.evaluate(() => window.__windowTest.glass.at(-1))).toBe(false);
+  state.activeSpace = 'personal';
+  state.theme = 'dark';
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
+  await expect.poll(alpha).toBe(64);
+  space.translucency = 0;
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
+  await expect(page.locator('.browser-shell')).not.toHaveClass(/glass/);
+  await expect.poll(alpha).toBe(255);
 });
 
 test("native caption geometry keeps three equal buttons flush with the window edge", async ({ page }) => {

@@ -51,6 +51,7 @@ use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
+    platform::windows::WindowAttributesExtWindows,
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::{Icon, Window, WindowId},
 };
@@ -254,6 +255,7 @@ struct App {
     peek: Option<Peek>,
     peek_visible: Rc<Cell<bool>>,
     caption: Option<crate::caption::Caption>,
+    glass_backdrop: Option<crate::glass::Backdrop>,
     thumbnails: crate::thumbnails::Cache,
     tab_preview: Option<(String, Rect)>,
     preview_renders: HashMap<String, PreviewRender>,
@@ -347,6 +349,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         peek: None,
         peek_visible: Rc::new(Cell::new(false)),
         caption: None,
+        glass_backdrop: None,
         thumbnails: crate::thumbnails::Cache::default(),
         tab_preview: None,
         preview_renders: HashMap::new(),
@@ -424,7 +427,7 @@ impl App {
         Ok(())
     }
 
-    /// Acrylic under a see-through frame. A failed backdrop leaves the frame solid.
+    /// Keep the clear appearance, with a light native blur where supported.
     fn apply_glass(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(window) = &self.window else {
             return Ok(());
@@ -432,14 +435,20 @@ impl App {
         let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
             return Ok(());
         };
-        let wanted = self.glass;
-        let shown = crate::glass::apply(HWND(handle.hwnd.get() as *mut _), wanted) && wanted;
-        if wanted && !shown {
-            self.glass = false;
-            self.emit(json!({"type":"glassUnavailable"}));
+        let hwnd = HWND(handle.hwnd.get() as *mut _);
+        crate::glass::clear_system_backdrop(hwnd);
+        if self.glass && self.glass_backdrop.is_none() {
+            match crate::glass::Backdrop::new(hwnd) {
+                Ok(backdrop) => self.glass_backdrop = Some(backdrop),
+                // Keep real clear transparency when Composition is unavailable.
+                Err(error) => eprintln!("Rove background blur: {error}"),
+            }
+        }
+        if let Some(backdrop) = &self.glass_backdrop {
+            backdrop.set_enabled(self.glass)?;
         }
         if let Some(ui) = &self.ui {
-            let color = if shown {
+            let color = if self.glass {
                 (0, 0, 0, 0)
             } else {
                 surface_color(self.state.theme == "dark")
@@ -2325,6 +2334,9 @@ impl ApplicationHandler<Event> for App {
                     .with_title("Rove")
                     .with_window_icon(Some(app_icon()?))
                     .with_decorations(false)
+                    .with_transparent(true)
+                    // Let WebView2 alpha reach the desktop/system backdrop.
+                    .with_no_redirection_bitmap(true)
                     .with_visible(false)
                     .with_resizable(true)
                     .with_inner_size(LogicalSize::new(1280, 820))
@@ -2810,6 +2822,7 @@ impl ApplicationHandler<Event> for App {
         }
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.glass_backdrop = None;
         self.save();
     }
 }

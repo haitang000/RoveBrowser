@@ -35,6 +35,8 @@ export function bookmarkTitle(title: string, input: string) {
   return title;
 }
 export function upgradeLibrary(s: BrowserState) {
+  // The former frosted/clear choice no longer changes a space's appearance.
+  for (const space of s.spaces) delete (space as typeof space & { clearGlass?: boolean }).clearGlass;
   for (const tab of [...s.tabs, ...s.closed]) tab.url = normalizeSettingsUrl(tab.url);
   s.pins ||= [];
   s.favorites.forEach((f) => { f.id ||= crypto.randomUUID(); });

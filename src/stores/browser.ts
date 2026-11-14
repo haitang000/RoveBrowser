@@ -51,7 +51,6 @@ export const useBrowser = defineStore("browser", () => {
     deskOpen = ref(false),
     settingsOpen = ref(false),
     dragging = ref(false),
-    glassBlocked = ref(false),
     findOpen = ref(false),
     findQuery = ref(""),
     findCount = ref(0),
@@ -500,7 +499,6 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions && settings.value.searchSuggestions) suggestions.value = e.suggestions;
     if (e.type === "dataCleared") { dataStatus.value = e.message || "已清除"; if (e.action === "history") history.value = []; }
     if (e.type === "error") error.value = e.message || "操作失败";
-    if (e.type === "glassUnavailable") glassBlocked.value = true;
     if (e.type === "findOpen") {
       resetFind();
       findOpen.value = true;
@@ -616,7 +614,6 @@ export const useBrowser = defineStore("browser", () => {
     suggestions,
     recent,
     error,
-    glassBlocked,
     findOpen,
     findQuery,
     findCount,

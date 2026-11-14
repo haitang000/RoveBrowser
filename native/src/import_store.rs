@@ -41,7 +41,6 @@ impl Storage {
                     name: format!("导入 · {}", batch.name),
                     color: "sand".into(),
                     translucency: None,
-                    clear_glass: None,
                     active_tab: None,
                 });
             }

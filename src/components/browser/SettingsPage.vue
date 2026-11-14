@@ -29,8 +29,7 @@ const notice = ref(""),
 const editing = ref<string>(),
   spaceName = ref(""),
   spaceColor = ref<SpaceColor>("sky"),
-  translucency = ref(0),
-  clearGlass = ref(true);
+  translucency = ref(0);
 const pending = ref<{
   kind: string;
   id?: string;
@@ -423,7 +422,6 @@ function editSpace(space?: Space) {
   spaceName.value = space?.name || "";
   spaceColor.value = space?.color || "sky";
   translucency.value = space?.translucency || 0;
-  clearGlass.value = space?.clearGlass !== false;
 }
 function saveSpace() {
   if (!spaceName.value.trim()) {
@@ -436,7 +434,6 @@ function saveSpace() {
     name: spaceName.value.trim(),
     color: spaceColor.value,
     translucency: translucency.value,
-    clearGlass: clearGlass.value,
     background: true,
   });
   editing.value = undefined;
@@ -812,30 +809,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
             </button>
           </div>
           <label class="glass-control"
-            >通透
+            >清透
             <input
               v-model.number="translucency"
-              aria-label="通透"
+              aria-label="清透"
               type="range"
               min="0"
               max="1"
               step="0.01"
           /></label>
-          <div v-if="translucency > 0.005" class="glass-switch">
-            <button
-              type="button"
-              :aria-pressed="clearGlass"
-              @click="clearGlass = true"
-            >
-              清透</button
-            ><button
-              type="button"
-              :aria-pressed="!clearGlass"
-              @click="clearGlass = false"
-            >
-              磨砂
-            </button>
-          </div>
+          <p class="settings-note">清透背景带轻微模糊，界面和网页保持清晰。</p>
           <p v-if="notice" role="status">{{ notice }}</p>
           <footer>
             <button
