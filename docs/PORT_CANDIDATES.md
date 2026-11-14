@@ -21,7 +21,7 @@
 | **P0** | | | | | |
 | 1 | 自定义错误页（19 类）+ 代理提示 + 失败不入历史 | `Web/ErrorPage.swift`、`Web/ProxyCheck.swift`、`Web/NetworkChanges.swift` | 高 | M | 低 |
 | 2 | Cookie 横幅自动拒绝（Autoconsent） | `Web/CookieBanners.swift` + `Resources/Autoconsent` | 高 | S–M | MPL-2.0，需页面内消息垫片 |
-| 3 | 标签休眠（内存节省） | `Tabs/TabSleep.swift`、`Tabs/PageState.swift` | 高 | M | WebView2 `TrySuspend` 实测 |
+| 3 | 标签休眠（内存节省） | `Tabs/TabSleep.swift`、`Tabs/PageState.swift` | 高 | M | WebView2 `TrySuspend`；**已实现，见 [标签休眠移植](TAB_SLEEP_PORT.md)** |
 | 4 | 打印 / 另存网页（含整页 PDF） | `Web/PDFViewer.swift`、`Window/BrowserActions` | 中高 | S | 低 |
 | 5 | 历史页 + 40 分钟会话聚类 + 撤销清除 | `Web/HistoryPage.swift`、`Web/HistoryClusters.swift` | 高 | M | 需 `history` 表迁移 |
 | 6 | 站点权限对话框 + 权限存储（最小闭环） | `Web/SitePermissions.swift` | 高 | M | 原生 `PermissionRequested` + deferral |
@@ -253,7 +253,7 @@
 按“互不耦合、可独立验收、每个都能单独进 VALIDATION”的原则分批：
 
 1. **批次 A（页面体验，约 1 周）**：自定义错误页（P0-1）→ 打印/另存（P0-4）→ Cookie 横幅（P0-2）→ 弹窗拦截提示（P1-11 的前半）。四项都不改存储模型，只加命令/事件/前端页面，适合作为一批提交。
-2. **批次 B（标签与资源）**：标签休眠（P0-3）→ 标签归档（P1-9）→ 数字提示/切换器（P1-14）→ Now Playing（P1-13）。休眠涉及 `host.rs` 页面生命周期，先做；其余都是前端/存储增量。
+2. **批次 B（标签与资源）**：标签休眠（P0-3，**已实现**，见 [标签休眠移植](TAB_SLEEP_PORT.md)）→ 标签归档（P1-9）→ 数字提示/切换器（P1-14）→ Now Playing（P1-13）。休眠涉及 `host.rs` 页面生命周期，先做；其余都是前端/存储增量。
 3. **批次 C（数据与信任）**：历史页 + 聚类（P0-5）→ 站点权限最小闭环（P0-6）→ 页面对话框（P1-10）→ 侧栏尺寸/右侧（P1-15）。历史页会改 `history` 表，之后做权限与站点数据都会复用 origin 索引。
 4. **批次 D（内容能力）**：阅读器（P1-7）→ 深色页面（P1-8）→ 整页截图（P1-18）→ 视频占满页面（P1-12）。
 5. **再往后**：导入扩展（P1-17，拉新）与 MCP（P2-26，差异化）可以独立插队；广告拦截（P2-19）、4 分屏（P2-20）、嵌套标签（P2-21）各自单独开分支，不要和别的批次混。

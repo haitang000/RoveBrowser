@@ -122,6 +122,8 @@ export interface Settings {
   savePasswords: boolean;
   autofill: boolean;
   rememberHistory: boolean;
+  /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
+  sleepTabs: boolean;
   downloadFolder: string;
   shortcuts: Record<string, Shortcut | null>;
 }
@@ -136,6 +138,7 @@ export const defaultSettings = (): Settings => ({
   savePasswords: true,
   autofill: true,
   rememberHistory: true,
+  sleepTabs: true,
   downloadFolder: "",
   shortcuts: {},
 });

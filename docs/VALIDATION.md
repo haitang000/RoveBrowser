@@ -329,3 +329,13 @@ TypeScript／Vite 构建、73 项前端单元测试、79 项串行 Rust 测试�
 computer-use 在 Windows 11 26200 上点击隔离 Release 窗口中的默认浏览器按钮，确认真实注册命令正确并启动 Windows 设置。系统窗口初始空白，通用默认应用页随后显示；本机没有完成 Rove 详情页和最终系统选择的交互核对，不将其计为已验证。未更改用户实际默认浏览器，测试后删除本次新增的候选注册并停止测试进程，用户原有 Rove 窗口继续运行。
 
 发布使用静态 CRT 的 x64 Release 构建，生成安装器和便携 ZIP。许可证清单重新生成，包含 181 条记录和 289 份许可正文。便携打包会将复制载荷中超出 ZIP 支持年份的文件时间戳归一化，避免 Cargo 许可文件的 Unix 纪元时间导致压缩失败，不改动原文件正文或元数据。安装包未代码签名；其他 Windows 版本与物理多屏设备未实机覆盖。
+
+## 后台标签休眠移植与验证（2026-11-14）
+
+移植 Zigzag `Tabs/TabSleep.swift` 与 `TabManager.sleepIdleTabs` 的休眠规则：默认 1 小时未查看、同时存活超过 20 个时 15 分钟、系统内存紧张时 5 分钟；按最久未看排序，正在播放声音、加载中、当前标签与分屏伙伴永不休眠，Favorite 页面只在内存严重不足时休眠。宿主用 `ICoreWebView2_3::TrySuspend` 挂起隐藏页面、`Resume` 唤醒；最多两个挂起在途，完成事件驱动下一批；内存压力由 `GlobalMemoryStatusEx().dwMemoryLoad` 分档（≥90% 低、≥96% 严重）。侧栏给休眠标签画 Zigzag 的均匀虚线环，tooltip 与悬停卡片说明“已休眠以节省内存”；设置 › 通用 › 标签页新增“后台标签休眠”，关闭时立即唤醒全部休眠页。映射、参数与平台差异见 [TAB_SLEEP_PORT.md](TAB_SLEEP_PORT.md)。
+
+验证通过：TypeScript／Vite 构建，87 项前端单元测试（20 个文件），94 项串行 Rust 测试（含 8 项休眠判定测试：空闲阈值、拥挤阈值、低内存与 Favorite、必须保持的页面、排序、拥挤时只休眠多余数量、内存分档、debug 环境变量）；其间既有单实例命名管道测试曾一次超时，单独复跑与随后全量串行复跑均通过，该测试未修改。生产目标 Clippy（`cargo clippy --manifest-path native/Cargo.toml -- -D warnings`）、Debug 与 Release 构建通过（Release 构建另确认无 `unused_mut` 等配置分支警告）。全量界面 E2E 首轮 98 通过、18 失败；失败集中在下载、常用网站、查找与首次引导。逐项复跑时查找 6 项、下载 7 项全部通过；常用网站 `context-editing` 用例在暂时移除本次前端改动后仍以同一断言失败，属于当前基线既有问题（未修改）；引导用例失败期间工作区正被并行改动并经 Vite 热更新。最终按本次影响面复跑 `tab-sleep`、`tabs`、`bookmarks`、`settings` 共 19 项 E2E 全部通过。
+
+`npm run test:native:sleep`（`scripts/native-sleep-smoke.mjs`）在隔离临时用户目录与真实 WebView2 上 8 项检查通过：页面 A 加载并转入后台；A 的页面经 `TrySuspend` 确认进入休眠且没有重新请求网页；侧栏出现休眠虚线环、tooltip 与休眠数据；点击后立即唤醒且页面标题保留、服务器没有再次访问（说明是恢复而非重载）；页面 B 同样休眠；关闭设置后全部唤醒且 4.5 秒内不再产生新休眠；重新打开设置后休眠继续生效。结果在 `test-results/native-sleep/result.json`。全量 `npm run test:native` 的 35 项既有 WebView2 检查也通过，未观察到页面可见性、分屏、Peek 或会话恢复回归。
+
+局限：不检测页面里尚未提交的输入（Zigzag 的 `PageState.hasTypedText` 需要页面内脚本，Rove 网页无 IPC，留作后续）；没有站点级“保持唤醒”；`TrySuspend` 在旧 WebView2 Runtime 或调试器附着页面时可能拒绝，宿主只做 10 分钟静默冷却；不显示释放的内存量。自动化检查不能替代不同硬件、长会话与真实用户输入节奏下的观察。

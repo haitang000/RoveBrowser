@@ -17,6 +17,9 @@ import {
 } from "../src/lib/settings";
 
 describe("Zigzag settings port", () => {
+  it("keeps background tab sleeping on by default", () => {
+    expect(defaultSettings().sleepTabs).toBe(true);
+  });
   it("maps every section to an internal address and preserves it as a tab", () => {
     for (const pane of SETTINGS_PANES)
       expect(settingsPane(settingsUrl(pane.id))).toBe(pane.id);

@@ -207,6 +207,21 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "general",
+    title: "标签页",
+    rows: [
+      {
+        id: "sleep",
+        title: "后台标签休眠",
+        detail:
+          "一段时间没有查看的标签页会释放内存，再次打开时回到原来的位置；正在播放声音或加载中的标签页不会休眠。",
+        kind: "toggle",
+        setting: "sleepTabs",
+        keywords: "tabs sleep asleep memory background suspend 标签 休眠 内存",
+      },
+    ],
+  },
+  {
+    pane: "general",
     title: "下载",
     rows: [
       {

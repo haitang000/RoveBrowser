@@ -21,6 +21,7 @@ mod preview;
 mod shadow;
 mod site;
 mod settings;
+mod sleep;
 mod storage;
 mod split;
 mod suggestions;

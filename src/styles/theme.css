@@ -527,6 +527,20 @@ kbd {
   place-items: center;
   flex-shrink: 0;
 }
+/* Zigzag TabSleep: a thin, even dashed ring round the icon of a page that gave
+ * its memory back. The row also says why in its tooltip and hover card. */
+.tab-row.sleeping .tab-picture {
+  position: relative;
+}
+.tab-row.sleeping .tab-picture::after {
+  content: "";
+  position: absolute;
+  inset: -2.5px;
+  border: 1px dashed var(--quiet);
+  border-radius: 50%;
+  opacity: 0.55;
+  pointer-events: none;
+}
 .tab-title {
   overflow: hidden;
   white-space: nowrap;

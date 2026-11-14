@@ -63,6 +63,8 @@ export const useBrowser = defineStore("browser", () => {
     findFocusTicket = ref(0),
     pageZoom = ref(1),
     audio = ref<Record<string, boolean>>({}),
+    /** Zigzag TabSleep: loaded pages the host put to sleep, by tab id. */
+    asleep = ref<Record<string, boolean>>({}),
     zoomNotice = ref<{ ticket: number; factor: number } | null>(null),
     actionToast = ref<{ ticket: number; message: string; action?: string } | null>(null),
     /** Whether an undoable close batch is recent enough for the sidebar Undo. */
@@ -530,6 +532,10 @@ export const useBrowser = defineStore("browser", () => {
       audio.value = Object.fromEntries(
         Object.entries(audio.value).filter(([id, playing]) => playing && live.has(id)),
       );
+      // Sleeping is runtime state too; a closed tab must not leave a stale ring.
+      asleep.value = Object.fromEntries(
+        Object.entries(asleep.value).filter(([id, sleeping]) => sleeping && live.has(id)),
+      );
     }
     if (e.type === "history" && e.entries) history.value = e.entries;
     if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions && settings.value.searchSuggestions) suggestions.value = e.suggestions;
@@ -554,6 +560,10 @@ export const useBrowser = defineStore("browser", () => {
     }
     if (e.type === "audio" && e.id && typeof e.playing === "boolean")
       audio.value = { ...audio.value, [e.id]: e.playing };
+    if (e.type === "sleep" && e.id && typeof e.asleep === "boolean")
+      asleep.value = { ...asleep.value, [e.id]: e.asleep };
+    if (e.type === "sleepState" && Array.isArray(e.ids))
+      asleep.value = Object.fromEntries(e.ids.map((id) => [id, true]));
     if (e.type === "downloads" && e.items) downloads.value = e.items;
     if (e.type === "downloadStarted" && e.id && !popupWindow) {
       toggleDownloads(true);
@@ -666,6 +676,7 @@ export const useBrowser = defineStore("browser", () => {
     findStep,
     pageZoom,
     audio,
+    asleep,
     zoomNotice,
     zoom,
     toggleMute,

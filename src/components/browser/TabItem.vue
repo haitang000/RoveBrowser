@@ -11,8 +11,14 @@ const props = defineProps<{ tab: Tab; doomed?: boolean }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser();
 const playing = computed(() => Boolean(b.audio[props.tab.id]));
+const asleep = computed(() => Boolean(b.asleep[props.tab.id]));
 const muted = computed(() => Boolean(props.tab.muted));
 const title = computed(() => tabDisplayTitle(props.tab));
+/** Zigzag TabSleep: the hover card and the row explain why the page gave its memory back. */
+const sleepNote = "已休眠以节省内存";
+const rowTitle = computed(() =>
+  asleep.value ? `${sleepNote} · ${props.tab.url}` : props.tab.url,
+);
 // Zigzag's aging: freshly used tabs stay full, days-old tabs rest at 42%. The
 // Clear button previews what it would close by sinking those rows further.
 const fade = computed(() =>
@@ -47,12 +53,13 @@ function drop(e: DragEvent) {
     class="tab-row"
     :data-tab-id="tab.id"
     :data-bookmark-id="tab.bookmarkId"
-    :class="{ selected: b.state.activeTab === tab.id, loading: tab.loading, unloaded: tab.unloaded, doomed }"
+    :data-sleeping="asleep || undefined"
+    :class="{ selected: b.state.activeTab === tab.id, loading: tab.loading, unloaded: tab.unloaded, doomed, sleeping: asleep }"
     role="tab"
     :aria-label="title"
     :aria-selected="b.state.activeTab === tab.id"
     :tabindex="b.state.activeTab === tab.id ? 0 : -1"
-    :title="b.previewTarget === (tab.bookmarkId || tab.id) ? undefined : tab.url"
+    :title="b.previewTarget === (tab.bookmarkId || tab.id) ? undefined : rowTitle"
     :aria-describedby="b.previewTarget === (tab.bookmarkId || tab.id) ? 'tab-hover-preview' : undefined"
     :style="{ '--tab-freshness': fade }"
     draggable="true"

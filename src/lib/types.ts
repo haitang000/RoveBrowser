@@ -151,6 +151,10 @@ declare global {
       /** Page zoom factor, and whether a page is playing sound. */
       factor?: number;
       playing?: boolean;
+      /** A background page went to sleep (true) or woke up (false). */
+      asleep?: boolean;
+      /** The pages asleep right now, sent when a UI renderer becomes ready. */
+      ids?: string[];
       /** The full downloads list, and the row a just-started download created. */
       items?: DownloadItem[];
     }) => void;

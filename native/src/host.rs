@@ -9,7 +9,7 @@ use serde_json::json;
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     path::{Path as FilePath, PathBuf},
     rc::Rc,
     time::{Duration, Instant},
@@ -18,10 +18,11 @@ use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler,
     DownloadStartingEventHandler, FaviconChangedEventHandler,
     IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
-    ZoomFactorChangedEventHandler,
+    TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
-        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_4,
+        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_3,
+        ICoreWebView2_4,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED,
@@ -133,6 +134,11 @@ enum Event {
     },
     /// A new download joined the list: the UI reveals the panel on it.
     DownloadStarted(String),
+    /// Zigzag `TabSleep`: every tick, background pages nobody has seen for a
+    /// while give their memory back.
+    SleepTick,
+    /// A background page's `TrySuspend` finished; `true` when it slept.
+    SleepDone(String, bool),
 }
 struct Page {
     view: WebView,
@@ -146,6 +152,12 @@ struct Page {
     viewport: Rc<Cell<Option<[i32; 2]>>>,
     dark: Cell<bool>,
     navigation: Rc<NavigationPolicy>,
+    /// The page is suspended (`ICoreWebView2_3::TrySuspend`). Runtime only.
+    sleeping: Rc<Cell<bool>>,
+    /// A suspension is in flight; do not ask for another.
+    sleep_pending: Rc<Cell<bool>>,
+    /// A suspension that failed is not retried for `sleep::RETRY_AFTER`.
+    sleep_failed_at: Cell<Option<Instant>>,
 }
 struct NavigationPolicy {
     bookmarked: Cell<bool>,
@@ -201,6 +213,18 @@ impl Page {
             self.dark.set(dark);
         }
         Ok(())
+    }
+    /// Shows the page again after it slept, and resumes it explicitly. WebView2
+    /// also resumes a suspended page when it becomes visible; doing both keeps
+    /// the wake immediate and the state certain.
+    fn wake(&self) {
+        if !self.sleeping.replace(false) {
+            return;
+        }
+        if let Ok(web) = self.view.webview().cast::<ICoreWebView2_3>() {
+            // SAFETY: the controller belongs to this live Page on the UI thread.
+            let _ = unsafe { web.Resume() };
+        }
     }
 }
 struct Peek {
@@ -290,6 +314,10 @@ struct App {
     icon_refresh: bool,
     /// At least one saved icon was actually replaced by that refresh.
     icon_refresh_found: bool,
+    /// Zigzag `TabSleep`: pages waiting for a suspension turn, longest unseen
+    /// first, and the thresholds this build runs with.
+    sleep_queue: VecDeque<String>,
+    sleep_thresholds: crate::sleep::Thresholds,
 }
 struct PreviewRender {
     view: WebView,
@@ -334,6 +362,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = event_loop.create_proxy();
     let external_proxy = proxy.clone();
     instance.listen(move |urls| { let _ = external_proxy.send_event(Event::ExternalUrls(urls)); });
+    // Zigzag `TabManager.sleepIdleTabs` runs on a timer; the same tick asks the
+    // pages that have been out of sight for a while to give their memory back.
+    {
+        let sleep_proxy = proxy.clone();
+        let every = crate::sleep::tick_interval();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(every);
+            if sleep_proxy.send_event(Event::SleepTick).is_err() {
+                return;
+            }
+        });
+    }
     let mut app = App {
         _instance: instance,
         external_urls,
@@ -378,6 +418,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         site_icons: crate::favicon::SiteIcons::default(),
         icon_refresh,
         icon_refresh_found: false,
+        sleep_queue: VecDeque::new(),
+        sleep_thresholds: crate::sleep::thresholds(),
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -991,6 +1033,9 @@ impl App {
             viewport: Rc::new(Cell::new(None)),
             dark: Cell::new(self.state.theme == "dark"),
             navigation,
+            sleeping: Rc::new(Cell::new(false)),
+            sleep_pending: Rc::new(Cell::new(false)),
+            sleep_failed_at: Cell::new(None),
         })
     }
     fn invalidate_thumbnail(&mut self, id: &str) {
@@ -1138,6 +1183,197 @@ impl App {
             self.emit(json!({"type":"tabPreviewDismissed"}));
         }
     }
+    /// Zigzag `TabSleep.sleepers`, with what the host knows: a page on screen,
+    /// in the split, playing sound, loading or tried lately never sleeps.
+    fn sleep_candidates(&self) -> Vec<crate::sleep::Candidate> {
+        let favorites: std::collections::HashSet<&str> =
+            self.state.favorites.iter().map(|f| f.id.as_str()).collect();
+        let second = self.state.active().and_then(|t| t.split_with.as_deref());
+        let now = model::now_secs();
+        let mut candidates = Vec::new();
+        for (id, page) in &self.pages {
+            let Some(tab) = self.state.tabs.iter().find(|tab| &tab.id == id) else { continue };
+            if !model::is_web(&tab.url) {
+                continue;
+            }
+            if page.sleeping.get() || page.sleep_pending.get() {
+                continue;
+            }
+            if page
+                .sleep_failed_at
+                .get()
+                .is_some_and(|at| at.elapsed() < crate::sleep::RETRY_AFTER)
+            {
+                continue;
+            }
+            let favorite = tab
+                .bookmark_id
+                .as_ref()
+                .is_some_and(|mark| favorites.contains(mark.as_str()));
+            candidates.push(crate::sleep::Candidate {
+                id: id.clone(),
+                unseen: Duration::from_secs(now.saturating_sub(tab.last_activated)),
+                can_sleep: !page.visible.get()
+                    && id != &self.state.active_tab
+                    && second != Some(id.as_str())
+                    && !self.playing.contains(id)
+                    && !tab.loading,
+                favorite,
+            });
+        }
+        candidates
+    }
+
+    /// One timer tick: ask Zigzag's rule which background pages should give
+    /// their memory back, then start suspending them two at a time.
+    fn sleep_pass(&mut self) {
+        if !self.ready || !self.state.onboarding.completed || !self.state.settings.sleep_tabs {
+            return;
+        }
+        if self.pages.is_empty() {
+            return;
+        }
+        let awake = self
+            .pages
+            .values()
+            .filter(|page| !page.sleeping.get())
+            .count();
+        let memory = crate::sleep::pressure();
+        let ids = crate::sleep::sleepers(
+            &self.sleep_candidates(),
+            awake,
+            memory,
+            &self.sleep_thresholds,
+        );
+        if ids.is_empty() {
+            return;
+        }
+        self.sleep_queue.extend(ids);
+        self.pump_sleep();
+    }
+
+    /// Zigzag's `StagedQueue`: at most two suspensions in flight, each one
+    /// followed by the next through `Event::SleepDone`, so a long list of tabs
+    /// never takes down their pages in one turn of the event loop.
+    fn pump_sleep(&mut self) {
+        if self.sleep_queue.is_empty() {
+            return;
+        }
+        if !self.state.settings.sleep_tabs || !self.ready || !self.state.onboarding.completed {
+            self.sleep_queue.clear();
+            return;
+        }
+        let mut in_flight = self
+            .pages
+            .values()
+            .filter(|page| page.sleep_pending.get())
+            .count();
+        while in_flight < 2 {
+            let Some(id) = self.sleep_queue.pop_front() else { return };
+            let Some(page) = self.pages.get(&id) else { continue };
+            if page.sleeping.get() || page.sleep_pending.get() {
+                continue;
+            }
+            let second = self.state.active().and_then(|t| t.split_with.as_deref());
+            if page.visible.get()
+                || id == self.state.active_tab
+                || second == Some(id.as_str())
+                || self.playing.contains(&id)
+            {
+                continue;
+            }
+            let Ok(web) = page.view.webview().cast::<ICoreWebView2_3>() else {
+                page.sleep_failed_at.set(Some(Instant::now()));
+                continue;
+            };
+            let proxy = self.proxy.clone();
+            let sleeping = page.sleeping.clone();
+            let pending = page.sleep_pending.clone();
+            let callback_id = id.clone();
+            let handler = TrySuspendCompletedHandler::create(Box::new(move |result, suspended| {
+                pending.set(false);
+                let slept = result.is_ok() && suspended;
+                if slept {
+                    sleeping.set(true);
+                }
+                let _ = proxy.send_event(Event::SleepDone(callback_id.clone(), slept));
+                Ok(())
+            }));
+            // SAFETY: same live WebView on the UI thread; WebView2 owns the
+            // handler until it invokes the completion.
+            match unsafe { web.TrySuspend(&handler) } {
+                Ok(()) => {
+                    page.sleep_pending.set(true);
+                    in_flight += 1;
+                }
+                Err(_) => page.sleep_failed_at.set(Some(Instant::now())),
+            }
+        }
+    }
+
+    /// A suspension finished. If the page came back on screen meanwhile (or the
+    /// setting was turned off), wake it; otherwise tell the UI its row is asleep.
+    fn sleep_done(&mut self, id: &str, slept: bool) {
+        let present = self.pages.contains_key(id);
+        let mut stale = false;
+        if let Some(page) = self.pages.get(id) {
+            page.sleep_pending.set(false);
+            if slept {
+                let second = self.state.active().and_then(|t| t.split_with.as_deref());
+                stale = !self.state.settings.sleep_tabs
+                    || page.visible.get()
+                    || id == self.state.active_tab
+                    || second == Some(id)
+                    || self.playing.contains(id);
+                if stale {
+                    page.wake();
+                }
+            } else {
+                page.sleep_failed_at.set(Some(Instant::now()));
+            }
+        }
+        #[cfg(debug_assertions)]
+        if std::env::var_os("ERA_SLEEP_LOG").is_some() {
+            eprintln!(
+                "Rove sleep: {id} {}",
+                if slept { "asleep" } else { "refused" }
+            );
+        }
+        // A tab closed while its suspension was in flight has no row to mark.
+        if slept && present {
+            self.emit(json!({"type":"sleep","id":id,"asleep":!stale}));
+        }
+        self.pump_sleep();
+    }
+
+    /// Settings › 标签页 turned sleeping off: give every sleeping page back.
+    fn wake_all_sleeping(&mut self) {
+        self.sleep_queue.clear();
+        let ids: Vec<String> = self
+            .pages
+            .iter()
+            .filter(|(_, page)| page.sleeping.get())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            if let Some(page) = self.pages.get(&id) {
+                page.wake();
+            }
+            self.emit(json!({"type":"sleep","id":id,"asleep":false}));
+        }
+    }
+
+    /// The runtime state the session doesn't hold: which loaded pages are asleep.
+    fn publish_sleep_state(&self) {
+        let ids: Vec<&str> = self
+            .pages
+            .iter()
+            .filter(|(_, page)| page.sleeping.get())
+            .map(|(id, _)| id.as_str())
+            .collect();
+        self.emit(json!({"type":"sleepState","ids":ids}));
+    }
+
     fn pump_thumbnails(&mut self) {
         // Peek's full-size capture/animation has priority over background cards.
         if self.peek.is_some() {
@@ -1149,6 +1385,7 @@ impl App {
             .iter()
             .filter(|(id, p)| {
                 !p.thumbnail_pending
+                    && !p.sleeping.get()
                     && p.thumbnail_attempt != Some(p.thumbnail_version)
                     && self.state.tabs.iter().any(|t| &t.id == *id && !t.loading)
             })
@@ -1483,13 +1720,13 @@ impl App {
                     page.clip.apply(page.view.hwnd(), r.corners, window.scale_factor())?;
                 }
                 visibility_changed |= !page.visible.get();
-                visibility.push((page, true));
+                visibility.push((Some(id.as_str()), page, true));
             } else {
                 // WebView2 stops painting IsVisible=false controllers. Let only the
                 // watched pages render behind the trusted UI while their card is up.
                 let visible = watched.contains(id);
                 visibility_changed |= page.visible.get() != visible;
-                visibility.push((page, visible));
+                visibility.push((Some(id.as_str()), page, visible));
             }
         }
         if let Some(peek) = &self.peek {
@@ -1502,12 +1739,12 @@ impl App {
                 peek.page
                     .clip
                     .apply(peek.page.view.hwnd(), r.corners, window.scale_factor())?;
-                visibility.push((&peek.page, visible));
+                visibility.push((None, &peek.page, visible));
                 focus_peek = !was_visible && visible;
             } else {
                 visibility_changed |= peek.shown.get();
                 peek.shown.set(false);
-                visibility.push((&peek.page, false));
+                visibility.push((None, &peek.page, false));
             }
         }
         // Both live edges move together before either renderer reflows.
@@ -1515,7 +1752,16 @@ impl App {
             page.sync_viewport()?;
         }
         // Newly shown pages need their first viewport before becoming visible.
-        for (page, visible) in visibility { page.set_visible(visible)?; }
+        // A page that was asleep wakes here, and the sidebar's ring goes away.
+        for (id, page, visible) in visibility {
+            page.set_visible(visible)?;
+            if visible && page.sleeping.get() {
+                page.wake();
+                if let Some(id) = id {
+                    self.emit(json!({"type":"sleep","id":id,"asleep":false}));
+                }
+            }
+        }
         if focus_peek {
             if let Some(peek) = &self.peek { peek.page.view.focus()?; }
         }
@@ -1994,6 +2240,7 @@ impl App {
                 self.publish();
                 self.publish_downloads();
                 self.publish_default_browser();
+                self.publish_sleep_state();
                 if let Err(e) = self.sync() {
                     self.error(e);
                 }
@@ -2056,6 +2303,7 @@ impl App {
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
                 self.publish_downloads();
                 self.publish_peek();
+                self.publish_sleep_state();
                 return;
             }
             Command::PopupState { popup } => {
@@ -2292,6 +2540,11 @@ impl App {
                         if !self.state.settings.autofill { let _ = view.evaluate_script("window.dispatchEvent(new Event('__rove_disable_imported_logins'))"); }
                     }
                     for error in errors { self.error(error); }
+                    // Zigzag's sleep setting is a switch: off gives every
+                    // suspended page back at once.
+                    if !self.state.settings.sleep_tabs {
+                        self.wake_all_sleeping();
+                    }
                 }
                 self.save();
                 self.publish();
@@ -2544,8 +2797,17 @@ impl ApplicationHandler<Event> for App {
                 } else {
                     self.playing.remove(&id);
                 }
+                // A page that starts playing sound must not stay suspended.
+                if playing {
+                    if let Some(page) = self.pages.get(&id).filter(|page| page.sleeping.get()) {
+                        page.wake();
+                        self.emit(json!({"type":"sleep","id":id,"asleep":false}));
+                    }
+                }
                 self.emit(json!({"type":"audio","id":id,"playing":playing}));
             }
+            Event::SleepTick => self.sleep_pass(),
+            Event::SleepDone(id, slept) => self.sleep_done(&id, slept),
             Event::DownloadsChanged { persist } => {
                 if persist {
                     self.save_downloads();

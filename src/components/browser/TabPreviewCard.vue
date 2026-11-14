@@ -44,7 +44,7 @@ onBeforeUnmount(() => { epoch++; freeze(); });
       </div>
       <div class="tab-preview-captions">
         <div v-for="page in pages" :key="page.key" class="tab-preview-caption">
-          <span>{{ page.title }}</span><small>{{ displayUrl(page.url) }}</small>
+          <span>{{ page.title }}</span><small v-if="b.asleep[page.tabId || page.key]" class="tab-preview-sleep">已休眠以节省内存</small><small v-else>{{ displayUrl(page.url) }}</small>
         </div>
       </div>
     </section>
