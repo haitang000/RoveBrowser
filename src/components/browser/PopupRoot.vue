@@ -12,6 +12,7 @@ import ErrorToast from "./ErrorToast.vue";
 import FindBar from "./FindBar.vue";
 import StatusToast from "./StatusToast.vue";
 import ActionToast from "./ActionToast.vue";
+import DownloadsPanel from "./DownloadsPanel.vue";
 import { browserKey } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
 const b = useBrowser();
@@ -27,13 +28,13 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast");
+  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .downloads-layer");
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   };
   // Keep the Peek hole covered until a leaving modal has painted its final frame.
-  const modal = Boolean(document.querySelector(".command-scrim, .settings-scrim, .menu-scrim, .desk"));
+  const modal = Boolean(document.querySelector(".command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer"));
   const content = document.querySelector<HTMLElement>(".peek-content");
   const cutout = !modal && b.peek && b.peekPhase === "open" && content ? { ...rect(content), corners: [12, 12, 12, 12] } : null;
   const regions = Array.from(surfaces, (element) => {
@@ -43,7 +44,7 @@ function report() {
     return surfaceRegion(bounds, shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout });
-  const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.findOpen ? "find" : "";
+  const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
   const focus = Boolean(active && active !== focusKey);
   focusKey = active;
   if (next !== last || focus) {
@@ -51,7 +52,7 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus });
   }
   if (focus) {
-    const selector = active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : ".context-menu input, .context-menu button";
+    const selector = active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : ".context-menu input, .context-menu button";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }
@@ -79,5 +80,5 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
-  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><TabPreviewCard /><ErrorToast />
+  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
 </template>

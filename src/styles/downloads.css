@@ -1,0 +1,157 @@
+/* Rounded, anchored downloads surface, shared with the native popup layer. */
+.downloads-button { position: relative; }
+.downloads-badge {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.downloads-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+}
+.downloads-panel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 12px 36px var(--panel-shadow), 0 2px 8px var(--shadow);
+  transform-origin: var(--downloads-tip) calc(100% + 10px);
+  outline: none;
+  user-select: none;
+}
+.downloads-panel::after {
+  content: "";
+  position: absolute;
+  top: calc(100% - 1px);
+  left: calc(var(--downloads-tip) - 11px);
+  width: 22px;
+  height: 12px;
+  background: var(--surface);
+  clip-path: polygon(0 0, 100% 0, 60% 90%, 55% 98%, 45% 98%, 40% 90%);
+}
+.downloads-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 2px 8px 8px;
+  flex-shrink: 0;
+}
+.downloads-title { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.3px; }
+.downloads-header-actions, .download-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.downloads-more { position: relative; }
+.downloads-menu {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  top: calc(100% + 5px);
+  width: max-content;
+  padding: 5px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px var(--panel-shadow);
+}
+.downloads-menu button { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+.downloads-menu button:disabled { opacity: .4; cursor: default; }
+.downloads-menu button:hover:enabled { background: var(--separator); }
+.downloads-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin: 0 4px 8px;
+  padding: 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  color: var(--quiet);
+  flex-shrink: 0;
+}
+.downloads-search:focus-within { border-color: var(--accent); }
+.downloads-search input { min-width: 0; width: 100%; padding: 5px 0; border: 0; outline: none; background: transparent; font-size: 12px; }
+.downloads-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
+}
+.downloads-empty { display: grid; justify-items: center; align-content: center; gap: 12px; min-height: 120px; color: var(--tertiary); font-size: 13px; }
+.download-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 82px;
+  padding: 12px 10px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  transition: background 120ms ease;
+}
+.download-row:hover, .download-row:focus-within, .download-row.focus { background: var(--separator); }
+.download-icon { display: grid; place-items: center; width: 30px; height: 36px; flex-shrink: 0; color: #607a9a; }
+.download-icon.archive { color: #0b9b59; }
+.download-icon.media { color: #8865bd; }
+.download-icon.image { color: #cb8250; }
+.download-icon.app { color: #3984c8; }
+.download-icon svg { color: inherit; }
+.download-body { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.download-name { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.download-meta { max-width: 100%; color: var(--tertiary); font-size: 10.5px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.download-meta.caution { color: var(--danger, #b33131); }
+.download-open { padding: 0; color: var(--accent); font-size: 12px; line-height: 1.5; text-align: left; }
+.download-open:hover { text-decoration: underline; }
+.download-bar { width: 100%; height: 5px; margin: 2px 0 0; border-radius: 3px; background: var(--separator); overflow: hidden; }
+.download-bar > span { display: block; height: 100%; border-radius: inherit; background: #0a9d58; transform-origin: left; transition: transform 160ms linear; }
+.download-row.paused .download-bar > span { background: var(--tertiary); }
+.download-bar.indeterminate > span { animation: download-progress 1.2s linear infinite; }
+.download-row.paused .download-bar.indeterminate > span { animation-play-state: paused; }
+@keyframes download-progress { from { transform: translateX(-30%) scaleX(.3); } to { transform: translateX(100%) scaleX(.3); } }
+.download-actions { align-self: center; }
+.download-action {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--icon);
+  transition: background 120ms ease, transform 120ms ease;
+}
+.download-action:hover { background: var(--separator); color: var(--ink); }
+.download-action:active { transform: scale(.94); }
+.downloads-panel button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Transition the existing surface so rapid close/reopen can reverse smoothly. */
+.downloads-enter-active { transition: opacity 260ms ease; }
+.downloads-leave-active { transition: opacity 180ms ease; }
+.downloads-enter-active .downloads-panel { transition: transform 260ms cubic-bezier(.16, 1.6, .3, 1); }
+.downloads-leave-active .downloads-panel { transition: transform 180ms cubic-bezier(.25, -.35, .45, 1); }
+.downloads-enter-from, .downloads-leave-to { opacity: 0; }
+.downloads-enter-from .downloads-panel { transform: translateY(7px) scale(.94); }
+.downloads-leave-to .downloads-panel { transform: translateY(5px) scale(.96); }
+@media (prefers-reduced-motion: reduce) {
+  .downloads-enter-active, .downloads-leave-active { transition-duration: 80ms; }
+  .downloads-enter-active .downloads-panel, .downloads-leave-active .downloads-panel { transition: none; transform: none; }
+  .download-bar.indeterminate > span { animation: none; }
+}
+html[data-reduce-motion="true"] .downloads-enter-active,
+html[data-reduce-motion="true"] .downloads-leave-active { transition-duration: 80ms; }
+html[data-reduce-motion="true"] .downloads-enter-active .downloads-panel,
+html[data-reduce-motion="true"] .downloads-leave-active .downloads-panel { transition: none; transform: none; }
+html[data-reduce-motion="true"] .download-bar.indeterminate > span { animation: none; }

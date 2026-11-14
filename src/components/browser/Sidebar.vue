@@ -8,7 +8,6 @@ import Favorites from "./Favorites.vue";
 import TabMenu from "./TabMenu.vue";
 import SpaceDeck from "./SpaceDeck.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
-import DownloadsPanel from "./DownloadsPanel.vue";
 const b = useBrowser();
 const spaceDeck = ref<InstanceType<typeof SpaceDeck>>();
 const swipeShares = ref<Record<string, number> | null>(null);
@@ -30,6 +29,6 @@ function showMenu(e: MouseEvent, tab: Tab) {
     </div>
     <Favorites />
     <SpaceDeck ref="spaceDeck" :blocked="b.overlay || Boolean(b.peek) || Boolean(b.contextMenu)" @menu="showMenu" @progress="swipeShares = $event" />
-    <WorkspaceSwitcher :swipe-shares="swipeShares" /><DownloadsPanel /><TabMenu v-if="!b.native" />
+    <WorkspaceSwitcher :swipe-shares="swipeShares" /><TabMenu v-if="!b.native" />
   </aside>
 </template>

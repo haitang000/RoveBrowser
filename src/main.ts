@@ -4,6 +4,7 @@ import App from "./App.vue";
 import PopupRoot from "./components/browser/PopupRoot.vue";
 import "./styles/tokens.css";
 import "./styles/theme.css";
+import "./styles/downloads.css";
 import "./styles/palette.css";
 import "./styles/typography.css";
 import "./styles/animations.css";

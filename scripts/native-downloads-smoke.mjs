@@ -61,7 +61,7 @@ await mkdir(downloadsDir, { recursive: true });
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-downloads');
 await mkdir(output, { recursive: true });
 
-let child, uiBrowser, pageBrowser, ui, page;
+let child, uiBrowser, pageBrowser, ui, popup, page;
 const checks = [];
 async function waitFor(fn, label) {
   for (let i = 0; i < 240; i++) {
@@ -72,7 +72,7 @@ async function waitFor(fn, label) {
 }
 const send = (command) => ui.evaluate((c) => window.ipc.postMessage(JSON.stringify(c)), command);
 /** Real OS keys, because CDP-injected input bypasses WebView2 accelerators. */
-async function realKeys(action) {
+async function realKeys(action, xFrac = 0.62, yFrac = 0.5) {
   await execFileAsync(
     'powershell.exe',
     [
@@ -85,13 +85,15 @@ async function realKeys(action) {
       String(child.pid),
       '-Action',
       action,
+      '-xFrac', String(xFrac),
+      '-yFrac', String(yFrac),
     ],
     { windowsHide: true },
   );
   await new Promise((done) => setTimeout(done, 400));
 }
 const items = () => ui.evaluate(() => window.__lastDownloads || []);
-const panel = () => ui.locator('.downloads-panel');
+const panel = () => popup.locator('.downloads-panel');
 const rows = () => panel().locator('.download-row');
 async function launch() {
   child = spawn(resolve(process.env.ERA_SMOKE_EXE || 'native/target/debug/rove.exe'), [], {
@@ -105,6 +107,9 @@ async function launch() {
     uiBrowser.contexts().flatMap((c) => c.pages()).find((p) => p.url() === 'https://era.ui/index.html'),
   'UI page');
   await ui.waitForSelector('.sidebar');
+  popup = await waitFor(async () =>
+    uiBrowser.contexts().flatMap((c) => c.pages()).find((p) => p.url() === 'https://era.ui/index.html?popup'),
+  'popup renderer');
   await ui.evaluate(() => {
     window.__lastDownloads = [];
     const previous = window.__ERA_RECEIVE__;
@@ -136,7 +141,7 @@ async function stop() {
   const exited = new Promise((done) => child.once('exit', done));
   child.kill();
   await Promise.race([exited, new Promise((done) => setTimeout(done, 4000))]);
-  child = uiBrowser = ui = pageBrowser = page = undefined;
+  child = uiBrowser = ui = popup = pageBrowser = page = undefined;
   await new Promise((done) => setTimeout(done, 700));
 }
 async function downloadSmall() {
@@ -162,8 +167,24 @@ try {
   assert.equal(first.total, Buffer.byteLength(smallText));
   assert.equal(await readFile(join(downloadsDir, 'small.txt'), 'utf8'), smallText);
   assert.equal(await rows().count(), 1);
-  await ui.screenshot({ path: join(output, 'panel.png') });
+  await popup.screenshot({ path: join(output, 'panel.png') });
   checks.push('下载完成后自动展开面板，文件保存到设置中的下载文件夹');
+
+  // The popup really covers the page HWND for outside clicks, then releases it
+  // after the leave transition; CDP input alone cannot prove native hit testing.
+  await realKeys('click-page');
+  await waitFor(async () => (await panel().count()) === 0, 'native page click closes panel');
+  await ui.locator('.downloads-button').click();
+  await panel().waitFor();
+  await waitFor(() => ui.locator('.downloads-button').getAttribute('aria-expanded').then((value) => value === 'true'), 'shared open state');
+  checks.push('真实系统鼠标点击网页关闭浮窗，侧栏按钮与原生浮层开关状态同步');
+  for (const [x, y] of [[0.08, 0.25], [0.4, 0.03]]) {
+    await realKeys('click-page', x, y);
+    await waitFor(async () => (await panel().count()) === 0, 'native sidebar/title click closes panel');
+    await ui.locator('.downloads-button').click();
+    await panel().waitFor();
+  }
+  checks.push('真实系统鼠标点击侧栏与标题栏空白也能关闭浮窗');
 
   // A second identical name gets Zigzag's " (1)" collision name.
   await panel().getByRole('button', { name: '关闭下载面板' }).click();
@@ -199,7 +220,8 @@ try {
     const names = await readdir(downloadsDir);
     return !names.includes('slow.bin');
   }, 'partial file removed');
-  await panel().getByRole('button', { name: '清除' }).click();
+  await panel().getByRole('button', { name: '更多下载操作' }).click();
+  await panel().getByRole('menuitem', { name: '清除已结束的下载' }).click();
   await waitFor(async () => (await rows().count()) === 0, 'clear finished downloads');
   checks.push('取消后清除已结束下载，未完成文件不残留');
 
@@ -212,9 +234,18 @@ try {
   await realKeys('ctrl-j');
   await panel().waitFor();
   await ui.waitForTimeout(300);
-  await realKeys('escape');
+  await popup.keyboard.press('Escape');
   await waitFor(async () => (await panel().count()) === 0, 'page escape closes panel');
-  checks.push('Ctrl+J 打开下载面板，外壳与网页内的 Esc 都能关闭');
+  checks.push('Ctrl+J 从外壳及真实网页打开下载面板，外壳与浮层内的 Esc 都能关闭');
+
+  await send({ type: 'sidebar' });
+  await waitFor(() => ui.locator('.sidebar-track').getAttribute('aria-hidden').then((value) => value === 'true'), 'sidebar collapsed');
+  await realKeys('ctrl-j');
+  await panel().waitFor();
+  await waitFor(() => ui.locator('.sidebar-track').getAttribute('aria-hidden').then((value) => value === 'false'), 'download shortcut reveals sidebar once');
+  await popup.keyboard.press('Escape');
+  await waitFor(async () => (await panel().count()) === 0, 'close after collapsed sidebar shortcut');
+  checks.push('侧栏折叠时从真实网页按 Ctrl+J 可展开侧栏并打开浮窗');
 
   // History survives a restart, and the file is still there.
   await downloadSmall();
@@ -235,6 +266,7 @@ try {
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
   await ui?.screenshot({ path: join(output, 'failure-ui.png') }).catch(() => {});
+  await popup?.screenshot({ path: join(output, 'failure-popup.png') }).catch(() => {});
   await writeFile(join(output, 'failure.json'), JSON.stringify({
     checks,
     error: String(error),

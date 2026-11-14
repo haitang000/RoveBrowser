@@ -1,8 +1,23 @@
 <script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 const b = useBrowser();
+const downloadButton = ref<HTMLElement>();
+let observer: ResizeObserver;
+function syncAnchor() {
+  const rect = downloadButton.value?.getBoundingClientRect();
+  if (rect) b.downloadsAnchor = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+}
+watch(() => [b.downloadsOpen, b.state.sidebarCollapsed, b.state.sidebarWidth], async () => { await nextTick(); syncAnchor(); });
+onMounted(() => {
+  observer = new ResizeObserver(syncAnchor);
+  if (downloadButton.value?.parentElement) observer.observe(downloadButton.value.parentElement);
+  window.addEventListener("resize", syncAnchor);
+  syncAnchor();
+});
+onBeforeUnmount(() => { observer?.disconnect(); window.removeEventListener("resize", syncAnchor); });
 defineProps<{ swipeShares?: Record<string, number> | null }>();
 </script>
 <template>
@@ -23,9 +38,13 @@ defineProps<{ swipeShares?: Record<string, number> | null }>();
     </button>
     <button
       class="icon-button downloads-button"
-      :class="{ active: b.activeDownloads > 0 }"
+      ref="downloadButton"
+      :class="{ active: b.activeDownloads > 0 || b.downloadsOpen }"
       :title="b.activeDownloads ? `下载 · ${b.activeDownloads} 个进行中 (Ctrl+J)` : '下载 (Ctrl+J)'"
       aria-label="下载"
+      aria-haspopup="dialog"
+      :aria-expanded="b.downloadsOpen"
+      aria-controls="downloads-panel"
       @click="b.toggleDownloads()"
     >
       <Icon name="download" :size="14" />

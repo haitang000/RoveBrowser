@@ -1,32 +1,55 @@
 <script setup lang="ts">
-// Zigzag's downloads panel (Window/DownloadsPanel.swift, Apache-2.0), adapted
-// to the sidebar lane: newest downloads first, a progress line while a file is
-// moving, pause/resume/cancel, reveal once finished, and Clear that never
-// throws away a half-finished file. The host owns the list; this component only
-// renders it and asks for actions.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+// State/actions belong to the host; the surface also runs in the native popup.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import {
-  clearableDownloads,
-  downloadFraction,
-  downloadStatus,
-} from "../../lib/downloads";
-import type { DownloadItem } from "../../lib/types";
+import { clearableDownloads, downloadFraction, downloadStatus, isActiveDownload } from "../../lib/downloads";
 import Icon from "../common/Icon.vue";
+import DownloadFileIcon from "./DownloadFileIcon.vue";
 
 const b = useBrowser();
 const panel = ref<HTMLElement>();
 const list = ref<HTMLElement>();
+const search = ref<HTMLInputElement>();
+const more = ref<HTMLButtonElement>();
+const clear = ref<HTMLButtonElement>();
+const searching = ref(false);
+const query = ref("");
+const menuOpen = ref(false);
+const viewport = ref({ width: innerWidth, height: innerHeight });
 const clearable = computed(() => clearableDownloads(b.downloads).length);
-
+const filtered = computed(() => b.downloads.filter((item) => item.filename.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
+const position = computed(() => {
+  const width = Math.min(380, viewport.value.width - 24);
+  const anchor = b.downloadsAnchor;
+  const bottom = Math.max(24, viewport.value.height - (anchor?.y ?? viewport.value.height - 42) + 10);
+  return {
+    left: "12px", width: `${width}px`, bottom: `${bottom}px`,
+    maxHeight: `${Math.max(100, Math.min(520, viewport.value.height - bottom - 40))}px`,
+    "--downloads-tip": `${Math.max(24, Math.min(width - 24, (anchor ? anchor.x + anchor.width / 2 : 88) - 12))}px`,
+  };
+});
+function resize() { viewport.value = { width: innerWidth, height: innerHeight }; }
 function act(action: string, id?: string) {
+  menuOpen.value = false;
   b.downloadAction(action, id);
 }
-function close() {
-  b.closeDownloads();
+function close() { b.closeDownloads(); }
+async function toggleMenu() {
+  menuOpen.value = !menuOpen.value;
+  if (menuOpen.value) {
+    await nextTick();
+    if (clearable.value) clear.value?.focus();
+  }
 }
-function rowClick(item: DownloadItem) {
-  if (item.state === "finished" && item.exists) act("open", item.id);
+function closeMenu() { menuOpen.value = false; more.value?.focus(); }
+function panelPointerDown(event: PointerEvent) {
+  if (!(event.target as Element).closest(".downloads-more")) menuOpen.value = false;
+}
+async function toggleSearch() {
+  searching.value = !searching.value;
+  menuOpen.value = false;
+  if (searching.value) { await nextTick(); search.value?.focus(); }
+  else query.value = "";
 }
 function outside(event: PointerEvent) {
   if (!b.downloadsOpen) return;
@@ -34,117 +57,82 @@ function outside(event: PointerEvent) {
   if (target && (panel.value?.contains(target) || target.closest(".downloads-button"))) return;
   close();
 }
-onMounted(() => document.addEventListener("pointerdown", outside, true));
-onBeforeUnmount(() => document.removeEventListener("pointerdown", outside, true));
-// A download that lands while the panel is open should scroll its newest row
-// into view, as the panel does when it reveals itself for a new download.
-watch(
-  () => b.downloadsFocus,
-  async () => {
-    await Promise.resolve();
-    list.value?.scrollTo({ top: 0 });
-  },
-);
+onMounted(() => {
+  window.addEventListener("resize", resize);
+  document.addEventListener("pointerdown", outside, true);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", resize);
+  document.removeEventListener("pointerdown", outside, true);
+});
+watch(() => b.downloadsOpen, async (open) => {
+  if (!open) return;
+  query.value = ""; searching.value = false; menuOpen.value = false;
+  await nextTick();
+  panel.value?.focus({ preventScroll: true });
+});
+watch(() => b.downloadsFocus, async () => {
+  query.value = "";
+  await nextTick();
+  list.value?.scrollTo({ top: 0 });
+});
 </script>
 <template>
   <Transition name="downloads">
-    <section
-      v-if="b.downloadsOpen"
-      ref="panel"
-      class="downloads-panel"
-      role="dialog"
-      aria-label="下载"
-      @wheel.stop
-      @keydown.esc="close"
-    >
-      <header class="downloads-header">
-        <span class="downloads-title">下载</span>
-        <div class="downloads-header-actions">
-          <button
-            v-if="clearable"
-            class="downloads-clear"
-            title="清除已结束的下载"
-            @click="act('clearFinished')"
+    <div v-if="b.downloadsOpen" class="downloads-layer" @pointerdown.self="close">
+      <section
+        id="downloads-panel" ref="panel" class="downloads-panel" :style="position"
+        role="dialog" aria-label="下载" tabindex="-1"
+        @wheel.stop @keydown.esc.stop.prevent="close"
+        @pointerdown="panelPointerDown"
+      >
+        <header class="downloads-header">
+          <h2 class="downloads-title">下载</h2>
+          <div class="downloads-header-actions">
+            <button class="download-action" title="打开下载文件夹" aria-label="打开下载文件夹" @click="act('openFolder')"><Icon name="folder" :size="18" /></button>
+            <button class="download-action" title="搜索下载" aria-label="搜索下载" :aria-pressed="searching" @click="toggleSearch"><Icon name="search" :size="18" /></button>
+            <div class="downloads-more">
+              <button ref="more" class="download-action" title="更多下载操作" aria-label="更多下载操作" aria-haspopup="menu" :aria-expanded="menuOpen" @click="toggleMenu" @keydown.down.prevent="!menuOpen && toggleMenu()"><Icon name="more" :size="18" /></button>
+              <div v-if="menuOpen" class="downloads-menu" role="menu" aria-label="下载操作" @keydown.esc.stop.prevent="closeMenu">
+                <button ref="clear" role="menuitem" :disabled="!clearable" @click="act('clearFinished'); more?.focus()"><Icon name="trash" :size="15" />清除已结束的下载</button>
+              </div>
+            </div>
+            <button class="download-action" aria-label="关闭下载面板" title="关闭" @click="close"><Icon name="close" :size="16" /></button>
+          </div>
+        </header>
+        <div v-if="searching" class="downloads-search">
+          <Icon name="search" :size="15" />
+          <input ref="search" v-model="query" aria-label="搜索下载文件" placeholder="搜索下载文件" type="search" />
+        </div>
+        <div v-if="!b.downloads.length" class="downloads-empty"><Icon name="download" :size="30" /><span>暂无下载</span></div>
+        <div v-else-if="!filtered.length" class="downloads-empty"><Icon name="search" :size="28" /><span>未找到匹配的下载</span></div>
+        <div v-else ref="list" class="downloads-list" aria-label="下载文件">
+          <article v-for="item in filtered" :key="item.id" class="download-row"
+            :class="[item.state, { focus: b.downloadsFocus === item.id, missing: item.state === 'finished' && !item.exists }]"
           >
-            清除
-          </button>
-          <button class="icon-button" aria-label="关闭下载面板" title="关闭" @click="close">
-            <Icon name="close" :size="12" />
-          </button>
+            <DownloadFileIcon :filename="item.filename" />
+            <div class="download-body">
+              <span class="download-name" :title="item.filename">{{ item.filename }}</span>
+              <div v-if="isActiveDownload(item)" class="download-bar" :class="{ indeterminate: !item.total }"
+                role="progressbar" :aria-label="`${item.filename} 下载进度`" :aria-valuenow="item.total > 0 ? Math.round(downloadFraction(item) * 100) : undefined" :aria-valuemin="0" :aria-valuemax="100" :aria-valuetext="downloadStatus(item)">
+                <span :style="{ transform: `scaleX(${item.total > 0 ? downloadFraction(item) : 0.3})` }" />
+              </div>
+              <span class="download-meta" :class="{ caution: item.state === 'failed' }" :title="downloadStatus(item)">{{ downloadStatus(item) }}</span>
+              <button v-if="item.state === 'finished' && item.exists" class="download-open" @click="act('open', item.id)">打开文件</button>
+            </div>
+            <div class="download-actions">
+              <template v-if="isActiveDownload(item)">
+                <button class="download-action" :title="item.state === 'paused' ? '继续下载' : '暂停下载'" :aria-label="item.state === 'paused' ? '继续下载' : '暂停下载'" @click="act(item.state === 'paused' ? 'resume' : 'pause', item.id)"><Icon :name="item.state === 'paused' ? 'play' : 'pause'" :size="17" /></button>
+                <button class="download-action" title="取消下载" aria-label="取消下载" @click="act('cancel', item.id)"><Icon name="close" :size="17" /></button>
+              </template>
+              <template v-else>
+                <button v-if="item.state === 'finished' && item.exists" class="download-action" title="在文件夹中显示" aria-label="在文件夹中显示" @click="act('reveal', item.id)"><Icon name="folder" :size="18" /></button>
+                <button class="download-action" title="从列表中移除" aria-label="从列表中移除" @click="act('remove', item.id)"><Icon name="trash" :size="18" /></button>
+              </template>
+            </div>
+          </article>
         </div>
-      </header>
-      <div v-if="!b.downloads.length" class="downloads-empty">
-        <Icon name="download" :size="26" />
-        <span>暂无下载</span>
-      </div>
-      <div v-else ref="list" class="downloads-list">
-        <div
-          v-for="item in b.downloads"
-          :key="item.id"
-          class="download-row"
-          :class="[item.state, { focus: b.downloadsFocus === item.id, missing: item.state === 'finished' && !item.exists }]"
-          :title="`${item.filename}\n${item.path || item.url}`"
-          @click="rowClick(item)"
-        >
-          <span class="download-icon"><Icon name="download" :size="14" /></span>
-          <span class="download-body">
-            <span class="download-name">{{ item.filename }}</span>
-            <span
-              class="download-meta"
-              :class="{ caution: item.state === 'failed' }"
-              :title="downloadStatus(item)"
-              >{{ downloadStatus(item) }}</span
-            >
-            <span
-              v-if="item.state === 'inProgress' || item.state === 'paused'"
-              class="download-bar"
-            >
-              <span :style="{ width: `${downloadFraction(item) * 100}%` }" />
-            </span>
-          </span>
-          <span class="download-actions">
-            <button
-              v-if="item.state === 'inProgress' || item.state === 'paused'"
-              class="download-action"
-              :title="item.state === 'paused' ? '继续下载' : '暂停下载'"
-              :aria-label="item.state === 'paused' ? '继续下载' : '暂停下载'"
-              @click.stop="act(item.state === 'paused' ? 'resume' : 'pause', item.id)"
-            >
-              <Icon :name="item.state === 'paused' ? 'play' : 'pause'" :size="11" />
-            </button>
-            <button
-              v-if="item.state === 'inProgress' || item.state === 'paused'"
-              class="download-action"
-              title="取消下载"
-              aria-label="取消下载"
-              @click.stop="act('cancel', item.id)"
-            >
-              <Icon name="close" :size="11" />
-            </button>
-            <button
-              v-else-if="item.state === 'finished' && item.exists"
-              class="download-action reveal"
-              title="在文件夹中显示"
-              aria-label="在文件夹中显示"
-              @click.stop="act('reveal', item.id)"
-            >
-              <Icon name="folder" :size="11" />
-            </button>
-            <button
-              v-else
-              class="download-action"
-              title="从列表中移除"
-              aria-label="从列表中移除"
-              @click.stop="act('remove', item.id)"
-            >
-              <Icon name="close" :size="11" />
-            </button>
-          </span>
-        </div>
-      </div>
-      <button class="downloads-folder" @click="act('openFolder')">
-        <Icon name="folder" :size="13" />打开下载文件夹
-      </button>
-    </section>
+      </section>
+    </div>
   </Transition>
 </template>

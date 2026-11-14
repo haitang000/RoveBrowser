@@ -69,6 +69,7 @@ export const useBrowser = defineStore("browser", () => {
     undoAvailable = ref(false),
     downloads = ref<DownloadItem[]>([]),
     downloadsOpen = ref(false),
+    downloadsAnchor = ref<Rect>(),
     downloadsFocus = ref<string | undefined>(undefined),
     /** Clock for tab fading and the Clear button's stale check. */
     now = ref(nowSeconds());
@@ -413,8 +414,14 @@ export const useBrowser = defineStore("browser", () => {
   }
   function toggleDownloads(open?: boolean) {
     const next = open ?? !downloadsOpen.value;
-    // The panel lives in the sidebar lane; opening it with the sidebar
-    // collapsed would otherwise reveal nothing.
+    if (next) {
+      commandOpen.value = false;
+      deskOpen.value = false;
+      settingsOpen.value = false;
+      contextMenu.value = undefined;
+      closeSpaceEditor();
+    }
+    // Reveal the sidebar trigger when opened from a page shortcut.
     if (next && state.value.sidebarCollapsed) send({ type: "sidebar" });
     downloadsOpen.value = next;
   }
@@ -444,8 +451,7 @@ export const useBrowser = defineStore("browser", () => {
     else if (action === "cancel") change({ state: "cancelled", finished: now, exists: false });
     else if (action === "remove") downloads.value = items.filter((item) => item.id !== id);
   }
-  // The page accelerator needs to know whether Esc belongs to the panel. The
-  // popup layer never renders it, so only the main UI reports.
+  // Only the main UI reports shared visibility to the page accelerator.
   watch(downloadsOpen, (open) => {
     if (native && !popupWindow) send({ type: "downloadsPanel", open });
   });
@@ -549,9 +555,8 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "audio" && e.id && typeof e.playing === "boolean")
       audio.value = { ...audio.value, [e.id]: e.playing };
     if (e.type === "downloads" && e.items) downloads.value = e.items;
-    if (e.type === "downloadStarted" && e.id) {
-      if (state.value.sidebarCollapsed) send({ type: "sidebar" });
-      downloadsOpen.value = true;
+    if (e.type === "downloadStarted" && e.id && !popupWindow) {
+      toggleDownloads(true);
       downloadsFocus.value = e.id;
     }
     if (e.type === "toast" && e.message) {
@@ -563,8 +568,8 @@ export const useBrowser = defineStore("browser", () => {
       if (e.action === "new") openCommand();
       if (e.action === "desk") deskOpen.value = !deskOpen.value;
       if (e.action === "settings") openSettings();
-      if (e.action === "downloads") toggleDownloads();
-      if (e.action === "downloadsEscape") closeDownloads();
+      if (e.action === "downloads" && !popupWindow) toggleDownloads();
+      if (e.action === "downloadsEscape" && !popupWindow) closeDownloads();
     }
   };
   let suggestTicket = 0;
@@ -589,7 +594,11 @@ export const useBrowser = defineStore("browser", () => {
   // Only transient UI state crosses the trusted popup bridge. Each renderer keeps
   // its own DOM; native browser state continues to come from the host.
   let receivingPopup = false;
-  const popupFields = { commandOpen, commandMode, deskOpen, settingsOpen, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error };
+  watch([commandOpen, deskOpen, settingsOpen, contextMenu, spaceEditor], (surfaces) => {
+    if (surfaces.some(Boolean)) closeDownloads();
+  });
+  watch(() => peek.value?.id, (id) => { if (id) closeDownloads(); });
+  const popupFields = { commandOpen, commandMode, deskOpen, settingsOpen, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, downloadsFocus, downloadsAnchor };
   function receivePopup(patch: Record<string, unknown>) {
     receivingPopup = true;
     for (const [key, value] of Object.entries(patch)) {
@@ -667,6 +676,7 @@ export const useBrowser = defineStore("browser", () => {
     undoBatch,
     downloads,
     downloadsOpen,
+    downloadsAnchor,
     downloadsFocus,
     activeDownloads,
     toggleDownloads,

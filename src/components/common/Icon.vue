@@ -44,6 +44,7 @@ const paths: Record<string, string> = {
   folder: "M2 4h4l1.5 2H14v8H2z",
   pause: "M5 3v10M11 3v10",
   play: "M5 3v10l8-5z",
+  more: "M4 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0M9 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0M14 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0",
 };
 </script>
 <template>

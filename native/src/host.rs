@@ -2054,6 +2054,7 @@ impl App {
             Command::PopupReady => {
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
+                self.publish_downloads();
                 self.publish_peek();
                 return;
             }

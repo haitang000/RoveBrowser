@@ -20,6 +20,7 @@ import { SPACE_SWIPE } from "./lib/space-swipe";
 import { coverage, isSeeThrough } from "./lib/page-frame";
 import { frameOf, lookOf } from "./lib/space-look";
 import SpaceEditor from "./components/browser/SpaceEditor.vue";
+import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
 const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
@@ -204,7 +205,7 @@ onBeforeUnmount(() => {
       ><PageArea><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
     </div>
     <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><SpaceEditor v-if="b.spaceEditor" :key="b.spaceEditor" /><TabPreview />
-    <ErrorToast v-if="!b.native" />
+    <ErrorToast v-if="!b.native" /><DownloadsPanel v-if="!b.native" />
     </template>
   </div>
 </template>
