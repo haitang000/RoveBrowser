@@ -1,103 +1,97 @@
 # Rove
 
-Windows 10/11 轻量浏览器基础实现：Rust + winit + wry/WebView2 + Vue 3/TypeScript + Pinia + SQLite。视觉移植自 Zigzag 的真实源码，基线、组件映射和参数见 [源码研究](docs/SOURCE_ANALYSIS.md)。这是可加载网页的 Windows 应用；Vite 地址仅用于独立界面预览。
+Rove 是一款面向 Windows 10/11 的实验性浏览器，使用 WebView2 加载网页，以工作区、侧栏标签和分屏组织浏览。界面与部分交互参考并移植自 Zigzag；项目仍处于 beta 阶段，不是生产发行版。
 
-## 开发运行
+[下载发行版](https://github.com/haitang000/RoveBrowser/releases) · [反馈问题](https://github.com/haitang000/RoveBrowser/issues) · [验证记录](docs/VALIDATION.md)
 
-需要 Node.js 22.12+、Rust stable MSVC、Visual Studio Build Tools（C++ 桌面开发与 Windows SDK）、WebView2 Evergreen Runtime。当前环境已安装 Rust 1.99.1，Cargo 路径为 `%USERPROFILE%\.cargo\bin`；新终端需要将其加入 PATH。
+## 功能概览
+
+- **工作区和标签**：按工作区组织标签、固定标签和分屏；顶部常用网站跨工作区共享，最多 8 个。支持拖动排序、移动标签和悬停预览。
+- **浏览与分屏**：导航、历史、下载、页面查找，以及两个独立网页并排浏览。Shift 点击链接可使用 Peek 临时预览，再将其转为普通标签。
+- **命令面板和设置**：通过命令面板搜索地址、标签及历史；设置页提供搜索引擎、外观、下载目录、快捷键和浏览数据管理等选项。
+- **首次引导和导入**：可从 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 的配置导入书签和历史，并从 CSV 导入密码。导入的密码使用 Windows DPAPI 加密，并需用户手动选择填充。
+- **会话恢复**：工作区、标签和历史保存在 SQLite；网站登录等站点状态由 WebView2 管理。支持通过 Windows 设置将 Rove 设为 HTTP/HTTPS 链接的默认浏览器。
+
+默认快捷键包括 `Ctrl+L`、`Ctrl+T`、`Ctrl+W`、`Ctrl+Shift+T`、`Ctrl+Tab`、`Ctrl+B`、`Ctrl+R`、`Alt+←/→` 和 `Ctrl+,`；`Ctrl+1` 至 `Ctrl+9` 切换工作区。快捷键可在设置中修改。
+
+## 安装与使用
+
+从 [GitHub Releases](https://github.com/haitang000/RoveBrowser/releases) 下载 Windows x64 安装程序（`*-setup.exe`）或便携 ZIP。需要 Windows 10/11 x64，或能够运行 x64 应用的 Windows ARM64，以及 Microsoft Edge WebView2 Evergreen Runtime。
+
+- **安装版**：运行安装程序，默认安装到 `%LOCALAPPDATA%\Programs\Rove`，无需管理员权限。已有 WebView2 Runtime 时可离线安装；缺少时安装程序会联网调用微软引导程序。安装包目前未签名。
+- **便携版**：解压 ZIP，运行 `Rove.exe`。需要预先安装 WebView2 Runtime。运行发行版无需 Node.js 或 Rust。
+
+卸载或覆盖升级会保留用户数据。Rove 沿用旧版 EraBrowser 的用户数据目录、数据库和内部协议，以保留已有会话与登录状态；便携版默认也使用同一目录，并非将资料保存在程序文件夹中。测试时可通过 `ERA_DATA_DIR` 指定独立目录。
+
+在「设置 → 通用 → 设为默认浏览器」或首次引导最后一步打开 Windows 默认应用设置，再由用户选择 Rove。便携版移动位置后，可再次点击该按钮更新注册路径。当前仅注册 HTTP/HTTPS 链接，不关联本地 HTML 或 PDF；详情见 [默认浏览器支持](docs/DEFAULT_BROWSER.md)。
+
+## 开发
+
+### 环境要求
+
+- Windows 10/11、Microsoft Edge WebView2 Evergreen Runtime
+- Node.js 22.12 或更新版本（发行工作流使用 Node.js 22）
+- Rust stable 的 Windows MSVC 工具链、Visual Studio Build Tools 的 C++ 桌面开发组件和 Windows SDK
+- 构建安装程序另需 [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+
+在仓库根目录的 PowerShell 中运行：
 
 ```powershell
-cd F:\code\EraBrowser
-$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 npm ci
 npm run native:dev
 ```
 
-`native:dev` 先构建前端，再将 dist 嵌入 exe 并启动，不依赖常驻 Vite 服务器。修改前端后重跑该命令。Rove 沿用旧版 EraBrowser 的用户数据目录、数据库和内部协议，以保留已有会话与登录状态。开发模式默认使用持久用户目录；临时测试可先设置 `$env:ERA_DATA_DIR='F:\code\EraBrowser\.local\smoke'`。
+`native:dev` 先构建前端，再将 `dist` 嵌入原生程序并启动；修改前端后需重新运行。为避免使用日常资料，可在启动前设置独立目录，例如：
 
 ```powershell
-npm run native:build
-# 可执行文件：native\target\release\rove.exe
-.\scripts\package.ps1 # 打包便携 zip，包含许可证
-.\scripts\package.ps1 -Variant peek # 单独输出 Peek 版本，适用于旧便携版正在运行时
-.\scripts\package.ps1 -Variant snap-thumbnails # 缩略图与原生 Snap 菜单版本
-npm run installer # 构建 Windows 安装程序（需要 Inno Setup 6.x）
-npm run dev       # 浏览器中预览 UI，明确标记为预览，不加载外部网页
-npm test
-npm run test:e2e  # 使用本机 Microsoft Edge headless
-npm run test:native # 先 cargo build；本地固定网页 + Windows 原生宿主集成
-npm run test:native:favorites # 本地 PNG 图标、8 个上限及离线重启缓存
-npm run test:native:favicons # 图标清晰度：声明图标取回、不放大、旧缓存升级
-npm run test:native:spaces # 先 cargo build；独立临时目录验证真实 WebView2 Space 切换
-npm run test:native:preview # 先 cargo build；本地网页验证真实 WebView2 悬停预览与分屏
-npm run test:native:settings # 先 cargo build；设置持久化、真实下载和浏览数据清理
-cargo test --manifest-path native/Cargo.toml
+$env:ERA_DATA_DIR = Join-Path (Get-Location) '.local\dev-profile'
+npm run native:dev
+# 恢复默认目录：Remove-Item Env:ERA_DATA_DIR
 ```
 
-## Windows 安装版
+仅预览界面时可运行 `npm run dev`，并打开终端显示的地址。该模式不是真正的浏览器宿主，不能用于验证外部网页和 Windows 原生功能。
 
-运行 `release\Rove-0.1.0-beta6-windows-x64-setup.exe`，支持 Windows 10/11 x64 及可运行 x64 应用的 Windows ARM64。默认安装到 `%LOCALAPPDATA%\Programs\Rove`，无需管理员权限；创建开始菜单快捷方式，可选桌面快捷方式，并可通过 Windows 设置中的应用列表卸载。同一用户重新运行安装程序即可覆盖升级，安装及卸载均保留原有 EraBrowser 用户数据、会话和登录状态。安装程序尚未代码签名。
+### 构建与打包
 
-已安装 Microsoft Edge WebView2 Evergreen Runtime 时可离线安装；缺少时安装程序会使用内置的微软引导程序联网安装运行时，失败会提示重试。安装版应用静态链接 VC++ 运行库，无需额外安装 VC++ Redistributable，也不需要 Node.js 或 Rust。
+```powershell
+npm run native:build  # 前端 + 原生 Release；输出 native\target\release\rove.exe
+.\scripts\package.ps1 # 将上述构建打成 release 下的便携 ZIP
+npm run installer     # 构建 x64 Release 和安装程序，输出到 release
+```
 
-安装向导使用 Inno Setup 标准的现代向导外观，跟随系统语言提供简体中文和英文；安装目录、快捷方式和完成页均为原生控件，随系统高对比度与辅助功能设置变化。
+安装器脚本会下载并校验微软 WebView2 引导程序。若 Inno Setup 编译器不在默认位置，可设置 `$env:INNO_SETUP_COMPILER` 为 `ISCC.exe` 的路径。已有同一源码的安装器构建产物时，可用 `npm run installer -- -SkipBuild` 重新打包。发行工作流同时生成安装 EXE 和便携 ZIP。
 
-开发者先安装 [Inno Setup 6.x](https://jrsoftware.org/isinfo.php)，然后运行 `npm run installer`。编译器不在默认位置时，设置 `$env:INNO_SETUP_COMPILER='C:\path\to\ISCC.exe'`，或运行 `.\scripts\installer.ps1 -CompilerPath 'C:\path\to\ISCC.exe'`。脚本重新构建前端及 x64 原生程序，校验微软 WebView2 引导程序的数字签名，输出 `release\Rove-<版本>-windows-x64-setup.exe`。已有同一源码的安装版构建产物时，可以用 `npm run installer -- -SkipBuild` 只重新打包。
+### 测试
 
-GitHub Release 工作流同时生成安装 EXE 和便携 ZIP。静默安装支持 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`，可追加 `/DIR="C:\path\to\Rove"`；静默模式不会自动启动应用。
+```powershell
+npm run build                           # TypeScript 检查和前端构建
+npm test                                # 前端单元测试
+npm run test:e2e                        # 界面测试，使用本机 Microsoft Edge
+cargo test --manifest-path native/Cargo.toml -- --test-threads=1
+cargo build --manifest-path native/Cargo.toml
+npm run test:native                     # Windows 原生宿主 / WebView2 冒烟测试
+```
 
-「设置 → 通用 → 设为默认浏览器」或首次引导的最后一步会打开 Windows 默认应用设置，选择 Rove 后即可接收 HTTP／HTTPS 链接。安装版为当前用户注册候选项；便携版点击按钮时注册当前位置。界面分别检测 HTTP 和 HTTPS 的实际默认状态，从系统设置返回后刷新。外部链接会交给同一用户数据目录的现有窗口，首次引导未结束时先保留链接。卸载清理属于该安装路径的候选项，不更改 Windows 的 UserChoice，也不删除用户资料。当前关联范围是网页链接，不注册本地 HTML／PDF 文件。详见 [默认浏览器支持](docs/DEFAULT_BROWSER.md)。
+原生冒烟测试需要先构建 Debug 程序；其他专项测试及其构建前提见 `package.json` 的 `test:native:*` 脚本。原生测试使用临时用户目录和本地测试网页；实际验证范围和已知测试限制见 [验证记录](docs/VALIDATION.md)。
 
-## 已实现
+## 架构
 
-- Zigzag onboarding 五步流程：欢迎、数据导入、常用网站选择、广告拦截说明、默认浏览器设置入口。首次启动自动展示，步骤和网站选择写入 SQLite；旧会话直接恢复，可从设置的「欢迎引导」重看。支持 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 多配置书签／历史导入，以及密码 CSV 导入；书签进入来源工作区，重复导入去重，密码使用 Windows DPAPI 加密并在匹配网站提供手动填充。支持返回／跳过、Enter／Esc、减少动态效果、深色与小窗口。广告拦截后端尚未提供；默认浏览器候选注册和链接启动已接入，最终选择由 Windows 设置完成。源码映射、预览方法和平台限制见 [Onboarding 移植记录](docs/ONBOARDING_PORT.md)。
+- `src/`：Vue 3、TypeScript、Pinia 界面；独立预览使用 `src/lib/preview.ts`。
+- `native/`：Rust、winit 和 wry/WebView2 宿主；`model.rs` 管理标签与工作区状态，`host.rs` 管理窗口和 WebView，`storage.rs` 保存会话及历史。
+- `installer/`、`scripts/`：安装器、打包及测试脚本。
+- `docs/`：源码分析、功能移植说明与验证记录。
 
-- Zigzag 设置页：7 个分类、跨分类搜索、响应式导航、设置标签页与分类地址恢复；搜索引擎／自定义搜索地址、外观、工作区增删排序、下载目录、密码／表单偏好、历史与网站数据清理、自定义快捷键和退出确认。入口为侧栏底部设置按钮、命令面板 Settings 或 Ctrl+,。移植范围和平台适配见 [设置移植记录](docs/SETTINGS_PORT.md)。
+受信的应用界面通过受限 IPC 与原生宿主通信；普通网页使用独立 WebView，不提供内部命令接口。应用不使用 Electron 或 iframe 作为网页浏览器。
 
-- 源码参数化侧栏、Favorites、固定/普通标签、选中/hover/focus、浅深主题、数字工作区、统一设计 tokens。
-- 侧栏顶部置顶网站最多 8 个，所有工作区共用。通过标签页右键或拖拽添加、拖动排序、网站右键编辑和移除；移除独立管理弹窗及区域标题。网站图标只缩小不放大：WebView2 的真实 PNG 位图按原尺寸缓存，页面声明的 SVG／大图标在后台取回后使用，旧版本缓存的放大模糊图标首次启动时自动重新获取；随 SQLite 会话缓存，卸载网页、离线及重启后继续显示；旧会话超出上限的项目保留为当前工作区固定标签，分屏组合一同迁移。
-- 固定标签逻辑迁自 Zigzag 的 Swift Library/TabManager：保存项与运行中页面分离；关闭只卸载网页，固定项及起始网址保留；支持返回固定网址、分离为普通标签、编辑保存的名称/网址，普通标签/固定项/Favorites 间拖动转换保留同一网页实例。Favorites 跨工作区复用单个实例；已有分屏可整体固定并恢复配对。旧会话自动迁移，细节与平台差异见 [固定标签移植记录](docs/PINNED_TABS_PORT.md)。
-- Windows 无边框标题栏、拖动、边缘原生 resize、最小化/最大化/关闭，逻辑坐标与 DPI 换算。
-- 基本布局恢复为整行32px标题栏（Rove位于左上角）、下方240px侧栏和内缩圆角网页卡片；旧会话保存的无边框页面选项不再改变布局。工作区玻璃外观与标签悬停预览保留。
-- Windows 11 最大化按钮悬停显示系统原生 Snap Layout 菜单；按钮点击支持最大化和还原，最小窗口宽度480px。Windows 10 保留普通最大化行为。
-- 整个窗口采用 12px 原生圆角，标题栏、侧栏与浮层统一裁切；调整尺寸/DPI 时更新，最大化时恢复直角、还原后恢复圆角。
-- 整个窗口带柔和投影，保留12px圆角；阴影随移动、缩放和 DPI 同步更新，不拦截鼠标，最小化或最大化时隐藏，还原后恢复。
-- 两个受信 UI WebView 分别承载浏览器外壳和透明弹窗层；每个已激活网页独立 WebView2，首次激活延迟创建，切换后隐藏，关闭时销毁。
-- 真网页导航、后退/前进/刷新、标题/favicon/加载状态、target=_blank 在新标签打开。
-- 命令面板：在当前网页区域上方淡入、轻微缩放展开，背景保持实时网页；支持地址/Google 搜索、打开的标签页与本地历史、上下键/Enter/Esc、点击外侧关闭及焦点返回。
-- 所有应用内弹窗共用独立透明 WebView：命令栏、工作区快速编辑、全部标签页、右键菜单、固定网址编辑、悬停预览、Peek 外壳和错误提示。弹窗直接叠加在真实网页上，不捕获整页背景、不隐藏来源网页，空白区域通过原生窗口区域透传鼠标。完整设置页在普通标签页中显示。
-- 多工作区新增/重命名/颜色、独立 pins/tabs、右键跨空间移动、底栏拖动移动、标签排序。
-- 侧栏触控板左右轻扫切换 Space：相邻列表跟手滑动、方向锁定、短促轻扫、首尾阻尼回弹及可中断弹簧收尾，保留各空间的列表滚动位置；横向滚轮一次只切换一个空间。点击和快捷键沿空间方向切换，背景从当前屏幕颜色平滑过渡，遵循“减少动态效果”。行为及参数移植自 Zigzag 的 `SpaceSwipe`、`transitionList` 与 `ColorView.setColor`。
-- 中键关闭普通/固定标签和全部标签页视图中的卡片，关闭后台标签保留当前页；侧栏标签打开时滑入淡入、关闭时淡出、排序及相邻标签补位时平滑移动，遵循系统“减少动态效果”设置。
-- 两网页独立实例分屏、侧栏拖到网页开启分屏、拖动/键盘调整比例、退出、固定组合随会话恢复。
-- 原生网页圆角：对实际 wry 子窗口应用 Win32 区域裁切，按 CSS 内圆角和 DPI 换算；单页四角、分屏外角、调整尺寸和最大化时自动更新。
-- 界面英文字体使用内嵌 Inter Variable（拉丁与扩展拉丁字形），中文回退 Microsoft YaHei UI；无需联网获取字体。
-- SQLite WAL 保存标签/工作区/主题/关闭栈/分屏关系和历史；WebView2 自行保存站点状态。
-- 全部标签页按工作区分组、过滤、点击切换和拖动移动，显示 WebView2 实际网页缩略图，分屏组合并排展示两张快照。截图在页面加载后、切换前和打开视图时更新，导航或关闭后清理；尚未加载的标签显示占位，不为截图自动打开页面。
-- 标签悬停预览：普通标签、固定项及顶部常用网站停留600ms后显示320px宽的网页缩略图、标题和网址；已展开时移至相邻项立即更新，分屏组合并排展示两页。当前页及其分屏伙伴不显示预览；无缓存时在后台现场渲染，尚未正式打开的页面用临时WebView2生成画面，不增加标签或历史，收起后释放控制器。已有页面的快照每秒刷新，移出、按下、滚动、Esc、切换工作区、窗口失焦或打开浮层时收起。
-- 悬停预览入场160ms淡入，移开后120ms淡出；离场中移回可从当前透明度反转，相邻项直接更新。减少动态效果时采用80ms淡入淡出；按键、点击和打开其他浮层时即时取消。卡片在透明弹窗层播放动画，周围网页持续实时显示和交互。
-- Peek：Shift 点击 HTTP/HTTPS 链接（含 target=_blank）打开独立临时 WebView2；支持 Esc、关闭按钮、点击遮罩关闭，或不重新加载地转为普通标签页。预览内 Shift 点击替换当前 Peek，临时页面不写入会话/历史；晋升后才作为普通访问记录。标签右键菜单也提供预览入口。
-- Peek 动效：从链接点击位置渐入放大（240ms），关闭时向同一位置缩小淡出（180ms），中途关闭可连续反向，不跳回起点。原生网页在动画期间使用内存快照，完成后切回可交互控制器；开启“减少动态效果”时仅做80ms淡入淡出。菜单入口没有链接坐标时使用居中的轻微缩放。
+## 已知限制
 
-默认快捷键：Ctrl+L/T/W/Tab/Shift+T、Ctrl+B、Ctrl+R、Alt+左右、Ctrl+Shift+反斜线、Ctrl+,；可在设置中修改，按钮提示同步更新。网页获得焦点时通过原生 AcceleratorKeyPressed 转发，普通网页不能调用内部命令。Ctrl+1…9 切换工作区。
+- 广告拦截后端、文件夹、自动更新、扩展和站点权限管理界面尚未实现。
+- 分屏组合可恢复，但分屏比例暂不跨重启保存；侧栏尚无原生浮动侧栏的边缘呼出。
+- Windows 触控板手势、多屏混合 DPI 和部分窗口布局仍需更多硬件验证；网页缩略图可能显示最近捕获的画面或占位。
+- 视觉和交互参考 Zigzag，但 Windows 字体、窗口及平台能力存在差异，不保证像素级一致。
 
-## 架构与边界
+更多细节见 [源码研究](docs/SOURCE_ANALYSIS.md)、[固定标签](docs/PINNED_TABS_PORT.md)、[首次引导](docs/ONBOARDING_PORT.md)、[设置](docs/SETTINGS_PORT.md) 和 [验证记录](docs/VALIDATION.md)。
 
-`native/src/model.rs` 是标签/空间权威状态；`host.rs` 管理窗口和 WebView；`storage.rs` 保存会话和历史。Pinia 原生模式只展示 Rust 广播并发送受限命令；`preview.ts` 仅供独立前端预览。DOM 测量网页槽位，Rust 校验逻辑矩形并裁到窗口，再设置 native child bounds。没有 iframe、Electron 或完整 Chromium 源码。
+## 许可证与致谢
 
-原生集成脚本自动建立临时用户目录和本地 HTTP fixture，debug 构建可通过 `ERA_DEBUG_PORT` 临时开启 loopback CDP（UI=该端口、网页=下一端口）；Release 不编译该入口。原生按键路径通过 Windows 实机输入单独核验，因为 CDP 键盘事件不产生 Win32 accelerator 事件。测试结束关闭测试进程，保留临时数据库便于检查。
-
-两个受信 UI WebView 注册 IPC，限定 `https://era.ui/index.html`（弹窗层使用 `?popup`），消息最大16KB并反序列化为封闭枚举；页面 WebView 无 IPC handler/host objects。网页侧的 `peek-links.js` 只把受信 Shift 点击转换为标准 named-window 请求，Rust 在 WebView2 NewWindowRequested 中验证 URL、用户手势及来源实例，再选择 Peek 打开方式，不提供普通网页调用内部命令的能力。UI 自定义协议只提供嵌入资源，带 CSP、禁 iframe 和外部脚本；UI 导航锁定。网页只允许 http/https（运行时空白初始化允许 about:blank）。不实现 Cookie 加密，交给 WebView2 用户目录。会话损坏时停止启动、保留数据库，错误记录到 `%TEMP%\rove-error.log`。
-
-## 尚未完成与平台适配
-
-- 文件夹尚未移植。Windows DOM 滚轮没有 macOS 的手势开始/结束与惯性阶段信号，Space 手势检测减速后提前切换或回弹，拖满一页立即切换；无输入时按事件频率等待32–64ms作为松手兜底。250ms内的惯性尾流被消费，明显的新加速或短暂停顿后的新手势可立即接手动画。不同触控板驱动的实际手感仍需更多硬件覆盖。
-- 悬停预览复用内存缩略图缓存；窄窗口会缩小卡片，分屏快照等宽展示；后台网页快照表示控制器最近可捕获的画面，不保证视频持续播放。
-- 网页缩略图保留在内存，最多64张且总计8MiB；按比例缩至480×320以内、JPEG质量75，不写入会话、历史或磁盘。页面加载失败或截图失败时显示占位；已有快照代表最近捕获的画面。
-- Peek 自身离场缩放使用内存快照，单张上限8MiB；解码并绘制后才隐藏临时控制器。来源网页始终实时显示。其他弹窗无需整页截图或解码握手；网页与弹窗的圆角、透传区域通过原生 HWND 区域实现，GDI 使用物理像素区域栅格化。
-- 标题栏使用 WebView2 原生拖动区域，四边与四角由 Win32 命中测试直接处理缩放；Snap Layout 菜单由 Windows 提供，是否显示遵循系统版本和设置。多屏幕混合 DPI、各类 Snap 区域及最大化边界仍需更多实机覆盖。
-- 侧栏折叠采用源码180ms时长，尚未复制原生浮动侧栏的边缘呼出。分屏比例暂不跨重启保存（组合关系保存）。
-- 图标为自绘线图标，SF Pro 换为 Inter 和 Windows 中文字体；frame 已按原始 OKLab 公式生成，accent/ink 尚未移植完整 Brand.Theme 求解；没有宣称像素级一致。
-- 尚无自动更新/扩展支持/站点权限管理界面。不是生产发行版。
-
-验证结果详见 [验证记录](docs/VALIDATION.md)。第三方来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本项目采用 [Apache License 2.0](LICENSE)。Zigzag 及其他第三方组件的来源、许可和声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [licenses/](licenses/)。
