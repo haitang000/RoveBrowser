@@ -10,6 +10,7 @@ import { nowSeconds, tabIsFaded } from "./tab-meta";
 import { cleanIcon } from "./space-icon";
 import { paintKeys } from "./space-look";
 import { ONBOARDING_STEPS, saveOnboardingSites } from "./onboarding";
+import { normalizeSidebarWidth } from "./sidebar-width";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -288,6 +289,10 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     case "sidebar":
       s.sidebarCollapsed = !s.sidebarCollapsed;
+      break;
+    case "sidebarWidth":
+      if (c.width === null) delete s.sidebarWidth;
+      else if (typeof c.width === "number" && Number.isFinite(c.width)) s.sidebarWidth = normalizeSidebarWidth(c.width);
       break;
     case "split": {
       const t = tab(),

@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/favicon.ico", route => route.abort());
+});
+
 test("sidebar scrollbar stays hidden until the list scrolls", async ({
   page,
 }) => {

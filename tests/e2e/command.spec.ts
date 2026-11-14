@@ -43,7 +43,7 @@ test("new command stays over the current page and dismisses outside the panel", 
   await expect(page.getByRole("tab", { selected: true })).toHaveAttribute("data-tab-id", selected!);
   await page.getByRole("button", { name: "工作区 Work", exact: true }).click();
   await expect(page.getByRole("combobox")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Work", exact: true })).toBeVisible();
+  await expect(page.locator(".sidebar-header .space-name")).toHaveText("Work");
 });
 
 test("tab searches one site and a named command runs", async ({ page }) => {

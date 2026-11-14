@@ -16,6 +16,7 @@
     "test:native:import": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-import-smoke.mjs",
     "test:native:default-browser": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-default-browser-smoke.mjs",
     "test:native:split": "node scripts/native-split-smoke.mjs",
+    "test:native:sidebar": "node scripts/native-sidebar-smoke.mjs",
     "test:native:favorites": "node scripts/native-favorites-smoke.mjs",
     "test:native:favicons": "node scripts/native-favicon-smoke.mjs",
     "test:native:command": "node scripts/native-command-smoke.mjs",

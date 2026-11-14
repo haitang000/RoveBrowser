@@ -2,6 +2,7 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useBrowser } from "./stores/browser";
 import Sidebar from "./components/browser/Sidebar.vue";
+import SidebarResize from "./components/browser/SidebarResize.vue";
 import WindowControls from "./components/browser/WindowControls.vue";
 import PageArea from "./components/browser/PageArea.vue";
 import CommandBar from "./components/browser/CommandBar.vue";
@@ -17,7 +18,7 @@ import Icon from "./components/common/Icon.vue";
 import { browserKey } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
 import { coverage, isSeeThrough } from "./lib/page-frame";
-import { frameOf } from "./lib/space-look";
+import { frameOf, lookOf } from "./lib/space-look";
 import SpaceEditor from "./components/browser/SpaceEditor.vue";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
@@ -51,7 +52,8 @@ function finishFrameAnimation() { frameAnimation?.cancel(); frameAnimation = und
 // ColorView.setColor/CALayer.set: retarget from the color currently on screen.
 // Submit only a background-color effect; the titlebar, list and native page stay live.
 watch(
-  [() => b.state.theme, () => b.space, () => b.spacePreview] as const,
+  // Saving a width or receiving a tab title must not restart the color tween.
+  () => JSON.stringify([b.state.theme, lookOf(shownSpace.value)]),
   () => {
     const theme = painted.value.theme ?? b.state.theme;
     const from = shell.value ? getComputedStyle(shell.value).backgroundColor : undefined;
@@ -71,7 +73,7 @@ watch(
       duration: SPACE_SWIPE.backgroundDuration, easing: "ease",
     });
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 );
 watch(
   [() => b.overlay, () => b.commandOpen],
@@ -113,6 +115,7 @@ onBeforeUnmount(() => {
     class="browser-shell"
     :class="{
       collapsed: b.state.sidebarCollapsed,
+      'sidebar-resizing': b.sidebarResizing,
       glass: glassActive,
       'glass-neutral': glassActive && painted.neutralGlass,
       'custom-frame': painted.custom,
@@ -129,6 +132,7 @@ onBeforeUnmount(() => {
         :aria-hidden="b.state.sidebarCollapsed"
       >
         <Sidebar />
+        <SidebarResize />
       </div>
       <button
         v-if="b.state.sidebarCollapsed"

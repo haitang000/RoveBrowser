@@ -84,6 +84,8 @@ export interface BrowserState {
   closed: Tab[];
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
+  /** Preferred width in CSS pixels; absent uses the responsive default. */
+  sidebarWidth?: number;
   settings?: import("./settings").Settings;
   /** Per-site zoom by normalized host; 100% is stored as absence. */
   siteZoom?: Record<string, number>;

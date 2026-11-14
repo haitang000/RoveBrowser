@@ -137,6 +137,8 @@ pub struct State {
     pub closed: Vec<Tab>,
     pub theme: String,
     pub sidebar_collapsed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<f64>,
     #[serde(default)]
     pub settings: crate::settings::Settings,
     /// The page meets the window edges. Absent in an older session means on.
@@ -349,6 +351,8 @@ pub enum Command {
     Theme,
     #[serde(rename = "sidebar")]
     Sidebar,
+    #[serde(rename = "sidebarWidth")]
+    SidebarWidth { width: Option<f64> },
     #[serde(rename = "split")]
     Split { id: String, other: String },
     #[serde(rename = "unsplit")]
@@ -607,6 +611,7 @@ impl Default for State {
             closed: vec![],
             theme: "light".into(),
             sidebar_collapsed: false,
+            sidebar_width: None,
             settings: crate::settings::Settings::default(),
             borderless: true,
             site_zoom: HashMap::new(),
@@ -863,6 +868,8 @@ impl State {
     pub fn repair(&mut self) {
         // A missing removable download folder must not reset unrelated preferences.
         self.settings.repair();
+        self.sidebar_width = self.sidebar_width.filter(|width| width.is_finite())
+            .map(|width| width.clamp(192., 480.).round());
         // Zoom is only meaningful inside WebView2's range; a session written by
         // an older build or a damaged file must not wedge the page at 0 or 99x.
         self.site_zoom.retain(|site, zoom| {
@@ -1177,6 +1184,12 @@ impl State {
                 .into()
             }
             Command::Sidebar => self.sidebar_collapsed = !self.sidebar_collapsed,
+            Command::SidebarWidth { width } => {
+                if width.is_some_and(|width| !width.is_finite()) {
+                    return Err("侧栏宽度无效".into());
+                }
+                self.sidebar_width = width.map(|width| width.clamp(192., 480.).round());
+            }
             Command::Split { id, other } => {
                 if id != other
                     && self

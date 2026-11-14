@@ -82,7 +82,7 @@ function layout() {
     type: "layout",
     primary: rect(primary.value),
     secondary: secondary.value ? rect(secondary.value) : null,
-    liveResize: resizing.value,
+    liveResize: resizing.value || b.sidebarResizing,
   });
 }
 watch(
@@ -90,6 +90,7 @@ watch(
     () => b.active?.id,
     () => b.active?.splitWith,
     () => b.state.sidebarCollapsed,
+    () => b.sidebarResizing,
     ratio,
     resizing,
   ],
@@ -165,7 +166,7 @@ function split(e: DragEvent) {
   <main
     ref="container"
     class="page-area"
-    :class="{ split: other, dropping: drop, resizing }"
+    :class="{ split: other, dropping: drop, resizing: resizing || b.sidebarResizing }"
     :style="{ '--split-ratio': ratio }"
     @dragover.prevent="drop = true"
     @dragleave.self="drop = false"

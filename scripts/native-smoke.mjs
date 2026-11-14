@@ -153,6 +153,7 @@ try{
   await ui.getByRole('tab',{name:'Outside fixture'}).waitFor();
   assert.equal(web.url(),base+'/first');assert.equal(await web.evaluate(()=>window.__pinMarker),'controller retained');
   await send(ui,{type:'close'});await send(ui,{type:'bookmarkOpen',id:retainedID});
+  await waitFor(()=>ui.getByRole('tab',{selected:true}).getAttribute('data-bookmark-id').then(id=>id===retainedID),'pin active after reopening');
   const countBeforeSignIn=await ui.getByRole('tab').count();
   await web.getByRole('link',{name:'Sign in',exact:true}).click();await web.waitForURL(`http://localhost:${server.address().port}/login`);
   assert.equal(await ui.getByRole('tab').count(),countBeforeSignIn);
@@ -207,6 +208,7 @@ try{
   await send(ui,{type:'forward'});await web.waitForURL(base+'/second');checks.push('网页导航/后退/前进')
   // CDP keyboard injection cannot generate Win32 AcceleratorKeyPressed; that path is tested with Computer Use.
   await ui.keyboard.press('Control+l');await popup.getByRole('combobox').waitFor();assert.equal(await popup.getByRole('combobox').inputValue(),base+'/second');await popup.keyboard.press('Escape');checks.push('UI Ctrl+L 与浮层恢复；网页原生快捷键另经实机检查')
+  await popup.locator('.command-scrim').waitFor({state:'detached'});
   await checkCommand(ui,[web],'page');checks.push('命令栏在独立浮层播放动画，无整页背景截图；DOM/滚动/可见性保持，关闭恢复焦点');
   await checkCommandHandoff(ui,web);checks.push('命令栏不依赖背景解码；快速重开正常；Ctrl+T及点击外侧关闭不新建空白标签');
   const tabCount=await ui.getByRole('tab').count();

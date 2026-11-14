@@ -6,7 +6,7 @@ Rove 是一款面向 Windows 10/11 的实验性浏览器，使用 WebView2 加�
 
 ## 功能概览
 
-- **工作区和标签**：按工作区组织标签、固定标签和分屏；顶部常用网站跨工作区共享，最多 8 个。支持拖动排序、移动标签和悬停预览。
+- **工作区和标签**：按工作区组织标签、固定标签和分屏；顶部常用网站跨工作区共享，最多 8 个。支持拖动排序、移动标签和悬停预览。拖动侧栏右边缘可调整宽度，重启后保留；双击边缘恢复默认宽度。
 - **浏览与分屏**：导航、历史、下载、页面查找，以及两个独立网页并排浏览。Shift 点击链接可使用 Peek 临时预览，再将其转为普通标签。
 - **命令面板和设置**：通过命令面板搜索地址、标签及历史；设置页提供搜索引擎、外观、下载目录、快捷键和浏览数据管理等选项。
 - **首次引导和导入**：可从 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 的配置导入书签和历史，并从 CSV 导入密码。导入的密码使用 Windows DPAPI 加密，并需用户手动选择填充。
@@ -70,6 +70,7 @@ npm run test:e2e                        # 界面测试，使用本机 Microsoft 
 cargo test --manifest-path native/Cargo.toml -- --test-threads=1
 cargo build --manifest-path native/Cargo.toml
 npm run test:native                     # Windows 原生宿主 / WebView2 冒烟测试
+npm run test:native:sidebar             # 侧栏调宽、真实视口和重启恢复专项（需先构建 Debug）
 ```
 
 原生冒烟测试需要先构建 Debug 程序；其他专项测试及其构建前提见 `package.json` 的 `test:native:*` 脚本。原生测试使用临时用户目录和本地测试网页；实际验证范围和已知测试限制见 [验证记录](docs/VALIDATION.md)。

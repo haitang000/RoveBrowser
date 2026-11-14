@@ -307,7 +307,7 @@ test("native split feedback updates the shell without sending a resize back whil
     window.__windowTest.layoutCount = 0;
     window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: true });
   });
-  await expect(page.getByRole('separator')).toHaveAttribute('aria-valuenow', '60');
+  await expect(page.getByRole('separator', { name: '调整分屏比例' })).toHaveAttribute('aria-valuenow', '60');
   await expect(page.locator('.page-area')).toHaveCSS('border-radius', '0px');
   expect(await page.evaluate(() => window.__windowTest.layoutCount)).toBe(0);
   await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: false }));
@@ -317,6 +317,6 @@ test("native split feedback updates the shell without sending a resize back whil
   await expect(page.locator('.page-area')).toHaveClass(/resizing/);
   state.tabs.find(t => t.id === 'github')!.splitWith = undefined;
   await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
-  await expect(page.getByRole('separator')).toHaveCount(0);
+  await expect(page.getByRole('separator', { name: '调整分屏比例' })).toHaveCount(0);
   await expect(page.locator('.page-area')).not.toHaveClass(/resizing/);
 });

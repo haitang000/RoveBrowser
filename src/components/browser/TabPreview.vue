@@ -15,7 +15,7 @@ const phase = ref<"preparing" | "opening" | "open" | "closing">("preparing");
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const closing = ref(0);
 const pages = computed(() => rendered.value ? previewPages(b.state, rendered.value) : []);
-const blocked = computed(() => b.overlay || !!b.peek || b.state.sidebarCollapsed);
+const blocked = computed(() => b.overlay || !!b.peek || b.state.sidebarCollapsed || b.sidebarResizing);
 let source: HTMLElement | undefined, pending: HTMLElement | undefined;
 let showTimer: ReturnType<typeof setTimeout> | undefined, hideTimer: ReturnType<typeof setTimeout> | undefined;
 let watchTimer: ReturnType<typeof setInterval> | undefined, refreshTimer: ReturnType<typeof setInterval> | undefined;

@@ -62,7 +62,7 @@ test("command keyboard navigation, close and restore", async ({ page }) => {
 });
 test("spaces, dark mode, pinning and split container", async ({ page }) => {
   await page.getByRole("button", { name: "工作区 Work", exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Work', exact: true })).toBeVisible();
+  await expect(page.locator('.sidebar-header .space-name')).toHaveText('Work');
   await page
     .getByRole("button", { name: "工作区 Personal", exact: true })
     .click();

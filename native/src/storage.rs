@@ -79,6 +79,40 @@ mod tests {
     use super::*;
     use crate::model::Command;
     #[test]
+    fn sidebar_width_upgrades_legacy_sessions_and_survives_restart() {
+        let path = std::env::temp_dir().join(format!("rove-sidebar-{}", uuid::Uuid::new_v4()));
+        {
+            let db = Storage::open(&path).unwrap();
+            let mut legacy = serde_json::to_value(State::default()).unwrap();
+            legacy.as_object_mut().unwrap().remove("sidebarWidth");
+            db.conn.execute("INSERT INTO session(id,json) VALUES(1,?1)", [legacy.to_string()]).unwrap();
+            let mut state = db.load().unwrap();
+            assert_eq!(state.sidebar_width, None);
+            let command: Command = serde_json::from_str(r#"{"type":"sidebarWidth","width":336}"#).unwrap();
+            state.apply(&command).unwrap();
+            db.save(&state).unwrap();
+        }
+        {
+            let db = Storage::open(&path).unwrap();
+            let mut state = db.load().unwrap();
+            assert_eq!(state.sidebar_width, Some(336.));
+            for (input, expected) in [(-100., 192.), (9999., 480.), (300.6, 301.)] {
+                state.apply(&Command::SidebarWidth { width: Some(input) }).unwrap();
+                assert_eq!(state.sidebar_width, Some(expected));
+            }
+            assert!(state.apply(&Command::SidebarWidth { width: Some(f64::NAN) }).is_err());
+            assert_eq!(state.sidebar_width, Some(301.));
+            state.sidebar_width = Some(9999.);
+            db.save(&state).unwrap();
+            assert_eq!(db.load().unwrap().sidebar_width, Some(480.));
+            let reset: Command = serde_json::from_str(r#"{"type":"sidebarWidth","width":null}"#).unwrap();
+            state.apply(&reset).unwrap();
+            db.save(&state).unwrap();
+        }
+        assert_eq!(Storage::open(&path).unwrap().load().unwrap().sidebar_width, None);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
     fn customized_and_empty_favorites_survive_restart() {
         let path = std::env::temp_dir().join(format!("era-favorites-{}", uuid::Uuid::new_v4()));
         {

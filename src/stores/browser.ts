@@ -26,6 +26,7 @@ export const useBrowser = defineStore("browser", () => {
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
   const splitResize = ref<{ ratio: number; resizing: boolean }>();
+  const sidebarResizing = ref(false);
   const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
   const previewAnimationDone = ref(0);
   const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || onboardingPreview(initialState()))),
@@ -617,6 +618,7 @@ export const useBrowser = defineStore("browser", () => {
     contextMenu,
     popupArea,
     splitResize,
+    sidebarResizing,
     hoverPreview,
     previewAnimationDone,
     thumbnails,

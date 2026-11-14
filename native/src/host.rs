@@ -2021,7 +2021,7 @@ impl App {
                 if primary.valid() && secondary.is_none_or(|r| r.valid()) {
                     self.primary = primary;
                     self.secondary = secondary;
-                    self.live_resize = live_resize && secondary.is_some();
+                    self.live_resize = live_resize;
                 } else {
                     return;
                 }
