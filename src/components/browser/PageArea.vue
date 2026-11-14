@@ -80,11 +80,13 @@ function layout() {
   // geometry now; another rAF leaves native pages one frame behind the sidebar.
   b.send({
     type: "layout",
+    viewport: { width: innerWidth, height: innerHeight },
     primary: rect(primary.value),
     secondary: secondary.value ? rect(secondary.value) : null,
     liveResize: resizing.value || b.sidebarResizing,
   });
 }
+defineExpose({ layout });
 watch(
   [
     () => b.active?.id,
@@ -137,6 +139,7 @@ function resize(e: PointerEvent) {
     // Resize real controllers in the input event, before waiting for Vue/layout
     // or a paint callback. Native keeps only the latest pending dimensions.
     b.send({ type: 'layout', liveResize: true,
+      viewport: { width: innerWidth, height: innerHeight },
       primary: { ...rect(primaryRect), width: leftWidth },
       secondary: { ...rect(secondaryRect), x: primaryRect.x + leftWidth + gap, width: width - leftWidth },
     });

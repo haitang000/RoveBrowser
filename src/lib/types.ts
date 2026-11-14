@@ -106,6 +106,7 @@ export interface Rect {
 export interface Layout {
   primary: Rect;
   secondary?: Rect;
+  viewport?: { width: number; height: number };
 }
 export interface Point {
   x: number;

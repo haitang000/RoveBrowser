@@ -23,6 +23,7 @@ import SpaceEditor from "./components/browser/SpaceEditor.vue";
 import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
+const pageArea = ref<InstanceType<typeof PageArea>>();
 const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
 const transparencyReduced = ref(reducedTransparency.matches);
 const glassAllowed = computed(() => !transparencyReduced.value);
@@ -192,7 +193,7 @@ onBeforeUnmount(() => {
         :aria-hidden="b.state.sidebarCollapsed"
       >
         <Sidebar />
-        <SidebarResize />
+        <SidebarResize @resize="pageArea?.layout()" />
       </div>
       <button
         v-if="b.state.sidebarCollapsed"
@@ -202,7 +203,7 @@ onBeforeUnmount(() => {
         @click="b.send({ type: 'sidebar' })"
       >
         <Icon name="sidebar" /></button
-      ><PageArea><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
+      ><PageArea ref="pageArea"><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
     </div>
     <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><SpaceEditor v-if="b.spaceEditor" :key="b.spaceEditor" /><TabPreview />
     <ErrorToast v-if="!b.native" /><DownloadsPanel v-if="!b.native" />

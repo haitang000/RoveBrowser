@@ -248,6 +248,7 @@ struct Peek {
 struct PageLayout {
     primary: Rect,
     secondary: Option<Rect>,
+    viewport: Option<crate::layout::Viewport>,
     live_resize: bool,
 }
 /// The runtime state every page's events share. Bundled so registering a page
@@ -313,6 +314,7 @@ struct App {
     primary: Rect,
     secondary: Option<Rect>,
     pending_layout: Rc<Cell<Option<PageLayout>>>,
+    layout_viewport: Option<crate::layout::Viewport>,
     live_resize: bool,
     overlay: bool,
     ready: bool,
@@ -426,6 +428,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         primary: Rect::default(),
         secondary: None,
         pending_layout: Rc::new(Cell::new(None)),
+        layout_viewport: None,
         live_resize: false,
         overlay: false,
         ready: false,
@@ -2355,11 +2358,18 @@ impl App {
                 }
                 return;
             }
-            Command::Layout { primary, secondary, live_resize } => {
+            Command::Layout { primary, secondary, viewport, live_resize } => {
                 if self.split_handle.as_ref().is_some_and(|handle| handle.dragging()) { return; }
+                let Some(window) = &self.window else { return; };
+                let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+                let current = crate::layout::Viewport { width: size.width, height: size.height };
+                // A renderer can finish an older resize after the native window
+                // has moved on. It must not shrink the pages back to that frame.
+                if viewport.is_some_and(|viewport| !viewport.matches(current)) { return; }
                 if primary.valid() && secondary.is_none_or(|r| r.valid()) {
                     self.primary = primary;
                     self.secondary = secondary;
+                    self.layout_viewport = Some(current);
                     self.live_resize = live_resize;
                 } else {
                     return;
@@ -2712,9 +2722,10 @@ impl ApplicationHandler<Event> for App {
                 .with_ipc_handler(move|req|{
                     if req.uri().scheme_str()!=Some("https")||req.uri().host()!=Some("era.ui")||req.uri().path()!="/index.html"||req.body().len()>16384{return}
                     if let Ok(c)=serde_json::from_str::<Command>(req.body()){
-                        if let Command::Layout { primary, secondary, live_resize } = c {
+                        if let Command::Layout { primary, secondary, viewport, live_resize } = c {
                             if primary.valid() && secondary.is_none_or(|r| r.valid())
-                                && pending_layout.replace(Some(PageLayout { primary, secondary, live_resize })).is_none() {
+                                && viewport.is_none_or(|v| v.valid())
+                                && pending_layout.replace(Some(PageLayout { primary, secondary, viewport, live_resize })).is_none() {
                                 let _ = proxy.send_event(Event::Layout);
                             }
                         } else { let _=proxy.send_event(Event::Command(c)); }
@@ -2803,7 +2814,7 @@ impl ApplicationHandler<Event> for App {
             }
             Event::Layout => {
                 if let Some(layout) = self.pending_layout.take() {
-                    self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, live_resize: layout.live_resize }, Some(event_loop));
+                    self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, viewport: layout.viewport, live_resize: layout.live_resize }, Some(event_loop));
                 }
             }
             Event::DataCleared(kind, ok) => {
@@ -3165,6 +3176,23 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 self.finish_split_resize();
                 self.dismiss_tab_preview();
+                if let Some(w) = &self.window {
+                    let size = w.inner_size().to_logical::<f64>(w.scale_factor());
+                    let current = crate::layout::Viewport { width: size.width, height: size.height };
+                    if current.valid() {
+                        if let Some(previous) = self.layout_viewport {
+                            (self.primary, self.secondary) = crate::layout::resized(
+                                self.primary, self.secondary, previous, current,
+                                self.state.sidebar_width, self.state.sidebar_collapsed,
+                            );
+                        }
+                        self.layout_viewport = Some(current);
+                        // The pages reflow now, even if the shell's JS is busy.
+                        // Its next layout restores the rounded card decoration.
+                        self.live_resize = true;
+                        if let Err(e) = self.sync_page_bounds() { self.error(e); }
+                    }
+                }
                 if let Err(e) = self.update_window_frame() {
                     self.error(e);
                 }
@@ -3180,7 +3208,7 @@ impl ApplicationHandler<Event> for App {
                         }
                     }
                 }
-                if let Err(e) = self.sync() {
+                if let Err(e) = self.sync_layout() {
                     self.error(e)
                 }
             }

@@ -1,5 +1,11 @@
 # 实际验证记录
 
+## 网页宽度更新滞后（Issue #23，2026-11-14）
+
+[Issue #23](https://github.com/haitang000/RoveBrowser/issues/23)：窗口尺寸事件现在直接按现有卡片边距、分屏比例和侧栏宽度调整真实 WebView2 视口，无需等待界面 WebView 的 `resize`／`ResizeObserver` 回报；缩放过程也不再重复执行页面创建、导航与设置同步。布局消息携带来源视口，原生端拒绝旧窗口尺寸的迟到回报。侧栏拖动在指针回调内同步提交两侧网页尺寸，减少等待下一次界面布局回调造成的滞后。
+
+验证通过：TypeScript／Vite 构建、94 项前端单元测试、103 项 Rust 测试和 24 项侧栏／窗口布局 E2E。新增 `npm run test:native:resize` 在独立临时 profile 中阻塞界面脚本 5 秒，再用 Win32 改变窗口大小，检查单页、分屏、窄窗口响应式侧栏、反向扩宽及旧布局拒绝；真实网页在界面恢复前已更新视口，保持可见且未重新加载。该测试在修复前的 Debug 程序上复现超时。现有 `test:native:sidebar` 也通过，覆盖单页／分屏拖动、松手保存、折叠展开、重启恢复和重置。结果位于 `test-results/native-resize/result.json` 与 `test-results/native-sidebar/result.json`。此验证证明尺寸更新不再依赖界面脚本，不能用于证明复杂网页绘制或桌面合成没有延迟。
+
 ## 设置搜索高亮（Issue #25，2026-11-14）
 
 [Issue #25](https://github.com/haitang000/RoveBrowser/issues/25) 已实现：搜索结果通过“分类 › 分组”显示来源层级，标题、说明、操作文字、工作区名称和快捷键中的命中词以适配浅色／深色的底色高亮。筛选与高亮共用逐词、大小写和 NFKD 规范化规则；重叠命中合并，清空搜索或切换分类后恢复普通文字。高亮使用 Vue 文本节点，工作区名称中的 HTML 与正则特殊字符均按原文显示，组合音标和 emoji 保持完整。

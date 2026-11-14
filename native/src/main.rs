@@ -17,6 +17,7 @@ mod onboarding;
 mod import;
 mod import_store;
 mod instance;
+mod layout;
 mod passwords;
 mod preview;
 mod shadow;

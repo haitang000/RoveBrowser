@@ -71,6 +71,7 @@ cargo test --manifest-path native/Cargo.toml -- --test-threads=1
 cargo build --manifest-path native/Cargo.toml
 npm run test:native                     # Windows 原生宿主 / WebView2 冒烟测试
 npm run test:native:sidebar             # 侧栏调宽、真实视口和重启恢复专项（需先构建 Debug）
+npm run test:native:resize              # 界面脚本阻塞时的窗口缩放、分屏视口和旧布局拒绝（需先构建 Debug）
 npm run test:native:sleep               # 后台标签休眠、真实 TrySuspend/Resume 与设置开关专项
 ```
 

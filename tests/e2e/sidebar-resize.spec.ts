@@ -136,3 +136,32 @@ for (const split of [false, true]) test(`native ${split ? "split" : "single"} pa
   expect(await page.evaluate(() => window.__sidebarTest.writes)).toEqual([360]);
   expect(await page.evaluate(() => window.__sidebarTest.overlays)).toEqual([]);
 });
+
+for (const split of [false, true]) test(`sidebar input submits ${split ? "both viewports" : "the viewport"} before layout observers run`, async ({ page }) => {
+  const state = initialState();
+  state.activeTab = "github";
+  if (split) state.tabs.find(tab => tab.id === "github")!.splitWith = "wiki";
+  await nativeShell(page, state);
+  const point = await startDrag(page);
+  await page.evaluate(async point => {
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    const handle = document.querySelector('.sidebar-resize-handle')!;
+    for (const delta of [1, 100, -40, 80]) {
+      handle.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 1, clientX: point.x + delta, clientY: point.y, bubbles: true,
+      }));
+      const layout = window.__sidebarTest.layout!;
+      const slots = [...document.querySelectorAll('.page-pane > .webview-slot')];
+      slots.forEach((slot, i) => {
+        const rect = slot.getBoundingClientRect();
+        const reported = i ? layout.secondary! : layout.primary;
+        if (Math.abs(rect.x - reported.x) > 0.1 || Math.abs(rect.width - reported.width) > 0.1)
+          throw Error('Page bounds lag behind sidebar input');
+      });
+      const viewport = (layout as Report & { viewport: { width: number; height: number } }).viewport;
+      if (viewport.width !== innerWidth || viewport.height !== innerHeight)
+        throw Error('Layout is missing its source viewport');
+    }
+  }, point);
+  await page.mouse.up();
+});

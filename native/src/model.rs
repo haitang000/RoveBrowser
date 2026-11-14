@@ -367,6 +367,8 @@ pub enum Command {
     Layout {
         primary: Rect,
         secondary: Option<Rect>,
+        #[serde(default)]
+        viewport: Option<crate::layout::Viewport>,
         #[serde(default, rename = "liveResize")]
         live_resize: bool,
     },

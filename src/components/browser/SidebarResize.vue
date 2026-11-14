@@ -4,6 +4,7 @@ import { useBrowser } from "../../stores/browser";
 import { MIN_SIDEBAR_WIDTH, normalizeSidebarWidth, sidebarWidthLimit, visibleSidebarWidth } from "../../lib/sidebar-width";
 
 const b = useBrowser();
+const emit = defineEmits<{ resize: [] }>();
 const preferred = ref(normalizeSidebarWidth(b.state.sidebarWidth));
 const viewport = ref(innerWidth);
 const width = computed(() => visibleSidebarWidth(preferred.value, viewport.value));
@@ -52,6 +53,9 @@ function resize(event: PointerEvent) {
     moved = true;
     preferred.value = value;
     paint();
+    // Submit the new page bounds in this input callback, before the next
+    // ResizeObserver/paint turn can leave the real WebViews behind the track.
+    emit("resize");
   };
   const finish = (commit = true) => {
     finishResize = undefined;
