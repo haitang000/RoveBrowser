@@ -154,6 +154,7 @@ struct Page {
     viewport: Rc<Cell<Option<[i32; 2]>>>,
     dark: Cell<bool>,
     navigation: Rc<NavigationPolicy>,
+    error_page: Rc<crate::error_page::ErrorPage>,
     /// The page is suspended (`ICoreWebView2_3::TrySuspend`). Runtime only.
     sleeping: Rc<Cell<bool>>,
     /// A suspension is in flight; do not ask for another.
@@ -213,6 +214,7 @@ impl Page {
             })?;
             self.view.set_background_color(surface_color(dark))?;
             self.dark.set(dark);
+            self.error_page.set_theme(&self.view, dark);
         }
         Ok(())
     }
@@ -330,6 +332,7 @@ struct App {
 }
 struct PreviewRender {
     view: WebView,
+    error_page: Rc<crate::error_page::ErrorPage>,
     source: String,
     epoch: u64,
     loading: bool,
@@ -1052,7 +1055,6 @@ impl App {
         let p2 = p.clone();
         let id2 = id.clone();
         let view = WebViewBuilder::new_with_web_context(&mut self.context)
-            .with_url(&tab.url)
             .with_visible(false)
             .with_focused(false)
             .with_background_color(surface_color(self.state.theme == "dark"))
@@ -1096,7 +1098,9 @@ impl App {
             navigation.clone(),
             self.live_settings.clone(),
         )?;
+        let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         self.apply_site_controls(&view, &tab.url, tab.muted);
+        view.load_url(&tab.url)?;
         Ok(Page {
             view,
             url: tab.url.clone(),
@@ -1109,6 +1113,7 @@ impl App {
             viewport: Rc::new(Cell::new(None)),
             dark: Cell::new(self.state.theme == "dark"),
             navigation,
+            error_page,
             sleeping: Rc::new(Cell::new(false)),
             sleep_pending: Rc::new(Cell::new(false)),
             sleep_failed_at: Cell::new(None),
@@ -1206,7 +1211,7 @@ impl App {
             let key = tab.id.clone();
             let proxy = self.proxy.clone();
             let view = WebViewBuilder::new_with_web_context(&mut self.context)
-                .with_url(&tab.url).with_visible(false).with_focused(false)
+                .with_visible(false).with_focused(false)
                 .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
                 .with_background_color(surface_color(self.state.theme == "dark"))
                 .with_additional_browser_args(browser_args(false))
@@ -1217,14 +1222,16 @@ impl App {
                     let _ = proxy.send_event(Event::PreviewLoad(key.clone(), epoch, url, matches!(event, PageLoadEvent::Started)));
                 }).build_as_child(self.window.as_ref().unwrap())?;
             crate::web_settings::apply(&view, &self.state.settings)?;
+            let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
             view.set_bounds(self.bounds(self.primary))?;
+            view.load_url(&tab.url)?;
             let timed_key = tab.id.clone();
             let proxy = self.proxy.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(12));
                 let _ = proxy.send_event(Event::PreviewLoad(timed_key, epoch, String::new(), false));
             });
-            self.preview_renders.insert(tab.id, PreviewRender { view, source: tab.url, epoch, loading: true, pending: false, version: 0 });
+            self.preview_renders.insert(tab.id, PreviewRender { view, error_page, source: tab.url, epoch, loading: true, pending: false, version: 0 });
         }
         self.sync_layout()?;
         Ok(())
@@ -1754,6 +1761,9 @@ impl App {
         }
         for page in self.pages.values().chain(self.peek.iter().map(|p| &p.page)) {
             page.set_theme(self.state.theme == "dark")?;
+        }
+        for render in self.preview_renders.values() {
+            render.error_page.set_theme(&render.view, self.state.theme == "dark");
         }
         self.sync_layout()
     }
@@ -2964,6 +2974,7 @@ impl ApplicationHandler<Event> for App {
             Event::Shortcut(key, shift) => self.shortcut(key, shift),
             Event::Open(url) => self.command(Command::New { url }, Some(event_loop)),
             Event::Title(id, title) => {
+                let failed = self.pages.get(&id).is_some_and(|p| p.error_page.is_failed());
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
                     p.tab.title = title.chars().take(512).collect();
                     self.publish_peek();
@@ -2971,7 +2982,7 @@ impl ApplicationHandler<Event> for App {
                 }
                 if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
                     t.title = title.chars().take(512).collect();
-                    if self.state.settings.remember_history && model::is_web(&t.url) {
+                    if !failed && self.state.settings.remember_history && model::is_web(&t.url) {
                         let _ = self.storage.visit(&t.title, &t.url);
                     }
                 }
@@ -2979,6 +2990,7 @@ impl ApplicationHandler<Event> for App {
                 self.save();
             }
             Event::Load(id, url, loading) => {
+                let failed = self.pages.get(&id).is_some_and(|p| p.error_page.is_failed());
                 // A different document in the page the bar searched ends the
                 // session. The same page's own first load does not: the bar may
                 // open while that document is still arriving.
@@ -3025,13 +3037,13 @@ impl ApplicationHandler<Event> for App {
                             }
                         }
                     }
-                    if !loading && self.state.settings.remember_history {
+                    if !loading && !failed && self.state.settings.remember_history {
                         let _ = self.storage.visit(&t.title, &t.url);
                     }
                 }
                 self.publish();
                 if !loading {
-                    if self.state.settings.autofill {
+                    if !failed && self.state.settings.autofill {
                         if let Some(page) = self.pages.get(&id) {
                             if let Some(origin) = crate::import::origin(&page.url) {
                                 let logins = self.storage.imported_logins(&origin);
