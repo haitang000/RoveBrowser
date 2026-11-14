@@ -19,6 +19,8 @@ import {
 import type { Space } from "../../lib/types";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
+import SearchHighlight from "../common/SearchHighlight.vue";
+import { matchesSettingsSearch, settingsSearchWords } from "../../lib/settings-search";
 import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 import SpaceLookEditor from "./SpaceLookEditor.vue";
 import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } from "../../lib/space-look";
@@ -80,17 +82,9 @@ watch(pane, (next, prev) => {
   if (scroll.value) scroll.value.scrollTop = 0;
 });
 const searching = computed(() => !!query.value.trim());
-const words = computed(() =>
-  query.value
-    .normalize("NFKD")
-    .toLocaleLowerCase()
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean),
-);
+const words = computed(() => settingsSearchWords(query.value));
 function matches(...text: string[]) {
-  const joined = text.join(" ").normalize("NFKD").toLocaleLowerCase();
-  return words.value.every((word) => joined.includes(word));
+  return matchesSettingsSearch(words.value, ...text);
 }
 type Row = {
   id: string;
@@ -581,19 +575,17 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               class="settings-group"
               :aria-label="group.title"
             >
-              <h3>
-                {{
-                  searching
-                    ? `${SETTINGS_PANES.find((p) => p.id === group.pane)?.title} · `
-                    : ""
-                }}{{ group.title }}
+              <h3 :class="{ 'settings-result-heading': searching }">
+                <span v-if="searching" class="settings-result-pane">
+                  <SearchHighlight :text="SETTINGS_PANES.find((p) => p.id === group.pane)!.title" :words="words" />
+                  <span class="settings-result-separator" aria-hidden="true">›</span>
+                </span>
+                <span><SearchHighlight :text="group.title" :words="words" /></span>
               </h3>
               <div v-for="row in group.rows" :key="row.id" class="setting-row">
                 <div class="setting-description">
-                  <label :for="`setting-${row.id}-${tabId}`">{{
-                    row.title
-                  }}</label>
-                  <p>{{ row.detail }}</p>
+                  <label :for="`setting-${row.id}-${tabId}`"><SearchHighlight :text="row.title" :words="words" /></label>
+                  <p><SearchHighlight :text="row.detail" :words="words" /></p>
                 </div>
                 <button
                   v-if="row.kind === 'toggle'"
@@ -651,9 +643,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   :aria-label="row.id === 'default' ? row.action : `${row.action}${row.title}`"
                   @click="action(row)"
                 >
-                  {{ row.action }}
+                  <SearchHighlight :text="row.action!" :words="words" />
                 </button>
-                <span v-else class="setting-status">{{ row.action }}</span>
+                <span v-else class="setting-status"><SearchHighlight :text="row.action!" :words="words" /></span>
               </div>
             </section>
             <section
@@ -662,7 +654,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               aria-label="你的工作区"
             >
               <div class="settings-group-heading">
-                <h3>你的工作区</h3>
+                <h3 :class="{ 'settings-result-heading': searching }">
+                  <span v-if="searching" class="settings-result-pane">
+                    <SearchHighlight text="工作区" :words="words" />
+                    <span class="settings-result-separator" aria-hidden="true">›</span>
+                  </span>
+                  <span><SearchHighlight text="你的工作区" :words="words" /></span>
+                </h3>
                 <button
                   class="setting-button"
                   :disabled="b.state.spaces.length >= 16"
@@ -687,7 +685,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   <Icon v-else name="spaces" :size="18" />
                 </span>
                 <div class="setting-description">
-                  <strong>{{ space.name }}</strong>
+                  <strong><SearchHighlight :text="space.name" :words="words" /></strong>
                   <p>
                     {{
                       b.state.tabs.filter(
@@ -735,7 +733,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               aria-label="快捷键列表"
             >
               <div class="settings-group-heading">
-                <h3>快捷键</h3>
+                <h3 :class="{ 'settings-result-heading': searching }"><span><SearchHighlight text="快捷键" :words="words" /></span></h3>
                 <button
                   class="setting-button"
                   @click="
@@ -756,8 +754,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 class="setting-row"
               >
                 <div class="setting-description">
-                  <strong>{{ item.title }}</strong>
-                  <p>{{ item.group }}</p>
+                  <strong><SearchHighlight :text="item.title" :words="words" /></strong>
+                  <p><SearchHighlight :text="item.group" :words="words" /></p>
                 </div>
                 <button
                   class="setting-shortcut"
@@ -768,11 +766,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                     recording = recording === item.id ? '' : item.id;
                   "
                 >
-                  <kbd>{{
-                    recording === item.id
-                      ? "请按下组合键…"
-                      : shortcutText(shortcutFor(item.id, b.settings))
-                  }}</kbd>
+                  <kbd><SearchHighlight
+                    :text="recording === item.id ? '请按下组合键…' : shortcutText(shortcutFor(item.id, b.settings))"
+                    :words="words"
+                  /></kbd>
                 </button>
               </div>
             </section>

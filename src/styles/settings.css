@@ -126,6 +126,32 @@
   font-size: 11px;
   font-weight: 550;
 }
+.settings-group h3.settings-result-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink);
+}
+.settings-result-pane {
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 450;
+}
+.settings-result-separator {
+  margin-left: 6px;
+  color: var(--tertiary);
+}
+.settings-search-match {
+  padding: 0;
+  border-radius: 2px;
+  background: #ffe7a3;
+  color: var(--ink);
+}
+:root[data-theme="dark"] .settings-search-match {
+  background: #66501b;
+}
 .settings-group-heading {
   display: flex;
   align-items: center;

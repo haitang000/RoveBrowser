@@ -116,6 +116,79 @@ test("custom engine validates its address and shortcut recording changes actual 
   ).toHaveText("Ctrl + T");
 });
 
+test("settings search highlights titles, descriptions and result paths without changing controls", async ({ page }) => {
+  const search = page.getByRole("searchbox", { name: "查找设置" });
+  const group = page.getByRole("region", { name: "自动填充", exact: true });
+  await search.fill("自动填充");
+  await expect(group.locator("h3")).toHaveText(/密码\s*›\s*自动填充/);
+  await expect(group.locator("h3 mark")).toHaveText("自动填充");
+  await expect(group.locator("label mark")).toHaveText("自动填充");
+  const toggle = group.getByRole("switch", { name: "自动填充表单", exact: true });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(group.locator("label").filter({ hasText: "自动填充表单" })).toHaveText("自动填充表单");
+
+  await search.fill("表单 登录");
+  await expect(group.locator("label mark")).toHaveText("表单");
+  await expect(group.locator(".setting-description p mark")).toHaveText(["表单", "登录"]);
+  await search.fill("隐私");
+  await expect(page.locator(".settings-result-pane mark")).toHaveText("隐私");
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(page.locator(".settings-page mark")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
+});
+
+test("shortcut search highlights normalized key names and overlapping words", async ({ page }) => {
+  const search = page.getByRole("searchbox", { name: "查找设置" });
+  await search.fill("ＣＴＲＬ 标签");
+  const group = page.getByRole("region", { name: "快捷键列表" });
+  await expect(group.locator(".setting-row")).toHaveCount(6);
+  await expect(group.locator("kbd mark")).toHaveText(Array(6).fill("Ctrl"));
+  await expect(group.locator("strong mark")).toHaveText(Array(6).fill("标签"));
+  await search.fill("自动 自动填充");
+  await expect(page.locator(".setting-description label mark")).toHaveText("自动填充");
+  await search.fill("[.*+?]");
+  await expect(page.locator(".settings-empty")).toBeVisible();
+  await expect(page.locator(".settings-page mark")).toHaveCount(0);
+});
+
+test("workspace search preserves Unicode and renders user text safely", async ({ page }) => {
+  await page.getByRole("button", { name: "工作区", exact: true }).click();
+  await page.getByRole("button", { name: "新建工作区", exact: true }).click();
+  const name = "Café Ｒｏｖｅ <b>.*</b> 👩‍💻";
+  const dialog = page.getByRole("dialog", { name: "新建工作区", exact: true });
+  await dialog.getByRole("textbox", { name: "工作区名称", exact: true }).fill(name);
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
+  const search = page.getByRole("searchbox", { name: "查找设置" });
+  const group = page.getByRole("region", { name: "你的工作区", exact: true });
+  await search.fill("cafe rove 👩");
+  await expect(group.locator("strong")).toHaveText(name);
+  await expect(group.locator("strong mark")).toHaveText(["Café", "Ｒｏｖｅ", "👩‍💻"]);
+  await search.fill("<b>.*</b>");
+  await expect(group.locator("strong mark")).toHaveText("<b>.*</b>");
+  await expect(group.locator("strong b")).toHaveCount(0);
+  await expect(group.getByRole("button", { name: `编辑 ${name}`, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "通用", exact: true }).click();
+  await expect(search).toHaveValue("");
+  await expect(page.locator(".settings-page mark")).toHaveCount(0);
+});
+
+test("search highlights adapt to light, dark and narrow settings panes", async ({ page }) => {
+  const search = page.getByRole("searchbox", { name: "查找设置" });
+  for (const theme of ["light", "dark"]) {
+    await search.fill("");
+    await page.getByRole("combobox", { name: "外观", exact: true }).selectOption(theme);
+    await search.fill("自动填充");
+    for (const width of [1280, 700, 480]) {
+      await page.setViewportSize({ width, height: 640 });
+      await expect(page.locator(".setting-description label mark")).toHaveText("自动填充");
+      expect(await page.locator(".settings-scroll").evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+      await page.screenshot({ path: `test-results/settings-search-${theme}-${width}.png` });
+    }
+  }
+});
+
 test("space editor creates and deletes a space in place with confirmation", async ({
   page,
 }) => {
