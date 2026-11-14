@@ -2,6 +2,8 @@
 
 研究基线：`https://github.com/ZigaoWang/zigzag`，提交 `5338e99f58aa9a75a0696d5d96ec74353c3b3c7d`。原始检出保留在 `.reference/zigzag`（不进入交付源码）。本文记录实际阅读的源码，不以 README 截图代替源码分析。
 
+> 2026-11-14 更新：上游参考已更新至 `626a464`（0.9.0 beta 8）。0.7–0.9 新增功能的移植候选、WebView2 落地方案与优先级另见[移植候选清单](PORT_CANDIDATES.md)；本文以下内容仍描述旧基线 `5338e99` 的移植研究。
+
 | 实际源码 | 阅读与迁移结论 | Rove 对应 |
 |---|---|---|
 | `Zigzag/Design/Tokens.swift` | 布局、Sidebar 专用尺寸优先于一般 Metric；透明度、圆角、动画 | `src/styles/tokens.css`、`theme.css`、`animations.css` |

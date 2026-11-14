@@ -122,6 +122,7 @@ test("space editor creates and deletes a space in place with confirmation", asyn
   await page.getByRole("button", { name: "工作区", exact: true }).click();
   await page.getByRole("button", { name: "新建工作区", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "新建工作区", exact: true });
+  await dialog.getByRole("button", { name: "效果", exact: true }).click();
   await expect(dialog.getByRole("slider", { name: "清透", exact: true })).toBeVisible();
   await expect(dialog.getByText("磨砂", { exact: true })).toHaveCount(0);
   await dialog
@@ -151,6 +152,7 @@ test("space editor creates and deletes a space in place with confirmation", asyn
 test("quick workspace editor keeps a single live clear control", async ({ page }) => {
   await page.getByRole("button", { name: "工作区与外观", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "工作区与外观", exact: true });
+  await dialog.getByRole("button", { name: "效果", exact: true }).click();
   const clear = dialog.getByRole("slider", { name: "清透", exact: true });
   await expect(clear).toBeVisible();
   await expect(dialog.getByText("磨砂", { exact: true })).toHaveCount(0);

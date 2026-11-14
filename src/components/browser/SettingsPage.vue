@@ -16,10 +16,12 @@ import {
   type SettingsPane,
   type Settings,
 } from "../../lib/settings";
-import type { Space, SpaceColor } from "../../lib/types";
+import type { Space } from "../../lib/types";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
+import SpaceLookEditor from "./SpaceLookEditor.vue";
+import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } from "../../lib/space-look";
 const props = defineProps<{ tabId: string; url: string }>();
 const b = useBrowser(),
   query = ref(""),
@@ -32,8 +34,7 @@ const editing = ref<string>(),
   spaceName = ref(""),
   spaceIcon = ref<string>(),
   pickingIcon = ref(false),
-  spaceColor = ref<SpaceColor>("sky"),
-  translucency = ref(0);
+  spaceLook = ref<LookFields>({ color: "sky" });
 const pending = ref<{
   kind: string;
   id?: string;
@@ -67,16 +68,6 @@ function trapFocus(event: KeyboardEvent) {
     first.focus();
   }
 }
-const colors: { id: SpaceColor; title: string }[] = [
-  { id: "sky", title: "天空" },
-  { id: "sage", title: "鼠尾草" },
-  { id: "sand", title: "沙色" },
-  { id: "rose", title: "玫瑰" },
-  { id: "lavender", title: "薰衣草" },
-  { id: "mint", title: "薄荷" },
-  { id: "peach", title: "蜜桃" },
-  { id: "graphite", title: "石墨" },
-];
 const pane = computed(() => settingsPane(props.url));
 const searching = computed(() => !!query.value.trim());
 const words = computed(() =>
@@ -426,8 +417,8 @@ function editSpace(space?: Space) {
   spaceName.value = space?.name || "";
   spaceIcon.value = space?.icon;
   pickingIcon.value = false;
-  spaceColor.value = space?.color || "sky";
-  translucency.value = space?.translucency || 0;
+  const source = space ?? { color: "sky" as const };
+  spaceLook.value = committed(openDraft(source, b.state.theme === "dark"), lookOf(source));
 }
 function saveSpace() {
   if (!spaceName.value.trim()) {
@@ -438,12 +429,15 @@ function saveSpace() {
     type: editing.value === "new" ? "spaceCreate" : "spaceUpdate",
     id: editing.value,
     name: spaceName.value.trim(),
-    color: spaceColor.value,
-    translucency: translucency.value,
     icon: spaceIcon.value ?? null,
     background: true,
+    ...commandLook(spaceLook.value),
   });
   editing.value = undefined;
+}
+function tileStyle(space: Space) {
+  const painted = frameOf(space, b.state.theme, false);
+  return painted.custom ? { background: painted.end ? `linear-gradient(160deg, ${painted.start}, ${painted.end})` : painted.start } : undefined;
 }
 function dropSpace(event: DragEvent, before: string) {
   const id = event.dataTransfer?.getData("text/era-space");
@@ -662,7 +656,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 @dragover.prevent
                 @drop.prevent="dropSpace($event, space.id)"
               >
-                <span class="space-color-tile" :data-color="space.color">
+                <span class="space-color-tile" :data-color="space.color" :style="tileStyle(space)">
                   <SpaceGlyph v-if="space.icon" :icon="space.icon" :size="16" />
                   <Icon v-else name="spaces" :size="18" />
                 </span>
@@ -796,31 +790,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
         </header>
         <form @submit.prevent="saveSpace">
           <SpaceIdentityEditor v-model:name="spaceName" v-model:icon="spaceIcon" v-model:picking="pickingIcon" />
-          <div v-show="!pickingIcon" class="swatches" aria-label="工作区颜色">
-            <button
-              v-for="color in colors"
-              :key="color.id"
-              type="button"
-              :data-color="color.id"
-              :aria-label="color.title"
-              :aria-pressed="spaceColor === color.id"
-              :class="{ chosen: spaceColor === color.id }"
-              @click="spaceColor = color.id"
-            >
-              <Icon v-if="spaceColor === color.id" name="check" />
-            </button>
-          </div>
-          <label class="glass-control"
-            >清透
-            <input
-              v-model.number="translucency"
-              aria-label="清透"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-          /></label>
-          <p class="settings-note">清透背景带轻微模糊，界面和网页保持清晰。</p>
+          <SpaceLookEditor
+            v-show="!pickingIcon"
+            :space="spaceLook"
+            :dark="b.state.theme === 'dark'"
+            @commit="spaceLook = $event"
+            @preview="spaceLook = $event"
+          />
           <p v-if="notice" role="status">{{ notice }}</p>
           <footer>
             <button

@@ -41,7 +41,7 @@ defineProps<{ swipeShares?: Record<string, number> | null }>();
         :title="s.name"
         :aria-label="`工作区 ${s.name}`"
         :aria-pressed="s.id === b.state.activeSpace"
-        @click="b.send({ type: 'space', id: s.id })"
+        @click="s.id === b.state.activeSpace ? b.toggleSpaceEditor(s.id) : b.send({ type: 'space', id: s.id })"
         @dragover.prevent
         @drop.prevent="
           b.send({

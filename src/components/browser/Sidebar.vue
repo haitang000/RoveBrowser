@@ -23,7 +23,7 @@ function showMenu(e: MouseEvent, tab: Tab) {
 <template>
   <aside class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)">
     <div class="sidebar-header">
-      <h1 class="space-name" :class="{compact: !b.settings.largeSpaceNames}" :title="b.space.name">
+      <h1 class="space-name editable" :class="{compact: !b.settings.largeSpaceNames}" :title="`${b.space.name} · 编辑空间`" role="button" tabindex="0" @click="b.toggleSpaceEditor(b.space.id)" @keydown.enter.prevent="b.toggleSpaceEditor(b.space.id)">
         <SpaceGlyph v-if="b.space.icon" :icon="b.space.icon" :size="b.settings.largeSpaceNames ? 22 : 13" />
         <span>{{ b.space.name }}</span>
       </h1>

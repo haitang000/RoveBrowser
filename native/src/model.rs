@@ -44,6 +44,43 @@ pub struct Tab {
     #[serde(default)]
     pub last_activated: u64,
 }
+/// A custom space color, from Zigzag's space editor. Absent fields keep the named color.
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SpacePaint {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hue: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tint: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hue2: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tint2: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness2: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain: Option<f64>,
+}
+impl SpacePaint {
+    fn cleaned(&self) -> Self {
+        let unit = |value: Option<f64>| value.filter(|n| n.is_finite()).map(|n| n.clamp(0.0, 1.0));
+        let tint = |value: Option<f64>| unit(value).filter(|n| *n <= 0.995);
+        Self {
+            hue: unit(self.hue),
+            tint: tint(self.tint),
+            brightness: unit(self.brightness),
+            hue2: unit(self.hue2),
+            tint2: tint(self.tint2),
+            brightness2: unit(self.brightness2),
+            angle: self.angle.filter(|n| n.is_finite()).map(|n| n.rem_euclid(360.0)),
+            grain: unit(self.grain).filter(|n| *n > 0.01),
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Space {
     pub id: String,
@@ -52,6 +89,8 @@ pub struct Space {
     /// How much of the desktop shows through the frame, 0 or absent when solid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translucency: Option<f64>,
+    #[serde(flatten, default)]
+    pub paint: SpacePaint,
     /// The tab this space was showing when the user left it. Switching back
     /// restores it instead of the space's first tab; absent in an older session.
     #[serde(default, rename = "activeTab", skip_serializing_if = "Option::is_none")]
@@ -287,6 +326,8 @@ pub enum Command {
         #[serde(default)] background: bool,
         #[serde(default)] translucency: f64,
         #[serde(default)] icon: Option<String>,
+        #[serde(flatten, default)]
+        paint: SpacePaint,
     },
     #[serde(rename = "spaceUpdate")]
     UpdateSpace {
@@ -297,6 +338,8 @@ pub enum Command {
         translucency: f64,
         #[serde(default)]
         icon: Option<String>,
+        #[serde(flatten, default)]
+        paint: SpacePaint,
     },
     #[serde(rename = "borderless")]
     Borderless,
@@ -549,6 +592,7 @@ impl Default for State {
                 name: n.to_string(),
                 color: c.to_string(),
                 translucency: None,
+                paint: SpacePaint::default(),
                 active_tab: None,
                 icon: None,
             })
@@ -1081,7 +1125,7 @@ impl State {
                     self.enter_space(id)?;
                 }
             }
-            Command::CreateSpace { name, color, background, translucency, icon } => {
+            Command::CreateSpace { name, color, background, translucency, icon, paint } => {
                 if name.trim().is_empty() { return Err("请输入工作区名称".into()); }
                 if !valid_color(color) {
                     return Err("未知工作区颜色".into());
@@ -1095,6 +1139,7 @@ impl State {
                     name: name.trim().chars().take(40).collect(),
                     color: color.clone(),
                     translucency: (0.005..=1.0).contains(translucency).then_some(*translucency),
+                    paint: paint.cleaned(),
                     active_tab: None,
                     icon: clean_icon(icon)?,
                 });
@@ -1106,6 +1151,7 @@ impl State {
                 color,
                 translucency,
                 icon,
+                paint,
             } => {
                 if !valid_color(color) {
                     return Err("未知工作区颜色".into());
@@ -1117,6 +1163,7 @@ impl State {
                     }
                     s.color = color.clone();
                     s.translucency = (0.005..=1.0).contains(translucency).then_some(*translucency);
+                    s.paint = paint.cleaned();
                     s.icon = icon;
                 }
             }
@@ -1539,6 +1586,7 @@ mod tests {
                 color: state.spaces[0].color.clone(),
                 translucency: 0.0,
                 icon: Some("🚀".into()),
+                paint: SpacePaint::default(),
             })
             .unwrap();
         assert_eq!(state.spaces[0].translucency, None);
@@ -1554,6 +1602,7 @@ mod tests {
                 color: state.spaces[0].color.clone(),
                 translucency: 0.0,
                 icon: Some("  ".into()),
+                paint: SpacePaint::default(),
             })
             .unwrap();
         assert!(state.spaces[0].icon.is_none());
@@ -1565,7 +1614,53 @@ mod tests {
                 color: state.spaces[0].color.clone(),
                 translucency: 0.0,
                 icon: Some("a\nb".into()),
+                paint: SpacePaint::default(),
             })
             .is_err());
+    }
+    #[test]
+    fn space_paint_roundtrips_and_clears() {
+        let mut state = State::default();
+        let id = state.spaces[0].id.clone();
+        state
+            .apply(&Command::UpdateSpace {
+                id: id.clone(),
+                name: state.spaces[0].name.clone(),
+                color: "sky".into(),
+                translucency: 0.4,
+                icon: None,
+                paint: SpacePaint {
+                    hue: Some(0.2),
+                    tint: Some(1.0),
+                    brightness: Some(0.3),
+                    hue2: Some(0.5),
+                    tint2: None,
+                    brightness2: Some(0.5),
+                    angle: Some(90.0),
+                    grain: Some(0.004),
+                },
+            })
+            .unwrap();
+        assert_eq!(state.spaces[0].paint.hue, Some(0.2));
+        assert!(state.spaces[0].paint.tint.is_none());
+        assert!(state.spaces[0].paint.grain.is_none());
+        assert_eq!(state.spaces[0].paint.angle, Some(90.0));
+        let saved = serde_json::to_value(&state).unwrap();
+        assert_eq!(saved["spaces"][0]["hue"], 0.2);
+        assert!(saved["spaces"][0].get("grain").is_none());
+        let restored: State = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.spaces[0].paint.brightness, Some(0.3));
+        state
+            .apply(&Command::UpdateSpace {
+                id,
+                name: state.spaces[0].name.clone(),
+                color: "sky".into(),
+                translucency: 0.0,
+                icon: None,
+                paint: SpacePaint::default(),
+            })
+            .unwrap();
+        assert!(state.spaces[0].paint.hue.is_none());
+        assert!(state.spaces[0].translucency.is_none());
     }
 }

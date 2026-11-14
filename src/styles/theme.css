@@ -169,6 +169,21 @@ kbd {
 .browser-shell.glass {
   background: color-mix(in srgb, var(--frame) calc(var(--frame-coverage) * 100%), transparent);
 }
+.browser-shell.custom-frame,
+.browser-shell.custom-frame.glass {
+  position: relative;
+  background: var(--shell-bg);
+}
+.browser-shell.custom-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity, 0);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/></filter><rect width='128' height='128' filter='url(%23n)'/></svg>");
+  background-size: 140px;
+  mix-blend-mode: multiply;
+}
 .browser-shell.glass.glass-neutral {
   --frame: #fff;
 }

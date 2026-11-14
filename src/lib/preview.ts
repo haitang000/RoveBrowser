@@ -8,6 +8,7 @@ import { sameOrigin } from "./favicon";
 import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type SettingsPane, type Settings } from "./settings";
 import { nowSeconds, tabIsFaded } from "./tab-meta";
 import { cleanIcon } from "./space-icon";
+import { paintKeys } from "./space-look";
 import { ONBOARDING_STEPS, saveOnboardingSites } from "./onboarding";
 export function initialState(): BrowserState {
   return upgradeLibrary({
@@ -261,6 +262,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         translucency: Number(c.translucency) > .005 ? Math.min(1, Number(c.translucency)) : undefined,
         ...(icon ? { icon } : {}),
       });
+      paintKeys(c, s.spaces.at(-1)!);
       if (!c.background) return reduce(s, { type: "space", id });
       break;
     }
@@ -271,6 +273,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
         space.color = c.color as any;
         const amount = Number(c.translucency);
         space.translucency = amount > 0.005 ? Math.min(1, amount) : undefined;
+        paintKeys(c, space);
         const icon = cleanIcon(c.icon);
         if (icon) space.icon = icon;
         else delete space.icon;

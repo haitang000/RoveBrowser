@@ -1,0 +1,192 @@
+/* Space editor, adapted from Zigzag/Sidebar/SpaceEditor.swift.
+   Copyright 2026 Zigao Wang, Apache-2.0. Modified for Rove. */
+.space-look {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.look-presets {
+  display: grid;
+  grid-template-columns: repeat(9, 24px);
+  justify-content: space-between;
+  row-gap: 8px;
+}
+.look-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--ink) 30%, transparent);
+  box-shadow: inset 0 0 0 2px transparent;
+  background-clip: padding-box;
+}
+.look-swatch.through {
+  background-color: #d0d0d0;
+  background-blend-mode: normal;
+}
+.look-swatch.chosen {
+  box-shadow: inset 0 0 0 2px var(--panel), 0 0 0 1.5px var(--ink);
+}
+.look-swatch:hover {
+  transform: scale(1.08);
+}
+.color-wheel {
+  position: relative;
+  height: 200px;
+  touch-action: none;
+  cursor: crosshair;
+}
+.color-wheel canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.wheel-link {
+  position: absolute;
+  height: 2px;
+  background: #fff;
+  transform-origin: 0 50%;
+  border-radius: 1px;
+  box-shadow: 0 0 1.5px #0004;
+  pointer-events: none;
+}
+.wheel-knob {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px #0004;
+  cursor: grab;
+}
+.wheel-knob.selected {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.look-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--quiet);
+}
+.look-row input[type="range"] {
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  border-radius: 15px;
+  appearance: none;
+  border: 1px solid var(--edge);
+}
+.look-row input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #00000014;
+  box-shadow: 0 1px 3px #0004;
+}
+.look-fold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+}
+.look-disclosure,
+.look-reset {
+  font-size: 13px;
+  color: var(--quiet);
+}
+.look-disclosure[aria-expanded="true"] {
+  color: var(--ink);
+}
+.look-reset:disabled {
+  opacity: 0.35;
+}
+.look-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.look-gradient {
+  grid-template-columns: 48px 26px 26px 40px;
+  justify-content: start;
+}
+.color-chip,
+.direction-dial {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--edge);
+  position: relative;
+}
+.color-chip.selected {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.color-chip.add {
+  color: var(--quiet);
+  font-size: 16px;
+}
+.chip-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--panel);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+.direction-dial {
+  width: 40px;
+  height: 40px;
+  cursor: grab;
+  touch-action: none;
+}
+.direction-dial span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 2px;
+  margin: -1px 0 0 -2px;
+  border-radius: 1px;
+  background: #52525b;
+  transform-origin: 0 50%;
+}
+.space-editor-panel {
+  position: fixed;
+  z-index: 31;
+  top: 48px;
+  left: calc(var(--sidebar-width) + 8px);
+}
+.browser-shell.collapsed .space-editor-panel {
+  left: 12px;
+}
+.space-editor-panel {
+  width: 300px;
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 14px;
+  box-shadow: 0 3px 16px var(--panel-shadow);
+}
+.space-editor-panel .space-name-input {
+  margin-bottom: 12px;
+}
+.space-name.editable {
+  cursor: default;
+}
+.space-name.editable:hover {
+  background: var(--hover);
+  border-radius: 6px;
+}

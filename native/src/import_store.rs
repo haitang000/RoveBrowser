@@ -41,6 +41,7 @@ impl Storage {
                     name: format!("导入 · {}", batch.name),
                     color: "sand".into(),
                     translucency: None,
+                    paint: crate::model::SpacePaint::default(),
                     active_tab: None,
                     icon: None,
                 });

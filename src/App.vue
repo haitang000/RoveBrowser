@@ -17,16 +17,31 @@ import Icon from "./components/common/Icon.vue";
 import { browserKey } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
 import { coverage, isSeeThrough } from "./lib/page-frame";
+import { frameOf } from "./lib/space-look";
+import SpaceEditor from "./components/browser/SpaceEditor.vue";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
 const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
 const transparencyReduced = ref(reducedTransparency.matches);
 const glassAllowed = computed(() => !transparencyReduced.value);
-const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(b.space?.translucency) && glassAllowed.value);
+const shownSpace = computed(() => {
+  const preview = b.spacePreview;
+  return preview && preview.id === b.space?.id ? { ...b.space, ...preview.look } : b.space;
+});
+const painted = computed(() => frameOf(shownSpace.value, b.state.theme, true));
+const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(shownSpace.value?.translucency) && glassAllowed.value);
 watch(() => b.onboardingOpen, (open) => { document.documentElement.dataset.onboarding = String(open); }, { immediate: true, flush: "sync" });
 const shellStyle = computed(() => ({
   ...(glassActive.value
-    ? { "--frame-coverage": String(coverage(b.space?.translucency)) }
+    ? { "--frame-coverage": String(coverage(shownSpace.value?.translucency)) }
+    : {}),
+  ...(painted.value.custom
+    ? {
+        "--frame": painted.value.start,
+        "--frame-h": String(painted.value.hue),
+        "--shell-bg": painted.value.background,
+        "--grain-opacity": String(painted.value.grain * 0.18),
+      }
     : {}),
 }));
 let frameAnimation: Animation | undefined;
@@ -36,19 +51,27 @@ function finishFrameAnimation() { frameAnimation?.cancel(); frameAnimation = und
 // ColorView.setColor/CALayer.set: retarget from the color currently on screen.
 // Submit only a background-color effect; the titlebar, list and native page stay live.
 watch(
-  [() => b.state.theme, () => b.space.color] as const,
-  ([theme, color]) => {
+  [() => b.state.theme, () => b.space, () => b.spacePreview] as const,
+  () => {
+    const theme = painted.value.theme ?? b.state.theme;
     const from = shell.value ? getComputedStyle(shell.value).backgroundColor : undefined;
     document.documentElement.dataset.theme = theme;
-    document.documentElement.dataset.color = color;
+    document.documentElement.dataset.color = painted.value.custom ? "custom" : b.space.color;
+    if (painted.value.custom) {
+      document.documentElement.style.setProperty("--frame", painted.value.start);
+      document.documentElement.style.setProperty("--frame-h", String(painted.value.hue));
+    } else {
+      document.documentElement.style.removeProperty("--frame");
+      document.documentElement.style.removeProperty("--frame-h");
+    }
     finishFrameAnimation();
-    if (!shell.value || !from || reducedMotion.matches || b.settings.reduceMotion || glassActive.value) return;
+    if (!shell.value || !from || painted.value.custom || reducedMotion.matches || b.settings.reduceMotion || glassActive.value) return;
     const to = getComputedStyle(document.documentElement).getPropertyValue("--frame").trim();
     frameAnimation = shell.value.animate([{ backgroundColor: from }, { backgroundColor: to }], {
       duration: SPACE_SWIPE.backgroundDuration, easing: "ease",
     });
   },
-  { immediate: true },
+  { immediate: true, deep: true },
 );
 watch(
   [() => b.overlay, () => b.commandOpen],
@@ -91,7 +114,8 @@ onBeforeUnmount(() => {
     :class="{
       collapsed: b.state.sidebarCollapsed,
       glass: glassActive,
-      'glass-neutral': glassActive && b.space?.color === 'graphite',
+      'glass-neutral': glassActive && painted.neutralGlass,
+      'custom-frame': painted.custom,
     }"
     :style="shellStyle"
   >
@@ -116,7 +140,7 @@ onBeforeUnmount(() => {
         <Icon name="sidebar" /></button
       ><PageArea><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
     </div>
-    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><TabPreview />
+    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><SpaceEditor v-if="b.spaceEditor" :key="b.spaceEditor" /><TabPreview />
     <ErrorToast v-if="!b.native" />
     </template>
   </div>

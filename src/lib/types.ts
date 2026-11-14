@@ -6,6 +6,19 @@ export interface Space {
   color: SpaceColor;
   /** 0 is solid. Absent means solid. */
   translucency?: number;
+  /** Custom wheel hue, 0–1. Absent: the named color. */
+  hue?: number;
+  /** How much of that hue, 0–1. Absent with a hue means all of it. */
+  tint?: number;
+  /** 0 is near white, 1 is near black. Absent: follow the app theme. */
+  brightness?: number;
+  hue2?: number;
+  tint2?: number;
+  brightness2?: number;
+  /** Gradient direction in degrees. 0 is left to right, 90 is top to bottom. */
+  angle?: number;
+  /** 0 is smooth. Absent means smooth. */
+  grain?: number;
   /** One emoji. Absent: the switcher shows its number. */
   icon?: string;
   /** The tab this space was showing when the user left it; restored on switch back. */

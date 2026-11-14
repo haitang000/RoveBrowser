@@ -90,7 +90,7 @@ npm run test:native                     # Windows 原生宿主 / WebView2 冒烟
 - Windows 触控板手势、多屏混合 DPI 和部分窗口布局仍需更多硬件验证；网页缩略图可能显示最近捕获的画面或占位。
 - 视觉和交互参考 Zigzag，但 Windows 字体、窗口及平台能力存在差异，不保证像素级一致。
 
-更多细节见 [源码研究](docs/SOURCE_ANALYSIS.md)、[固定标签](docs/PINNED_TABS_PORT.md)、[首次引导](docs/ONBOARDING_PORT.md)、[设置](docs/SETTINGS_PORT.md) 和 [验证记录](docs/VALIDATION.md)。
+更多细节见 [源码研究](docs/SOURCE_ANALYSIS.md)、[移植候选](docs/PORT_CANDIDATES.md)、[固定标签](docs/PINNED_TABS_PORT.md)、[首次引导](docs/ONBOARDING_PORT.md)、[设置](docs/SETTINGS_PORT.md) 和 [验证记录](docs/VALIDATION.md)。
 
 ## 许可证与致谢
 

@@ -18,6 +18,7 @@ import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
+import type { LookFields } from "../lib/space-look";
 import type { ImportRequest, ImportSource } from "../lib/import";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
@@ -50,6 +51,8 @@ export const useBrowser = defineStore("browser", () => {
     commandMode = ref<"new" | "edit">("new"),
     deskOpen = ref(false),
     settingsOpen = ref(false),
+    spaceEditor = ref<string>(),
+    spacePreview = ref<{ id: string; look: LookFields }>(),
     dragging = ref(false),
     findOpen = ref(false),
     findQuery = ref(""),
@@ -122,8 +125,33 @@ export const useBrowser = defineStore("browser", () => {
     return label ? `${title} (${label})` : title;
   }
   const dataStatus = ref("");
+  function closeSpaceEditor() {
+    spaceEditor.value = undefined;
+    spacePreview.value = undefined;
+  }
+  function toggleSpaceEditor(id: string) {
+    if (spaceEditor.value === id) {
+      closeSpaceEditor();
+      return;
+    }
+    commandOpen.value = false;
+    deskOpen.value = false;
+    contextMenu.value = undefined;
+    downloadsOpen.value = false;
+    spaceEditor.value = id;
+  }
+  function previewSpace(id: string, look: LookFields) {
+    spacePreview.value = { id, look };
+  }
+  watch(() => state.value.activeSpace, (id) => {
+    if (spaceEditor.value && spaceEditor.value !== id) closeSpaceEditor();
+  });
+  watch([commandOpen, deskOpen, settingsOpen], ([command, desk, settings]) => {
+    if ((command || desk || settings) && spaceEditor.value) closeSpaceEditor();
+  });
   function openSettings(pane?: SettingsPane) {
     commandOpen.value = false; settingsOpen.value = false; deskOpen.value = false;
+    closeSpaceEditor();
     send({ type: "settingsOpen", ...(pane ? { pane } : {}) });
   }
   const overlay = computed(
@@ -131,6 +159,7 @@ export const useBrowser = defineStore("browser", () => {
       commandOpen.value ||
       deskOpen.value ||
       settingsOpen.value ||
+      Boolean(spaceEditor.value) ||
       Boolean(contextMenu.value) ||
       dragging.value,
   );
@@ -651,6 +680,11 @@ export const useBrowser = defineStore("browser", () => {
     commandMode,
     deskOpen,
     settingsOpen,
+    spaceEditor,
+    spacePreview,
+    closeSpaceEditor,
+    toggleSpaceEditor,
+    previewSpace,
     dragging,
     overlay,
     send,

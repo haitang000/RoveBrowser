@@ -1,25 +1,15 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import type { SpaceColor } from "../../lib/types";
 import Icon from "../common/Icon.vue";
 import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
+import SpaceLookEditor from "./SpaceLookEditor.vue";
+import { commandLook, committed, lookOf, openDraft, type LookFields } from "../../lib/space-look";
 const b = useBrowser(),
   name = ref(""),
   icon = ref<string>(),
   pickingIcon = ref(false),
-  color = ref<SpaceColor>("sky"),
-  translucency = ref(0);
-const colors: SpaceColor[] = [
-  "sky",
-  "sage",
-  "sand",
-  "rose",
-  "lavender",
-  "mint",
-  "peach",
-  "graphite",
-];
+  look = ref<LookFields>({ color: "sky" });
 watch(
   () => b.settingsOpen,
   (open) => {
@@ -27,19 +17,18 @@ watch(
       name.value = b.space.name;
       icon.value = b.space.icon;
       pickingIcon.value = false;
-      color.value = b.space.color;
-      translucency.value = b.space.translucency ?? 0;
+      look.value = committed(openDraft(b.space, b.state.theme === "dark"), lookOf(b.space));
     }
   },
 );
-function publish(create = false) {
+function publish(create = false, next = look.value) {
+  look.value = next;
   b.send({
     type: create ? "spaceCreate" : "spaceUpdate",
     id: b.space.id,
     name: name.value,
-    color: color.value,
-    translucency: translucency.value,
     icon: icon.value ?? null,
+    ...commandLook({ ...next, color: b.space.color }),
   });
 }
 function save(create = false) {
@@ -71,37 +60,19 @@ function save(create = false) {
         </button>
       </header>
       <SpaceIdentityEditor v-model:name="name" v-model:icon="icon" v-model:picking="pickingIcon" />
-      <div v-show="!pickingIcon" class="swatches" aria-label="工作区颜色">
-        <button
-          v-for="c in colors"
-          :key="c"
-          :data-color="c"
-          :class="{ chosen: c === color }"
-          :aria-label="c"
-          :aria-pressed="c === color"
-          :title="c"
-          @click="color = c"
-        >
-          <Icon v-if="c === color" name="check" />
-        </button>
-      </div>
+      <SpaceLookEditor
+        v-if="b.settingsOpen"
+        v-show="!pickingIcon"
+        :space="b.space"
+        :dark="b.state.theme === 'dark'"
+        @preview="publish(false, $event)"
+        @commit="publish(false, $event)"
+      />
       <div class="settings-actions">
         <button class="plain-button" @click="save(true)">新建工作区</button
         ><button class="primary-button" @click="save()">保存</button>
       </div>
-      <label class="glass-control"
-        >清透
-        <input
-          v-model.number="translucency"
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          aria-label="清透"
-          @input="publish()"
-        />
-      </label>
-      <p class="settings-note">清透背景带轻微模糊，界面和网页保持清晰。</p>
+      <p class="settings-note">清透在「效果」里。背景带轻微模糊，界面和网页保持清晰。</p>
       <hr />
       <button class="theme-button" @click="b.send({ type: 'theme' })">
         <Icon :name="b.state.theme === 'light' ? 'moon' : 'sun'" />{{
