@@ -9,6 +9,7 @@ Rove 是一款面向 Windows 10/11 的实验性浏览器，使用 WebView2 加�
 - **工作区和标签**：按工作区组织标签、固定标签和分屏；顶部常用网站跨工作区共享，最多 8 个。支持拖动排序、移动标签和悬停预览。后台标签在一段时间未查看后休眠以节省内存，再次打开时回到原来的位置；可在设置中关闭。拖动侧栏右边缘可调整宽度，重启后保留；双击边缘恢复默认宽度。
 - **浏览与分屏**：导航、历史、下载、页面查找，以及两个独立网页并排浏览。Shift 点击链接可使用 Peek 临时预览，再将其转为普通标签。
 - **命令面板和设置**：通过命令面板搜索地址、标签及历史；设置页提供搜索引擎、外观、下载目录、快捷键和浏览数据管理等选项。
+- **新标签页和 Widget**：按时段问候、历史与收藏推荐，以及可添加、移除、拖动排序和调宽的时钟、GitHub 贡献图、日历、便签。点击 Widgets 旁的 Edit 进入 Discover，Done 完成编辑；称呼、布局和便签随会话保存。GitHub 贡献图仅查询填写的用户名的公开记录，由 [GitHub Contributions API](https://github.com/grubersjoe/github-contributions-api) 提供，需要联网；其他组件可离线使用。
 - **首次引导和导入**：可从 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 的配置导入书签和历史，并从 CSV 导入密码。导入的密码使用 Windows DPAPI 加密，并需用户手动选择填充。
 - **会话恢复**：工作区、标签和历史保存在 SQLite；网站登录等站点状态由 WebView2 管理。支持通过 Windows 设置将 Rove 设为 HTTP/HTTPS 链接的默认浏览器。
 
@@ -70,6 +71,7 @@ npm run test:e2e                        # 界面测试，使用本机 Microsoft 
 cargo test --manifest-path native/Cargo.toml -- --test-threads=1
 cargo build --manifest-path native/Cargo.toml
 npm run test:native                     # Windows 原生宿主 / WebView2 冒烟测试
+npm run test:native:new-tab             # Widget 操作、GitHub 实际请求和 SQLite 重启恢复（需先构建 Debug）
 npm run test:native:sidebar             # 侧栏调宽、真实视口和重启恢复专项（需先构建 Debug）
 npm run test:native:resize              # 界面脚本阻塞时的窗口缩放、分屏视口和旧布局拒绝（需先构建 Debug）
 npm run test:native:sleep               # 后台标签休眠、真实 TrySuspend/Resume 与设置开关专项

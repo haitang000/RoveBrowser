@@ -2709,7 +2709,7 @@ impl ApplicationHandler<Event> for App {
                     let mime=if path.ends_with(".js"){"text/javascript"}else if path.ends_with(".css"){"text/css"}else if path.ends_with(".woff2"){"font/woff2"}else{"text/html"};
                     wry::http::Response::builder().status(if file.is_some(){200}else{404})
                         .header("Content-Type",mime)
-                        .header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+                        .header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src https://github-contributions-api.jogruber.de; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
                         .body(Cow::Borrowed(file.map(|f|f.contents()).unwrap_or(b"Not found"))).unwrap()
                 }).with_https_scheme(true).with_url("era://ui/index.html")
                 .with_additional_browser_args(browser_args(true))

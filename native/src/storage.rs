@@ -79,6 +79,37 @@ mod tests {
     use super::*;
     use crate::model::Command;
     #[test]
+    fn new_tab_upgrades_and_persists_widgets_across_restart() {
+        let path = std::env::temp_dir().join(format!("rove-new-tab-{}", uuid::Uuid::new_v4()));
+        {
+            let db = Storage::open(&path).unwrap();
+            let mut legacy = serde_json::to_value(State::default()).unwrap();
+            legacy.as_object_mut().unwrap().remove("newTab");
+            db.conn.execute("INSERT INTO session(id,json) VALUES(1,?1)", [legacy.to_string()]).unwrap();
+            let mut state = db.load().unwrap();
+            assert_eq!(state.new_tab.widgets.len(), 1);
+            let command: Command = serde_json::from_str(r#"{"type":"newTabUpdate","settings":{"displayName":"Ada","widgets":[{"id":"notes","kind":"notes","size":"small","text":"Keep exploring"},{"id":"github","kind":"github","size":"wide","username":"octocat"}]}}"#).unwrap();
+            state.apply(&command).unwrap();
+            db.save(&state).unwrap();
+        }
+        {
+            let db = Storage::open(&path).unwrap();
+            let mut state = db.load().unwrap();
+            assert_eq!(state.new_tab.display_name, "Ada");
+            assert_eq!(state.new_tab.widgets[0].text.as_deref(), Some("Keep exploring"));
+            assert_eq!(state.new_tab.widgets[1].username.as_deref(), Some("octocat"));
+            let before = serde_json::to_string(&state.new_tab).unwrap();
+            let mut invalid = state.new_tab.clone();
+            invalid.widgets[1].id = "notes".into();
+            assert!(state.apply(&Command::UpdateNewTab { settings: invalid }).is_err());
+            assert_eq!(serde_json::to_string(&state.new_tab).unwrap(), before);
+            state.new_tab.widgets.clear();
+            db.save(&state).unwrap();
+            assert!(db.load().unwrap().new_tab.widgets.is_empty());
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
     fn sidebar_width_upgrades_legacy_sessions_and_survives_restart() {
         let path = std::env::temp_dir().join(format!("rove-sidebar-{}", uuid::Uuid::new_v4()));
         {

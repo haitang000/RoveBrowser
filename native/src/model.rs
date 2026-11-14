@@ -141,6 +141,8 @@ pub struct State {
     pub sidebar_width: Option<f64>,
     #[serde(default)]
     pub settings: crate::settings::Settings,
+    #[serde(default)]
+    pub new_tab: crate::new_tab::NewTab,
     /// The page meets the window edges. Absent in an older session means on.
     #[serde(default = "default_borderless")]
     pub borderless: bool,
@@ -222,6 +224,8 @@ pub enum Command {
     OpenSettings { pane: Option<String> },
     #[serde(rename = "settingsUpdate")]
     UpdateSettings { settings: crate::settings::Settings },
+    #[serde(rename = "newTabUpdate")]
+    UpdateNewTab { settings: crate::new_tab::NewTab },
     #[serde(rename = "settingsPane")]
     SettingsPane { id: String, pane: String },
     #[serde(rename = "spaceDelete")]
@@ -619,6 +623,7 @@ impl Default for State {
             sidebar_collapsed: false,
             sidebar_width: None,
             settings: crate::settings::Settings::default(),
+            new_tab: crate::new_tab::NewTab::default(),
             borderless: true,
             site_zoom: HashMap::new(),
         };
@@ -874,6 +879,7 @@ impl State {
     pub fn repair(&mut self) {
         // A missing removable download folder must not reset unrelated preferences.
         self.settings.repair();
+        if self.new_tab.validate().is_err() { self.new_tab = crate::new_tab::NewTab::default(); }
         self.sidebar_width = self.sidebar_width.filter(|width| width.is_finite())
             .map(|width| width.clamp(192., 480.).round());
         // Zoom is only meaningful inside WebView2's range; a session written by
@@ -950,6 +956,9 @@ impl State {
             }
             Command::UpdateSettings { settings } => {
                 let mut next = settings.clone(); next.validate()?; self.settings = next;
+            }
+            Command::UpdateNewTab { settings } => {
+                let mut next = settings.clone(); next.validate()?; self.new_tab = next;
             }
             Command::ReorderSpace { id, before } => {
                 if id != before && self.spaces.iter().any(|s| &s.id == before) {

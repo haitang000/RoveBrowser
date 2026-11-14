@@ -12,6 +12,7 @@ import { pageClip } from "../../lib/page-clip";
 import Icon from "../common/Icon.vue";
 import Peek from "./Peek.vue";
 import SettingsPage from "./SettingsPage.vue";
+import NewTabPage from "./NewTabPage.vue";
 import { isSettingsUrl } from "../../lib/settings";
 import { pageDirection, type PageDirection } from "../../lib/page-motion";
 const b = useBrowser(),
@@ -190,24 +191,11 @@ function split(e: DragEvent) {
       <div ref="primary" class="webview-slot" :data-page-dir="primaryDir">
         <Transition name="page">
         <SettingsPage v-if="b.active && isSettingsUrl(b.active.url)" :key="`settings:${b.active.id}`" :tab-id="b.active.id" :url="b.active.url" />
-        <div
+        <NewTabPage
           v-else-if="b.active?.url === 'era://newtab' || !b.active"
           :key="`newtab:${b.active?.id || 'empty'}`"
-          class="new-tab-page"
-        >
-          <div class="new-tab-content">
-            <span class="rove-wordmark">Rove</span>
-            <p>A little room to explore.</p>
-            <button class="start-search" @click="b.openCommand()">
-              <Icon name="search" /><span>Search or enter address</span
-              ><kbd v-if="b.shortcutLabel('address')">{{ b.shortcutLabel('address') }}</kbd>
-            </button>
-          </div>
-          <div class="new-tab-hints">
-            <span v-if="b.shortcutLabel('new')"><kbd>{{ b.shortcutLabel('new') }}</kbd> New tab</span
-            ><span v-if="b.shortcutLabel('desk')"><kbd>{{ b.shortcutLabel('desk') }}</kbd> All tabs</span>
-          </div>
-        </div>
+          :tab-id="b.active?.id"
+        />
         <div v-else-if="!b.native" :key="`preview:${b.active.id}:${b.active.url}`" class="preview-page">
           <Icon name="globe" :size="28" />
           <h2>{{ b.active.title }}</h2>
@@ -244,8 +232,9 @@ function split(e: DragEvent) {
         <div ref="secondary" class="webview-slot" :data-page-dir="secondaryDir">
           <Transition name="page">
           <SettingsPage v-if="isSettingsUrl(other.url)" :key="`settings:${other.id}`" :tab-id="other.id" :url="other.url" />
+          <NewTabPage v-else-if="other.url === 'era://newtab'" :key="`newtab:${other.id}`" :tab-id="other.id" />
           <div
-            v-else-if="other.url === 'era://newtab' || !b.native"
+            v-else-if="!b.native"
             :key="`preview:${other.id}:${other.url}`"
             class="preview-page"
           >

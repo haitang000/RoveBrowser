@@ -13,6 +13,7 @@ mod frame;
 mod glass;
 mod host;
 mod model;
+mod new_tab;
 mod onboarding;
 mod import;
 mod import_store;

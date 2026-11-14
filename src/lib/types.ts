@@ -87,6 +87,7 @@ export interface BrowserState {
   /** Preferred width in CSS pixels; absent uses the responsive default. */
   sidebarWidth?: number;
   settings?: import("./settings").Settings;
+  newTab?: import("./new-tab").NewTabSettings;
   /** Per-site zoom by normalized host; 100% is stored as absence. */
   siteZoom?: Record<string, number>;
   /** Legacy session preference; the restored framed layout ignores this flag. */

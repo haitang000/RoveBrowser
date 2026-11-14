@@ -11,6 +11,7 @@ import { cleanIcon } from "./space-icon";
 import { paintKeys } from "./space-look";
 import { ONBOARDING_STEPS, saveOnboardingSites } from "./onboarding";
 import { normalizeSidebarWidth } from "./sidebar-width";
+import { newTabSettings } from "./new-tab";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -101,6 +102,8 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     return { ...s };
   }
   switch (c.type) {
+    case "newTabUpdate":
+      s.newTab = newTabSettings(c.settings); break;
     case "onboardingOpen":
       s.onboarding = { step: "hello", completed: false }; break;
     case "onboardingBack":

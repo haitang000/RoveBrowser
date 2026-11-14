@@ -25,6 +25,7 @@
     "test:native:spaces": "node scripts/native-spaces-smoke.mjs",
     "test:native:preview": "node scripts/native-tab-preview-smoke.mjs",
     "test:native:settings": "node scripts/native-settings-smoke.mjs",
+    "test:native:new-tab": "node scripts/native-new-tab-smoke.mjs",
     "test:native:find": "node scripts/native-find-smoke.mjs",
     "test:native:site-controls": "node scripts/native-site-controls-smoke.mjs",
     "test:native:clear-menu": "node scripts/native-clear-menu-smoke.mjs",

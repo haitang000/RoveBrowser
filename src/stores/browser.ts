@@ -20,9 +20,11 @@ import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
 import type { LookFields } from "../lib/space-look";
 import type { ImportRequest, ImportSource } from "../lib/import";
+import { NEW_TAB_STORAGE_KEY, newTabSettings, type NewTabSettings } from "../lib/new-tab";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const popupWindow = Boolean(window.__ERA_POPUP__);
+  const pendingNewTab: NewTabSettings[] = [];
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
   const splitResize = ref<{ ratio: number; resizing: boolean }>();
@@ -34,6 +36,17 @@ export const useBrowser = defineStore("browser", () => {
     suggestions = ref<string[]>([]),
     recent = ref<string[]>([]),
     error = ref("");
+  // Native layouts live in the session database. Standalone previews retain
+  // only the new-tab preferences, without persisting the demo browser session.
+  if (!native && !popupWindow) {
+    try {
+      const saved = localStorage.getItem(NEW_TAB_STORAGE_KEY);
+      if (saved) state.value.newTab = newTabSettings(JSON.parse(saved));
+    } catch { /* A blocked storage area must not prevent opening a tab. */ }
+    watch(() => state.value.newTab, (value) => {
+      try { localStorage.setItem(NEW_TAB_STORAGE_KEY, JSON.stringify(newTabSettings(value))); } catch { /* Keep the current layout in memory. */ }
+    }, { deep: true });
+  }
   const commandOpen = ref(false),
     thumbnails = ref<Record<string, string>>({}),
     previewTarget = ref<string>(),
@@ -188,7 +201,15 @@ export const useBrowser = defineStore("browser", () => {
     )
       error.value = "";
     try {
-      if (native) window.ipc!.postMessage(JSON.stringify(c));
+      if (native) {
+        if (c.type === "newTabUpdate") {
+          const next = newTabSettings(c.settings);
+          pendingNewTab.push(next);
+          state.value.newTab = next;
+          c = { ...c, settings: next };
+        }
+        window.ipc!.postMessage(JSON.stringify(c));
+      }
       else if (c.type === "tabPreview") {
         if (!c.rect) previewHiddenTicket.value = Number(c.ticket);
       } else if (c.type.startsWith("tabPreview")) {
@@ -522,7 +543,14 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "state" && e.state) {
       const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
       const previous = sources(state.value);
-      state.value = upgradeLibrary(e.state);
+      const incoming = upgradeLibrary(e.state);
+      // A blur save and a subsequent resize/name change can be in flight at
+      // once. Keep the newest local draft until Rust acknowledges its value.
+      const acknowledged = JSON.stringify(newTabSettings(incoming.newTab));
+      const index = pendingNewTab.findIndex((value) => JSON.stringify(value) === acknowledged);
+      if (index >= 0) pendingNewTab.splice(0, index + 1);
+      if (pendingNewTab.length) incoming.newTab = pendingNewTab.at(-1);
+      state.value = incoming;
       const current = sources(state.value);
       thumbnails.value = Object.fromEntries(
         Object.entries(thumbnails.value).filter(([id]) => current.has(id) && current.get(id) === previous.get(id)),
