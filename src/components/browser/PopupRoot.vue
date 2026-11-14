@@ -15,12 +15,21 @@ import ActionToast from "./ActionToast.vue";
 import DownloadsPanel from "./DownloadsPanel.vue";
 import { browserKey } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
+import { frameOf } from "../../lib/space-look";
 const b = useBrowser();
 watch(() => b.settings.reduceMotion, (value) => document.documentElement.dataset.reduceMotion = String(value), { immediate: true });
 const area = computed(() => ({ left: b.popupArea.x + "px", top: b.popupArea.y + "px", width: b.popupArea.width + "px", height: b.popupArea.height + "px" }));
-watch(() => [b.state.theme, b.space.color], ([theme, color]) => {
-  document.documentElement.dataset.theme = theme;
-  document.documentElement.dataset.color = color;
+watch(() => frameOf(b.space, b.state.theme, false), (frame) => {
+  const root = document.documentElement;
+  root.dataset.theme = frame.theme ?? b.state.theme;
+  root.dataset.color = frame.custom ? "custom" : b.space.color;
+  if (frame.custom) {
+    root.style.setProperty("--frame", frame.start);
+    root.style.setProperty("--frame-h", String(frame.hue));
+  } else {
+    root.style.removeProperty("--frame");
+    root.style.removeProperty("--frame-h");
+  }
 }, { immediate: true });
 let observer: MutationObserver, resize: ResizeObserver, frame = 0, last = "", focusKey = "";
 const key = (event: KeyboardEvent) => browserKey(b, event);

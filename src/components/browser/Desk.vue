@@ -5,9 +5,26 @@ import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 import { tabDisplayTitle } from "../../lib/tab-meta";
+import { frameOf } from "../../lib/space-look";
 const b = useBrowser(),
   query = ref(""),
   input = ref<HTMLInputElement>();
+const material = computed(() => {
+  const frame = frameOf(b.space, b.state.theme, false);
+  const start = frame.custom ? frame.start : "var(--frame)";
+  return {
+    "--desk-tint-start": start,
+    "--desk-tint-end": frame.end ?? start,
+    "--desk-tint-angle": `${frame.cssAngle}deg`,
+  };
+});
+// Native pages live in separate WebView2 controllers. Bring their existing
+// snapshots into this renderer so backdrop-filter can soften the page beneath.
+const backdropTabs = computed(() => [b.active?.id, b.active?.splitWith]);
+const backdropBounds = computed(() => ({
+  left: `${b.popupArea.x}px`, top: `${b.popupArea.y}px`,
+  width: `${b.popupArea.width}px`, height: `${b.popupArea.height}px`,
+}));
 const spaces = computed(() =>
   b.state.spaces.map((s) => ({
     ...s,
@@ -40,11 +57,17 @@ watch(
     ><section
       v-if="b.deskOpen"
       class="desk"
+      :style="material"
       role="dialog"
       aria-modal="true"
       aria-label="全部标签页"
       @keydown.esc="b.deskOpen = false"
     >
+      <div v-if="b.native" class="desk-backdrop" :style="backdropBounds" aria-hidden="true">
+        <div v-for="(id, pane) in backdropTabs.filter(Boolean)" :key="pane" class="desk-backdrop-pane">
+          <img v-if="id && b.thumbnails[id]" :src="b.thumbnails[id]" alt="" draggable="false" />
+        </div>
+      </div>
       <div class="desk-tools">
         <div class="desk-search">
           <Icon name="search" /><input

@@ -1530,12 +1530,46 @@ hr {
   margin: 10px 0 0;
 }
 .desk {
+  --desk-tint-opacity: 72%;
   position: absolute;
   inset: var(--titlebar-block) 0 0;
   z-index: 60;
   overflow: auto;
-  background: var(--frame);
   padding: 24px 32px;
+}
+.desk::before {
+  content: "";
+  position: fixed;
+  inset: var(--titlebar-block) 0 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(var(--desk-tint-angle),
+    color-mix(in srgb, var(--desk-tint-start) var(--desk-tint-opacity), transparent),
+    color-mix(in srgb, var(--desk-tint-end) var(--desk-tint-opacity), transparent));
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+.desk-backdrop {
+  position: fixed;
+  z-index: -2;
+  display: flex;
+  overflow: hidden;
+  pointer-events: none;
+}
+.desk-backdrop-pane {
+  flex: 1;
+  min-width: 0;
+}
+.desk-backdrop-pane img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .desk { --desk-tint-opacity: 100%; }
+  .desk::before { backdrop-filter: none; }
+  .desk-backdrop { display: none; }
 }
 .desk-tools {
   display: flex;
