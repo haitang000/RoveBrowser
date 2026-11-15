@@ -102,6 +102,15 @@
   opacity: 0;
   transform: translateX(14px);
 }
+.reload-spinner {
+  transform-origin: center;
+  animation: reload-spin 700ms linear infinite;
+}
+@keyframes reload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .loading .tab-picture {
   animation: loading 1s ease-in-out infinite;
 }

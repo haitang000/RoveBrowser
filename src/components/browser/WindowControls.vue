@@ -80,8 +80,13 @@ onBeforeUnmount(() => {
           class="icon-button"
           :title="b.shortcutTitle('刷新', 'reload')"
           aria-label="刷新"
+          :aria-busy="b.active?.loading || undefined"
           @click="b.send({ type: 'reload' })"
-        ><Icon name="reload" :size="14" /></button>
+        ><Icon
+          :name="b.active?.loading ? 'spinner' : 'reload'"
+          :class="{ 'reload-spinner': b.active?.loading }"
+          :size="14"
+        /></button>
       </nav>
       <button
         class="address-field"
