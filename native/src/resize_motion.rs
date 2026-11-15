@@ -39,6 +39,9 @@ pub struct Motion {
     painted: Option<f32>,
     staged: bool,
     incoming: bool,
+    blur_only: bool,
+    blur: Spring,
+    released_blur: f32,
     pub reduced: bool,
 }
 pub struct Sample {
@@ -47,6 +50,8 @@ pub struct Sample {
     pub finished: bool,
     pub opacity: f32,
     pub slide: f32,
+    /// Content blur, independent of the card's projection and outline.
+    pub blur: f32,
 }
 pub const MOVE_DURATION: f32 = 0.280;
 /// Zero velocity and acceleration at both ends, with exact integer endpoints.
@@ -78,7 +83,20 @@ impl Motion {
             painted: None,
             staged: false,
             incoming: false,
+            blur_only: false,
+            blur: Spring::default(),
+            released_blur: 0.,
             reduced,
+        }
+    }
+    pub fn blur_only(reduced: bool, amount: f32) -> Self {
+        Self {
+            blur_only: true,
+            blur: Spring {
+                value: if reduced { 0. } else { amount.clamp(0., 1.) },
+                velocity: 0.,
+            },
+            ..Self::new(reduced)
         }
     }
     pub fn dragging(&self) -> bool {
@@ -118,6 +136,7 @@ impl Motion {
     }
     pub fn release(&mut self, now: f32) {
         self.released = Some((now, self.pose()));
+        self.released_blur = self.blur.value;
         self.painted = None;
     }
     pub fn paint_ready(&mut self, now: f32) {
@@ -143,18 +162,27 @@ impl Motion {
                 finished: false,
                 opacity: 0.,
                 slide: 0.08,
+                blur: if self.reduced { 0. } else { 1. },
             };
         }
         let Some((start, from)) = self.released else {
             self.scale.step(self.target.scale, dt);
             self.x.step(self.target.x, dt);
             self.y.step(self.target.y, dt);
+            if self.blur_only {
+                self.blur.step(if self.reduced { 0. } else { 1. }, dt);
+            }
             return Sample {
                 pose: self.pose(),
                 blend: 0.,
                 finished: false,
                 opacity: 1.,
                 slide: 0.,
+                blur: if self.blur_only {
+                    self.blur.value
+                } else {
+                    ((1. - self.scale.value) / 0.032).clamp(0., 1.)
+                },
             };
         };
         let elapsed = (now - start).max(0.);
@@ -181,10 +209,17 @@ impl Motion {
         self.scale.value = pose.scale;
         self.x.value = pose.x;
         self.y.value = pose.y;
+        let blur = if self.blur_only {
+            self.released_blur * (1. - settle)
+        } else {
+            ((1. - pose.scale) / 0.032).clamp(0., 1.)
+        };
+        self.blur.value = blur;
         Sample {
             pose,
             blend,
             finished: blend >= 1. && settle >= 1.,
+            blur,
             opacity: if self.incoming {
                 smooth(elapsed / if self.reduced { 0.08 } else { 0.14 })
             } else {
@@ -220,6 +255,41 @@ pub fn projection(pose: Pose, width: f32, height: f32) -> [[f32; 4]; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sidebar_blurs_without_changing_the_plane_and_clears_after_paint() {
+        let mut motion = Motion::blur_only(false, 0.);
+        let identity = projection(Pose::default(), 1000., 700.);
+        let mut blur = 0.;
+        for n in 1..=12 {
+            let sample = motion.sample(n as f32 / 60., 1. / 60.);
+            assert_eq!(projection(sample.pose, 1000., 700.), identity);
+            assert!(sample.blur >= blur && sample.blur <= 1.);
+            blur = sample.blur;
+        }
+        assert!(blur > 0.9);
+        motion.release(0.2);
+        motion.paint_ready(0.24);
+        let fading = motion.sample(0.31, 0.016);
+        assert!(fading.blend > 0. && fading.blend < 1.);
+        assert_eq!(fading.blur, blur, "retain blur through the layout crossfade");
+        let clearing = motion.sample(0.44, 0.016);
+        assert_eq!(projection(clearing.pose, 1000., 700.), identity);
+        assert!(clearing.blur > 0. && clearing.blur < blur);
+        let resumed = Motion::blur_only(false, clearing.blur).sample(0., 0.);
+        assert!((resumed.blur - clearing.blur).abs() < 1e-6, "a new toggle keeps the visible blur");
+        let done = motion.sample(0.6, 0.016);
+        assert!(done.finished);
+        assert_eq!(done.blur, 0.);
+        for reduced in [false, true] {
+            let mut missing_capture = Motion::blur_only(reduced, blur);
+            missing_capture.sample(0.2, 0.2);
+            missing_capture.release(0.2);
+            let last = missing_capture.sample(0.8, 0.016);
+            assert!(last.finished);
+            assert_eq!(last.blur, 0.);
+            assert_eq!(projection(last.pose, 1000., 700.), identity);
+        }
+    }
     fn dragged() -> Motion {
         let mut motion = Motion::new(false);
         motion.point(-1., -0.4);

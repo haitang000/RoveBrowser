@@ -751,12 +751,16 @@ kbd {
   display: flex;
   gap: 0;
   position: relative;
-  margin: 0 8px 8px 0;
+  margin: 0 var(--card-inset) var(--card-inset) 0;
   border-radius: 8px;
   background: var(--surface);
   overflow: hidden;
   border: 1px solid var(--separator);
   box-shadow: 0 1px 2px var(--shadow);
+  transition: margin-left var(--motion-slide) var(--ease-out);
+}
+.sidebar-hidden .page-area {
+  margin-left: var(--card-inset);
 }
 .page-pane {
   flex: 1;
@@ -766,18 +770,17 @@ kbd {
   overflow: hidden;
   background: var(--surface);
 }
-:root:not([data-native]) .page-area {
-  transition: transform var(--motion-standard) var(--ease-out);
-  transform-origin: right center;
+:root:not([data-native]) .page-pane > .webview-slot {
+  transition: filter var(--motion-standard) var(--ease-out);
 }
-:root:not([data-native]) .page-area.sidebar-motion-preview {
-  transform: perspective(1400px) rotateY(-2deg) scale(0.98);
+:root:not([data-native]) .sidebar-motion-preview .page-pane > .webview-slot {
+  filter: blur(3px);
 }
-:root[data-reduce-motion=true] .page-area.sidebar-motion-preview {
-  transform: none;
+:root[data-reduce-motion=true] .sidebar-motion-preview .page-pane > .webview-slot {
+  filter: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .page-area.sidebar-motion-preview { transform: none !important; }
+  .sidebar-motion-preview .page-pane > .webview-slot { filter: none !important; }
 }
 .page-area.resizing {
   border-radius: 0;

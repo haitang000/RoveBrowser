@@ -1863,9 +1863,7 @@ impl App {
                     && !page.resize_surface.relocating() && !self.resize_appearance.reduce_motion {
                     if let Some(bounds) = page.bounds.get() {
                         page.clip.clear(page.view.hwnd())?;
-                        page.resize_surface.begin(bounds, r.corners, window.scale_factor())?;
-                        // Reuse the resize gesture's plane: the left edge recedes.
-                        page.resize_surface.pointer(bounds[0] as f32, (bounds[1] + bounds[3] / 2) as f32);
+                        page.resize_surface.begin_blur(bounds, r.corners, window.scale_factor())?;
                     }
                 }
                 if self.live_resize { page.clip.clear(page.view.hwnd())?; }

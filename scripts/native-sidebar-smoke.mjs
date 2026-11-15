@@ -50,6 +50,7 @@ async function waitFor(fn, label) {
   throw Error('Timed out: ' + label);
 }
 let child, uiBrowser, pageBrowser, ui;
+const motionEvents = [];
 let desktopReview = process.env.ERA_SMOKE_REVIEW === '1';
 const send = command => ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
 const sidebarWidth = () => ui.locator('.sidebar-track').evaluate(e => e.getBoundingClientRect().width);
@@ -57,6 +58,7 @@ const execFileAsync = promisify(execFile);
 async function focusShortcut(pages, width) {
   const markers = await Promise.all(pages.map(page => page.evaluate(() => window.marker)));
   for (const collapsed of [true, false]) {
+    const mark = motionEvents.length;
     for (const page of pages) await page.evaluate(() => {
       window.focusWidths = [];
       window.onresize = () => window.focusWidths.push(innerWidth);
@@ -74,6 +76,18 @@ async function focusShortcut(pages, width) {
       assert.ok((await pages[i].evaluate(() => window.focusWidths)).length <= 1, 'renderer reflows once after the snapshot animation');
     }
     assert.equal(await ui.locator('.find-bar').count(), 0, 'Ctrl+Shift+F does not open Find');
+    const blurStart = motionEvents.findIndex((e, i) => i >= mark && e.phase === 'sidebar-blur');
+    assert.ok(blurStart >= mark, 'sidebar starts its content blur');
+    await waitFor(() => motionEvents.slice(blurStart).filter(e => e.phase === 'restored').length >= pages.length, 'blur settles for each pane');
+    const samples = motionEvents.slice(blurStart).filter(e => e.phase === 'settling');
+    assert.ok(samples.some(e => e.blur > 0), 'content blurs during the transition');
+    assert.ok(samples.every(e => e.scale === 1 && e.depth.every(n => n === 0) && e.slide === 0), 'sidebar motion keeps the page flat and at full scale');
+    if (collapsed) {
+      assert.deepEqual(await ui.locator('.page-area').evaluate(e => {
+        const r = e.getBoundingClientRect();
+        return [r.left, innerWidth - r.right];
+      }), [8, 8], 'fully hidden pages have matching outer margins');
+    }
   }
 }
 async function useDomInput() {
@@ -95,9 +109,17 @@ async function useDomInput() {
 }
 async function start() {
   child = spawn(resolve(process.env.ERA_SMOKE_EXE || 'native/target/debug/rove.exe'), [], {
-    env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) }, windowsHide: true, stdio: 'pipe',
+    env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port), ERA_RESIZE_TRACE: '1' }, windowsHide: true, stdio: 'pipe',
   });
-  child.stderr.on('data', data => process.stderr.write(data));
+  let partial = '';
+  child.stderr.on('data', data => {
+    partial += data.toString();
+    const lines = partial.split(/\r?\n/); partial = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('Rove resize: ')) motionEvents.push(JSON.parse(line.slice('Rove resize: '.length)));
+      else if (line) process.stderr.write(line + '\n');
+    }
+  });
   uiBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 'UI debugger');
   ui = await waitFor(() => uiBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === 'https://era.ui/index.html'), 'shell');
   await ui.waitForSelector('.sidebar-resize-handle');
@@ -200,7 +222,7 @@ try {
   await ui.getByRole('separator', { name: '调整侧栏宽度' }).dblclick();
   await waitFor(() => savedState().sidebarWidth === undefined, 'reset clears preference');
   await waitFor(async () => await sidebarWidth() === 240, 'default restored');
-  const report = { passed: true, profile, checks: ['single viewport', 'split viewports', 'save on release', 'collapse/expand', 'Ctrl+Shift+F from a focused page', 'fully hidden sidebar', 'one reflow after perspective motion', 'restart', 'reset'] };
+  const report = { passed: true, profile, checks: ['single viewport', 'split viewports', 'save on release', 'collapse/expand', 'Ctrl+Shift+F from a focused page', 'fully hidden sidebar', 'blur without perspective or scale', 'matching outer margins', 'one reflow after sidebar motion', 'restart', 'reset'] };
   await writeFile(join(output, 'result.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
   }

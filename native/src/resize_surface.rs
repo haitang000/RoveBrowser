@@ -120,6 +120,7 @@ enum Capture {
 }
 enum Start {
     Drag(Option<crate::resize_motion::Pose>),
+    Blur(f32),
     Enter(f32),
     Staged(f32),
 }
@@ -259,6 +260,14 @@ impl Surface {
             )?
         };
         self.frame.replace(Some(frame));
+        Ok(())
+    }
+    /// Sidebar toggles soften content while keeping the page flat and full size.
+    pub fn begin_blur(&self, bounds: [i32; 4], corners: [f64; 4], scale: f64) -> Result<()> {
+        let blur = self.frame.borrow().as_ref().filter(|f| !f.restored.get())
+            .map(|f| f.motion.borrow_mut().sample(f.now(), 0.).blur).unwrap_or(0.);
+        self.enter_with(bounds, corners, scale, Start::Blur(blur))?;
+        trace(serde_json::json!({"phase":"sidebar-blur", "bounds":bounds}));
         Ok(())
     }
     /// Start on the final viewport, already lifted and tilted away from the
@@ -752,6 +761,7 @@ impl Frame {
                 motion.point(-1., 0.);
             }
             Start::Enter(edge) => motion.enter(edge),
+            Start::Blur(amount) => motion = Motion::blur_only(motion.reduced, amount),
             Start::Staged(edge) => motion.stage(edge),
         }
         let frame = Box::new(Self {
@@ -847,7 +857,7 @@ impl Frame {
             trace(
                 serde_json::json!({"phase":"settling", "time":self.now(), "scale":sample.pose.scale,
                 "depth":[sample.pose.x,sample.pose.y], "blend":sample.blend,
-                "opacity":sample.opacity, "slide":sample.slide, "bounds":self.bounds.get()}),
+                "opacity":sample.opacity, "slide":sample.slide, "blur":sample.blur, "bounds":self.bounds.get()}),
             );
         }
         self.background_scale.SetScaleX2(width.max(1) as f32)?;
@@ -867,11 +877,10 @@ impl Frame {
         // 18 CSS px while lifted. Morph back to each pane's real corners as
         // the final scale reaches 1:1, so the handoff never changes its outline.
         let lift = ((1. - sample.pose.scale) / 0.032).clamp(0., 1.);
-        // Reuse the spring/ease-out lift: blur enters with the lifted snapshot,
-        // remains through the layout crossfade, and clears as it returns 1:1.
-        // Only this inner subtree is filtered; the outline and background stay sharp.
+        // Blur has its own channel for flat sidebar transitions. Only the inner
+        // subtree is filtered; the outline and background stay sharp.
         self.blur
-            .SetStandardDeviation2(3. * self.scale_factor * lift)?;
+            .SetStandardDeviation2(3. * self.scale_factor * sample.blur)?;
         rounded(
             &self.card_clip,
             width as f32,

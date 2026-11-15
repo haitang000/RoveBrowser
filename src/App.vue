@@ -189,6 +189,7 @@ onBeforeUnmount(() => {
     class="browser-shell"
     :class="{
       collapsed: b.state.sidebarCollapsed,
+      'sidebar-hidden': b.state.sidebarCollapsed && b.state.sidebarHidden,
       'sidebar-resizing': b.sidebarResizing,
       glass: glassActive,
       'glass-neutral': glassActive && painted.neutralGlass,
