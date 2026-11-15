@@ -22,8 +22,8 @@ use windows::{
                     D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_RECT_F,
                     D2D_SIZE_U,
                 },
-                D2D1CreateDevice, ID2D1DeviceContext, D2D1_BITMAP_PROPERTIES1,
-                D2D1_INTERPOLATION_MODE_LINEAR,
+                D2D1CreateDevice, ID2D1DeviceContext, D2D1_ANTIALIAS_MODE_ALIASED,
+                D2D1_BITMAP_PROPERTIES1, D2D1_INTERPOLATION_MODE_LINEAR,
             },
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
@@ -448,46 +448,63 @@ unsafe fn bitmap(
     )?;
     let mut offset = POINT::default();
     let dc: ID2D1DeviceContext = surface.BeginDraw(None, &mut offset)?;
-    let draw = (|| -> Result<()> {
-        dc.SetDpi(96., 96.);
-        if let Some(pixels) = pixels {
-            let image = dc.CreateBitmap(
-                D2D_SIZE_U { width, height },
-                Some(pixels.as_ptr().cast()),
-                width * 4,
-                &D2D1_BITMAP_PROPERTIES1 {
-                    pixelFormat: D2D1_PIXEL_FORMAT {
-                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-                    },
-                    dpiX: 96.,
-                    dpiY: 96.,
-                    ..Default::default()
-                },
-            )?;
-            let dest = D2D_RECT_F {
-                left: offset.x as f32,
-                top: offset.y as f32,
-                right: (offset.x + width as i32) as f32,
-                bottom: (offset.y + height as i32) as f32,
-            };
-            dc.DrawBitmap(
-                &image,
-                Some(&dest),
-                1.,
-                D2D1_INTERPOLATION_MODE_LINEAR,
-                None,
-                None,
-            );
-        } else {
-            dc.Clear(color.as_ref().map(|v| v as *const _));
-        }
-        Ok(())
-    })();
+    let draw = paint_bitmap(&dc, offset, width, height, pixels, color);
     let end = surface.EndDraw();
     draw?;
     end?;
     Ok(surface)
+}
+unsafe fn paint_bitmap(
+    dc: &ID2D1DeviceContext,
+    offset: POINT,
+    width: u32,
+    height: u32,
+    pixels: Option<&[u8]>,
+    color: Option<D2D1_COLOR_F>,
+) -> Result<()> {
+    dc.SetDpi(96., 96.);
+    let image = if let Some(pixels) = pixels {
+        Some(dc.CreateBitmap(
+            D2D_SIZE_U { width, height },
+            Some(pixels.as_ptr().cast()),
+            width * 4,
+            &D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.,
+                dpiY: 96.,
+                ..Default::default()
+            },
+        )?)
+    } else {
+        None
+    };
+    let dest = D2D_RECT_F {
+        left: offset.x as f32,
+        top: offset.y as f32,
+        right: (offset.x + width as i32) as f32,
+        bottom: (offset.y + height as i32) as f32,
+    };
+    // BeginDraw may return reused atlas pixels, including old page snapshots.
+    // Source-over cannot replace those beneath transparent blob edges. Clear
+    // OUR update rectangle first, without touching neighbouring atlas entries.
+    dc.PushAxisAlignedClip(&dest, D2D1_ANTIALIAS_MODE_ALIASED);
+    let clear = if image.is_some() { None } else { color };
+    dc.Clear(clear.as_ref().map(|v| v as *const _));
+    if let Some(image) = image {
+        dc.DrawBitmap(
+            &image,
+            Some(&dest),
+            1.,
+            D2D1_INTERPOLATION_MODE_LINEAR,
+            None,
+            None,
+        );
+    }
+    dc.PopAxisAlignedClip();
+    Ok(())
 }
 impl Frame {
     fn now(&self) -> f32 {
@@ -917,9 +934,111 @@ mod tests {
     use super::*;
     use windows::Win32::{
         Foundation::RECT,
+        Graphics::Direct2D::{
+            D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_CPU_READ,
+            D2D1_BITMAP_OPTIONS_TARGET, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_MAP_OPTIONS_READ,
+        },
         Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
         System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED},
     };
+    #[test]
+    fn texture_upload_replaces_stale_pixels_without_clearing_neighbours() -> Result<()> {
+        unsafe {
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+            let device = composition_device()?;
+            let seed = device.CreateSurface(
+                1,
+                1,
+                DXGI_FORMAT_B8G8R8A8_UNORM,
+                DXGI_ALPHA_MODE_PREMULTIPLIED,
+            )?;
+            let mut offset = POINT::default();
+            let seed_dc: ID2D1DeviceContext = seed.BeginDraw(None, &mut offset)?;
+            let dc = seed_dc
+                .GetDevice()?
+                .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
+            seed.EndDraw()?;
+            let mut properties = D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.,
+                dpiY: 96.,
+                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET,
+                ..Default::default()
+            };
+            let size = D2D_SIZE_U {
+                width: 160,
+                height: 160,
+            };
+            let target = dc.CreateBitmap(size, None, 0, &properties)?;
+            properties.bitmapOptions =
+                D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+            let readback = dc.CreateBitmap(size, None, 0, &properties)?;
+            dc.SetTarget(&target);
+            dc.SetDpi(96., 96.);
+            let field = radial([200, 80, 40]);
+            // Seed the entire shared target with conspicuous old content.
+            let stale = D2D1_COLOR_F {
+                r: 1.,
+                g: 0.,
+                b: 1.,
+                a: 1.,
+            };
+            let fill = D2D1_COLOR_F {
+                r: 0.,
+                g: 1.,
+                b: 0.,
+                a: 1.,
+            };
+            let offset = POINT { x: 13, y: 17 };
+            for pixels in [Some(field.as_slice()), None] {
+                dc.BeginDraw();
+                dc.Clear(Some(&stale));
+                paint_bitmap(
+                    &dc,
+                    offset,
+                    GRADIENT_SIZE,
+                    GRADIENT_SIZE,
+                    pixels,
+                    Some(fill),
+                )?;
+                dc.EndDraw(None, None)?;
+                readback.CopyFromBitmap(None, &target, None)?;
+                let mapped = readback.Map(D2D1_MAP_OPTIONS_READ)?;
+                let mut actual = Vec::new();
+                for y in 0..160 {
+                    actual.extend_from_slice(std::slice::from_raw_parts(
+                        mapped.bits.add(y * mapped.pitch as usize),
+                        160 * 4,
+                    ));
+                }
+                readback.Unmap()?;
+                for y in 0..160 {
+                    for x in 0..160 {
+                        let expected = if (13..141).contains(&x) && (17..145).contains(&y) {
+                            match pixels {
+                                Some(data) => &data[((y - 17) * 128 + x - 13) * 4..][..4],
+                                None => &[0, 255, 0, 255],
+                            }
+                        } else {
+                            &[255, 0, 255, 255]
+                        };
+                        assert_eq!(
+                            &actual[(y * 160 + x) * 4..][..4],
+                            expected,
+                            "GPU pixel at ({x}, {y}), bitmap={}",
+                            pixels.is_some()
+                        );
+                    }
+                }
+            }
+            drop(dc);
+            CoUninitialize();
+        }
+        Ok(())
+    }
     #[test]
     fn trusted_space_palette_deserializes_and_gradient_uses_its_direction() {
         let command: crate::model::Command = serde_json::from_str(r#"{"type":"resizeAppearance","start":[210,30,20],"end":[10,180,40],"angle":90,"dark":true,"reduceMotion":false}"#).unwrap();
