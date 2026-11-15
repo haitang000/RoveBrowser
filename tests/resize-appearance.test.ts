@@ -5,7 +5,7 @@ import { resizeAppearance } from "../src/lib/resize-appearance";
 const hex = (rgb: number[]) => "#" + rgb.map(c => c.toString(16).padStart(2, "0")).join("");
 
 describe("resize surround", () => {
-  it("follows named Space colors while reversing the chrome brightness", () => {
+  it("follows Space colors with distinct gradient stops and moderate brightness", () => {
     const sky = resizeAppearance({ color: "sky" }, "light", false);
     const sage = resizeAppearance({ color: "sage" }, "light", false);
     const night = resizeAppearance({ color: "sky" }, "dark", false);
@@ -13,9 +13,14 @@ describe("resize surround", () => {
     expect(sage.start[1]).toBeGreaterThan(sage.start[0]);
     expect(sky.start).not.toEqual(sage.start);
     for (const stop of ["start", "end"] as const) {
-      expect(luminance(hex(sky[stop]))).toBeLessThan(0.2);
-      expect(luminance(hex(night[stop]))).toBeGreaterThan(0.4);
+      const day = luminance(hex(sky[stop]));
+      const dark = luminance(hex(night[stop]));
+      expect(day).toBeGreaterThan(0.12);
+      expect(dark).toBeLessThan(0.55);
+      expect(dark).toBeGreaterThan(day);
     }
+    expect(Math.abs(luminance(hex(sky.start)) - luminance(hex(sky.end)))).toBeGreaterThan(0.05);
+    expect(Math.abs(luminance(hex(night.start)) - luminance(hex(night.end)))).toBeGreaterThan(0.05);
     const neutral = resizeAppearance({ color: "graphite" }, "light", false);
     expect(Math.max(...neutral.start) - Math.min(...neutral.start)).toBeLessThan(2);
   });

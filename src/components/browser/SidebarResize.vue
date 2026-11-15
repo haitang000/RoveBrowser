@@ -12,11 +12,33 @@ const width = computed(() => visibleSidebarWidth(preferred.value, viewport.value
 const maximum = computed(() => sidebarWidthLimit(viewport.value));
 let finishResize: ((commit?: boolean) => void) | undefined;
 let restoreNativeTransition = 0;
+let sidebarElement: HTMLElement | null;
+let titlebarElement: HTMLElement | null;
+
+function nativeMessage(event: MessageEvent<unknown>) {
+  if (!event.data || typeof event.data !== "object") return;
+  const update = event.data as Partial<NonNullable<typeof b.sidebarResize>> & { type?: string };
+  if (update.type !== "sidebarResize" || typeof update.width !== "number" || !Number.isFinite(update.width)) return;
+  b.sidebarResize = { width: update.width, resizing: Boolean(update.resizing), reset: Boolean(update.reset) };
+}
 
 function paint() {
+  const track = handleElement.value?.parentElement;
+  if (b.sidebarResizing && track) {
+    const pixels = `${width.value}px`;
+    // Scope drag updates to the sidebar and titlebar; changing the root custom
+    // property invalidates styles throughout the entire browser shell.
+    track.style.width = pixels;
+    if (sidebarElement) sidebarElement.style.width = pixels;
+    titlebarElement?.style.setProperty("--sidebar-width", pixels);
+    return;
+  }
   const style = document.documentElement.style;
   if (preferred.value === undefined) style.removeProperty("--sidebar-width");
   else style.setProperty("--sidebar-width", `${width.value}px`);
+  track?.style.removeProperty("width");
+  sidebarElement?.style.removeProperty("width");
+  titlebarElement?.style.removeProperty("--sidebar-width");
 }
 watch(() => b.sidebarResize, (update) => {
   if (!update) return;
@@ -83,9 +105,10 @@ function resize(event: PointerEvent) {
     handle.removeEventListener("lostpointercapture", release);
     if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
     b.sidebarResizing = false;
+    if (!commit) preferred.value = previous;
+    paint();
     track.style.removeProperty("transition");
-    if (!commit) { preferred.value = previous; paint(); }
-    else if (moved) save();
+    if (commit && moved) save();
   };
   const release = () => finish();
   finishResize = finish;
@@ -121,11 +144,16 @@ function blur() { finishResize?.(); }
 function visibility() { if (document.hidden) blur(); }
 watch(() => b.state.sidebarCollapsed || b.overlay || !!b.peek, (blocked) => { if (blocked) blur(); });
 onMounted(() => {
+  sidebarElement = handleElement.value?.parentElement?.querySelector<HTMLElement>(".sidebar") ?? null;
+  titlebarElement = document.querySelector<HTMLElement>(".titlebar");
+  window.chrome?.webview?.addEventListener("message", nativeMessage);
   window.addEventListener("resize", windowResize);
   window.addEventListener("blur", blur);
   document.addEventListener("visibilitychange", visibility);
 });
 onBeforeUnmount(() => {
+  window.chrome?.webview?.removeEventListener("message", nativeMessage);
+  titlebarElement?.style.removeProperty("--sidebar-width");
   cancelAnimationFrame(restoreNativeTransition);
   finishResize?.();
   window.removeEventListener("resize", windowResize);

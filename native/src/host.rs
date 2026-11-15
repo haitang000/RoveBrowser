@@ -1940,8 +1940,6 @@ impl App {
         self.live_resize = update.resizing;
         self.pending_layout.take();
         if let Some(ui) = &self.ui {
-            let event = json!({ "type": "sidebarResize", "width": c.width(), "resizing": update.resizing, "reset": c.preferred.is_none() });
-            let _ = ui.evaluate_script(&format!("window.__ERA_RECEIVE__?.({event})"));
             if update.commit {
                 // The native strip temporarily owns keyboard focus for Escape.
                 // WebView2's old focus can be a foreign-thread child (or NULL);
@@ -2859,9 +2857,16 @@ impl ApplicationHandler<Event> for App {
             self.ui = Some(ui);
             let proxy = self.proxy.clone();
             let pending_layout = self.pending_layout.clone();
+            let sidebar_ui = self.ui.as_ref().unwrap().webview();
             self.sidebar_handle = Some(crate::sidebar::SidebarHandle::new(
                 HWND(handle.hwnd.get() as *mut _), self.popup.as_ref().unwrap().hwnd(),
                 move || { pending_layout.take(); let _ = proxy.send_event(Event::SidebarResize); },
+                move |width, resizing, reset| {
+                    let event = json!({ "type": "sidebarResize", "width": width, "resizing": resizing, "reset": reset });
+                    // Native input -> shell message, without a timer, winit
+                    // event hop, ExecuteScript request or returned result.
+                    let _ = unsafe { sidebar_ui.PostWebMessageAsJson(&HSTRING::from(event.to_string())) };
+                },
             )?);
             self.window = Some(window);
             self.update_window_frame()?;

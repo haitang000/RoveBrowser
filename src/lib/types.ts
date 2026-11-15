@@ -119,6 +119,11 @@ declare global {
   const __APP_VERSION__: string;
   interface Window {
     ipc?: { postMessage(message: string): void };
+    chrome?: { webview?: {
+      postMessage(message: string): void;
+      addEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
+      removeEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
+    } };
     __ERA_NATIVE__?: boolean;
     __ERA_POPUP__?: boolean;
     __ERA_INITIAL_STATE__?: BrowserState;

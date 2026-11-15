@@ -6,11 +6,11 @@ const rgb = (hex: string) => [1, 3, 5].map(i => Number.parseInt(hex.slice(i, i +
 /** Reuse the Space color wheel, both gradient stops and its effective theme. */
 export function resizeAppearance(space: LookFields, theme: "light" | "dark", reduceMotion: boolean) {
   const dark = (frameOf(space, theme, false).theme ?? theme) === "dark";
-  // Keep the hue/tint and selected shade while guaranteeing a contrasting
-  // surround for the lifted page in either appearance.
+  // Stay in the middle tones: the surround should separate the page from the
+  // frame without flashing almost white or sinking to almost black.
   const depth = (shade: number | undefined, second: boolean) => {
-    const variation = (clamp01(shade ?? 0.5) - 0.5) * 0.1;
-    return dark ? 0.22 + (second ? -0.10 : 0) + variation : 0.72 + (second ? 0.12 : 0) + variation;
+    const variation = (clamp01(shade ?? 0.5) - 0.5) * 0.06;
+    return dark ? 0.40 + (second ? -0.12 : 0) + variation : 0.46 + (second ? 0.12 : 0) + variation;
   };
   return {
     start: rgb(paint(baseHue(space), depth(space.brightness, false), tintAmount(space))),

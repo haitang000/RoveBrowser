@@ -59,6 +59,11 @@ use windows::{
 };
 const SUBCLASS: usize = 0x52535641;
 const TIMER: usize = 1;
+thread_local! {
+    // All page previews belong to the UI thread. Reuse its device rather than
+    // initializing D3D/D2D synchronously for each pane on every mouse press.
+    static DEVICE: RefCell<Option<IDCompositionDevice>> = const { RefCell::new(None) };
+}
 #[derive(Clone, Copy, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Appearance {
@@ -147,6 +152,8 @@ struct Frame {
 }
 impl Surface {
     pub fn new(source: HWND, core: Option<ICoreWebView2>, appearance: Appearance) -> Self {
+        // Warm it while creating the page, before the user starts a drag.
+        let _ = unsafe { composition_device() };
         Self {
             source,
             core,
@@ -306,6 +313,9 @@ impl Layer {
     }
 }
 unsafe fn composition_device() -> Result<IDCompositionDevice> {
+    if let Some(device) = DEVICE.with(|cached| cached.borrow().clone()) {
+        return Ok(device);
+    }
     let mut d3d: Option<ID3D11Device> = None;
     D3D11CreateDevice(
         None::<&IDXGIAdapter>,
@@ -333,7 +343,9 @@ unsafe fn composition_device() -> Result<IDCompositionDevice> {
     })?;
     let dxgi: IDXGIDevice = d3d.unwrap().cast()?;
     let d2d = D2D1CreateDevice(&dxgi, None)?;
-    DCompositionCreateDevice2(&d2d)
+    let device: IDCompositionDevice = DCompositionCreateDevice2(&d2d)?;
+    DEVICE.with(|cached| cached.replace(Some(device.clone())));
+    Ok(device)
 }
 unsafe fn bitmap(
     device: &IDCompositionDevice,
@@ -425,6 +437,7 @@ impl Frame {
             let root_visual = device.CreateVisual()?;
             let background = device.CreateVisual()?;
             let card = device.CreateVisual()?;
+            let content = device.CreateVisual()?;
             let card_background = device.CreateVisual()?;
             let background_scale = device.CreateScaleTransform()?;
             let gradient_scale = device.CreateScaleTransform()?;
@@ -457,7 +470,10 @@ impl Frame {
             card_background.SetContent(&fill)?;
             let card_clip = device.CreateRectangleClip()?;
             let viewport_clip = device.CreateRectangleClip()?;
-            card.SetClip(&card_clip)?;
+            // Clip the snapshot subtree BEFORE the parent's 3D projection.
+            // A clip on the projected visual cuts the destination rectangle,
+            // missing the inset/perspective corners of the actual snapshot.
+            content.SetClip(&card_clip)?;
             root_visual.SetClip(&viewport_clip)?;
             let effect = device.CreateEffectGroup()?;
             let projection = device.CreateMatrixTransform3D()?;
@@ -469,9 +485,10 @@ impl Frame {
             new.effect.SetOpacity2(1.)?;
             root_visual.AddVisual(&background, false, None::<&IDCompositionVisual>)?;
             root_visual.AddVisual(&card, true, &background)?;
-            card.AddVisual(&card_background, false, None::<&IDCompositionVisual>)?;
-            card.AddVisual(&new.visual, true, &card_background)?;
-            card.AddVisual(&old.visual, true, &new.visual)?;
+            card.AddVisual(&content, false, None::<&IDCompositionVisual>)?;
+            content.AddVisual(&card_background, false, None::<&IDCompositionVisual>)?;
+            content.AddVisual(&new.visual, true, &card_background)?;
+            content.AddVisual(&old.visual, true, &new.visual)?;
             target.SetRoot(&root_visual)?;
             Ok((
                 target,

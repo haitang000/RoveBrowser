@@ -75,6 +75,8 @@ struct State {
     original: RefCell<Option<Config>>,
     pending: RefCell<Option<Update>>,
     notify: Box<dyn Fn()>,
+    present: Box<dyn Fn(f64, bool, bool)>,
+    presented: Cell<Option<(f64, bool, bool)>>,
     dragging: Cell<bool>,
     busy: Cell<bool>,
     timer: Cell<bool>,
@@ -86,7 +88,12 @@ pub struct SidebarHandle {
     state: Rc<State>,
 }
 impl SidebarHandle {
-    pub fn new(root: HWND, popup: HWND, notify: impl Fn() + 'static) -> Result<Self> {
+    pub fn new(
+        root: HWND,
+        popup: HWND,
+        notify: impl Fn() + 'static,
+        present: impl Fn(f64, bool, bool) + 'static,
+    ) -> Result<Self> {
         let state = Rc::new(State {
             root,
             popup,
@@ -95,6 +102,8 @@ impl SidebarHandle {
             original: RefCell::new(None),
             pending: RefCell::new(None),
             notify: Box::new(notify),
+            present: Box::new(present),
+            presented: Cell::new(None),
             dragging: Cell::new(false),
             busy: Cell::new(false),
             timer: Cell::new(false),
@@ -199,7 +208,14 @@ fn reflow(c: &Config) -> Result<()> {
     }
     Ok(())
 }
+fn present(s: &State, c: &Config, resizing: bool) {
+    let value = (c.width(), resizing, c.preferred.is_none());
+    if s.presented.replace(Some(value)) != Some(value) {
+        (s.present)(value.0, value.1, value.2);
+    }
+}
 fn report(s: &State, c: Config, resizing: bool, commit: bool, error: Option<String>) {
+    present(s, &c, resizing);
     let previous = s.pending.borrow_mut().replace(Update {
         config: c,
         resizing,
@@ -240,6 +256,9 @@ fn move_to(s: &State, x: f64) {
         if next.width() != c.width() {
             next.preferred = Some(next.width());
             *s.config.borrow_mut() = Some(next.clone());
+            // Paint feedback directly from input, before compositor work. The
+            // model/save notification still coalesces on the existing timer.
+            present(s, &next, true);
             if let Err(error) = move_windows(s, &next) {
                 report(s, next, true, false, Some(error.to_string()));
             }
@@ -341,6 +360,15 @@ unsafe extern "system" fn procedure(
         WM_LBUTTONDOWN => {
             let config = s.config.borrow().clone();
             if let Some(c) = config {
+                *s.original.borrow_mut() = Some(c.clone());
+                s.grab_offset.set(cursor_x(s, lparam, c.scale) - c.width());
+                s.dragging.set(true);
+                s.previous_focus.set(GetFocus());
+                let _ = SetFocus(Some(hwnd));
+                SetCapture(hwnd);
+                // Capture and show the resizing state before creating GPU
+                // devices or requesting either page's asynchronous snapshot.
+                report(s, c.clone(), true, false, None);
                 if let Some(pane) = &c.left {
                     pane.begin_preview(c.primary, c.scale);
                 }
@@ -348,12 +376,6 @@ unsafe extern "system" fn procedure(
                     pane.begin_preview(rect, c.scale);
                 }
                 point_previews(s, lparam);
-                *s.original.borrow_mut() = Some(c.clone());
-                s.grab_offset.set(cursor_x(s, lparam, c.scale) - c.width());
-                s.dragging.set(true);
-                s.previous_focus.set(GetFocus());
-                let _ = SetFocus(Some(hwnd));
-                SetCapture(hwnd);
                 let error = move_windows(s, &c).err().map(|e| e.to_string());
                 s.timer
                     .set(SetTimer(Some(hwnd), FRAME_TIMER, 16, None) != 0);
@@ -509,8 +531,15 @@ mod tests {
         let popup = window(Some(root.0));
         let reports = Rc::new(Cell::new(0));
         let counter = reports.clone();
-        let handle =
-            SidebarHandle::new(root.0, popup.0, move || counter.set(counter.get() + 1)).unwrap();
+        let painted = Rc::new(RefCell::new(Vec::new()));
+        let paints = painted.clone();
+        let handle = SidebarHandle::new(
+            root.0,
+            popup.0,
+            move || counter.set(counter.get() + 1),
+            move |width, resizing, reset| paints.borrow_mut().push((width, resizing, reset)),
+        )
+        .unwrap();
         handle.configure(Some(config(1.5))).unwrap();
         assert_ne!(
             unsafe { GetClassLongPtrW(handle.state.hwnd.get(), GCL_STYLE) } & CS_DBLCLKS.0 as usize,
@@ -521,12 +550,19 @@ mod tests {
         assert_eq!(unsafe { GetCapture() }, handle.state.hwnd.get());
         assert!(handle.take_update().unwrap().resizing);
         let start_reports = reports.get();
+        painted.borrow_mut().clear();
         for x in 236..=435 {
             send(&handle, WM_MOUSEMOVE, x as f64);
         }
         // Neither shell JS nor an app-event consumer ran between these inputs.
         let current = handle.state.config.borrow().clone().unwrap();
         assert_eq!(current.width(), 440.);
+        assert_eq!(
+            painted.borrow().len(),
+            200,
+            "visual feedback cannot wait for a timer or app event"
+        );
+        assert_eq!(painted.borrow().last().copied(), Some((440., true, false)));
         assert_eq!(current.primary.x, 441.);
         assert_eq!(
             current.primary.width + current.secondary.unwrap().width,
@@ -557,6 +593,7 @@ mod tests {
         assert!(final_update.commit);
         assert_eq!(final_update.config.preferred, Some(460.));
         assert_eq!(final_update.config.width(), 460.);
+        assert_eq!(painted.borrow().last().copied(), Some((460., false, false)));
         assert_ne!(unsafe { GetCapture() }, handle.state.hwnd.get());
     }
 
@@ -564,7 +601,7 @@ mod tests {
     fn escape_restores_the_start_and_double_click_resets_the_preference() {
         let root = window(None);
         let popup = window(Some(root.0));
-        let handle = SidebarHandle::new(root.0, popup.0, || {}).unwrap();
+        let handle = SidebarHandle::new(root.0, popup.0, || {}, |_, _, _| {}).unwrap();
         let mut c = config(1.);
         c.preferred = Some(336.);
         c = c.resized(336.);
