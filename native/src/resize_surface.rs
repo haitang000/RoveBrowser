@@ -794,7 +794,13 @@ impl Frame {
             if let Some((visual, _)) = &background {
                 root_visual.AddVisual(visual, false, None::<&IDCompositionVisual>)?;
             }
-            root_visual.AddVisual(&card, true, None::<&IDCompositionVisual>)?;
+            // With no reference, insertAbove=true puts the visual at the
+            // bottom. Anchor the card above the opaque fluid background.
+            root_visual.AddVisual(
+                &card,
+                true,
+                background.as_ref().map(|(visual, _)| visual),
+            )?;
             card.AddVisual(&content, false, None::<&IDCompositionVisual>)?;
             content.AddVisual(&blurred, false, None::<&IDCompositionVisual>)?;
             blurred.AddVisual(&card_background, false, None::<&IDCompositionVisual>)?;
