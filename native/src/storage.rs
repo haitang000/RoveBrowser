@@ -34,8 +34,8 @@ impl Storage {
         self.conn.execute("INSERT INTO session(id,json) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET json=excluded.json",[serde_json::to_string(s)?])?;
         Ok(())
     }
-    pub fn visit(&self, title: &str, url: &str) -> rusqlite::Result<usize> {
-        self.conn.execute("INSERT INTO history(url,title,visited) VALUES(?1,?2,unixepoch()) ON CONFLICT(url) DO UPDATE SET title=excluded.title,visited=excluded.visited",params![url,title])
+    pub fn visit(&self, title: &str, url: &str, visited: i64) -> rusqlite::Result<usize> {
+        self.conn.execute("INSERT INTO history(url,title,visited) VALUES(?1,?2,?3) ON CONFLICT(url) DO UPDATE SET title=excluded.title,visited=excluded.visited",params![url,title,visited])
     }
     pub fn clear_history(&self) -> rusqlite::Result<usize> { self.conn.execute("DELETE FROM history", []) }
     /// Newest first, capped by the caller's model. Malformed rows are skipped so

@@ -102,6 +102,7 @@ enum Event {
     SplitResize,
     SidebarResize,
     DataCleared(String, bool),
+    HistoryCleared(bool),
     Command(Command),
     Title(String, String),
     Load(String, String, bool),
@@ -142,7 +143,7 @@ enum Event {
     SleepTick,
     /// A background page's `TrySuspend` finished; `true` when it slept.
     SleepDone(String, bool),
-    SessionSaveError(String),
+    StorageWriteError(String),
 }
 struct Page {
     view: WebView,
@@ -405,7 +406,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = event_loop.create_proxy();
     let save_proxy = proxy.clone();
     let session_writer = crate::session_writer::SessionWriter::new(&data, move |error| {
-        let _ = save_proxy.send_event(Event::SessionSaveError(error));
+        let _ = save_proxy.send_event(Event::StorageWriteError(error));
     })?;
     let external_proxy = proxy.clone();
     instance.listen(move |urls| { let _ = external_proxy.send_event(Event::ExternalUrls(urls)); });
@@ -1709,7 +1710,7 @@ impl App {
         let Some(peek) = self.peek.take() else { return };
         self.peek_visible.set(false);
         let id = peek.tab.id.clone();
-        if self.state.settings.remember_history { let _ = self.storage.visit(&peek.tab.title, &peek.tab.url); }
+        if self.state.settings.remember_history { self.session_writer.visit(&peek.tab.title, &peek.tab.url); }
         self.state.tabs.push(peek.tab);
         self.state.activate(&id);
         // Transfer the same controller: DOM, scroll, JS state and navigation stack remain intact.
@@ -2325,10 +2326,15 @@ impl App {
             }
             Command::ClearBrowsingData { kind } => {
                 if kind == "history" {
-                    match self.storage.clear_history() {
-                        Ok(_) => { self.state.closed.clear(); self.save(); self.publish(); self.emit(json!({"type":"dataCleared","action":"history","message":"已清除浏览历史"})); }
-                        Err(e) => self.error(e),
-                    }
+                    // Apply the in-memory part now: a close/quit can arrive
+                    // before the background DELETE finishes.
+                    self.state.closed.clear();
+                    self.save();
+                    self.publish();
+                    let proxy = self.proxy.clone();
+                    self.session_writer.clear_history(move |ok| {
+                        let _ = proxy.send_event(Event::HistoryCleared(ok));
+                    });
                 } else if kind == "cache" || kind == "siteData" {
                     if self.data_clear_view.is_some() { self.error("正在清除浏览数据，请稍候"); return; }
                     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
@@ -3085,6 +3091,11 @@ impl ApplicationHandler<Event> for App {
                 self.data_clear_view = None;
                 self.emit(json!({"type":"dataCleared","action":kind,"message":if ok { "已清除浏览数据" } else { "清除失败，请重试" }}));
             }
+            Event::HistoryCleared(ok) => {
+                if ok {
+                    self.emit(json!({"type":"dataCleared","action":"history","message":"已清除浏览历史"}));
+                }
+            }
             Event::PreviewLoad(key, epoch, url, loading) => {
                 if let Some(render) = self.preview_renders.get_mut(&key).filter(|p| p.epoch == epoch) {
                     if url.is_empty() {
@@ -3180,7 +3191,7 @@ impl ApplicationHandler<Event> for App {
                 self.emit(json!({"type":"audio","id":id,"playing":playing}));
             }
             Event::SleepTick => self.sleep_pass(),
-            Event::SessionSaveError(error) => self.error(format!("保存会话失败：{error}")),
+            Event::StorageWriteError(error) => self.error(format!("保存浏览数据失败：{error}")),
             Event::SleepDone(id, slept) => self.sleep_done(&id, slept),
             Event::DownloadsChanged { persist } => {
                 if persist {
@@ -3259,7 +3270,7 @@ impl ApplicationHandler<Event> for App {
                 if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
                     t.title = title.chars().take(512).collect();
                     if !failed && self.state.settings.remember_history && model::is_web(&t.url) {
-                        let _ = self.storage.visit(&t.title, &t.url);
+                        self.session_writer.visit(&t.title, &t.url);
                     }
                 }
                 self.publish();
@@ -3314,7 +3325,7 @@ impl ApplicationHandler<Event> for App {
                         }
                     }
                     if !loading && !failed && self.state.settings.remember_history {
-                        let _ = self.storage.visit(&t.title, &t.url);
+                        self.session_writer.visit(&t.title, &t.url);
                     }
                 }
                 self.publish();

@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)][int]$ProcessId,
-  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'ctrl-shift-f', 'escape')][string]$Action,
+  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'ctrl-r', 'f5', 'ctrl-shift-f', 'escape')][string]$Action,
   [double]$xFrac = 0.62,
   [double]$yFrac = 0.5
 )
@@ -53,6 +53,8 @@ function Send-Key([byte]$key, [bool]$ctrl, [bool]$shift = $false) {
 switch ($Action) {
   'click-page' { }
   'ctrl-j' { Send-Key 0x4A $true }   # Ctrl+J
+  'ctrl-r' { Send-Key 0x52 $true }
+  'f5' { Send-Key 0x74 $false }
   'ctrl-shift-f' { Send-Key 0x46 $true $true }
   'escape' { Send-Key 0x1B $false }  # Esc
 }

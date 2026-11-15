@@ -28,7 +28,8 @@ function UserChoice {
 $before = UserChoice
 function Compile([string]$Script, [string]$AppVersion, [string]$PayloadDir, [string]$OutputDir) {
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-    & $CompilerPath /Q "/DAppVersion=$AppVersion" '/DFileVersion=0.1.0.0' "/DPayloadDir=$PayloadDir" "/DOutputDir=$OutputDir" "/DAppIcon=$($icon.FullName)" "/DBootstrapperPath=$bootstrapper" "/DSetupAppId={{$testId}" "/DAppRegistrationName=$registrationName" "/DAppTitle=$registrationName" $Script
+    $fileVersion = ($AppVersion -replace '-.*$', '') + '.0'
+    & $CompilerPath /Q "/DAppVersion=$AppVersion" "/DFileVersion=$fileVersion" "/DPayloadDir=$PayloadDir" "/DOutputDir=$OutputDir" "/DAppIcon=$($icon.FullName)" "/DBootstrapperPath=$bootstrapper" "/DSetupAppId={{$testId}" "/DAppRegistrationName=$registrationName" "/DAppTitle=$registrationName" $Script
     if ($LASTEXITCODE -ne 0) { throw 'Smoke installer compilation failed' }
     Join-Path $OutputDir "Rove-$AppVersion-windows-x64-setup.exe"
 }
