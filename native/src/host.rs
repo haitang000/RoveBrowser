@@ -285,6 +285,8 @@ struct App {
     split_handle: Option<crate::split::SplitHandle>,
     sidebar_handle: Option<crate::sidebar::SidebarHandle>,
     resize_appearance: crate::resize_surface::Appearance,
+    presented_split: Option<(String, String)>,
+    split_entry_pending: bool,
     pages: HashMap<String, Page>,
     data_clear_view: Option<WebView>,
     live_settings: Rc<RefCell<crate::settings::Settings>>,
@@ -406,6 +408,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         split_handle: None,
         sidebar_handle: None,
         resize_appearance: crate::resize_surface::Appearance::default(),
+        presented_split: None,
+        split_entry_pending: false,
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
         pages: HashMap::new(),
@@ -1920,6 +1924,24 @@ impl App {
         }
         if let Some(error) = update.error { self.error(error); }
     }
+    fn animate_split_entry(&mut self) {
+        if !self.split_entry_pending || self.live_resize || self.overlay || self.peek.is_some() { return; }
+        self.split_entry_pending = false;
+        let current = self.state.active().and_then(|tab| tab.split_with.as_ref())
+            .map(|other| (self.state.active_tab.clone(), other.clone()));
+        if current != self.presented_split { return; }
+        let Some(window) = &self.window else { return; };
+        let Some((left, right)) = self.presented_split.as_ref() else { return; };
+        for (id, rect, edge) in [(left, Some(self.primary), 1.), (right, self.secondary, -1.)] {
+            let Some((page, rect)) = self.pages.get(id).zip(rect).filter(|(page, _)| page.visible.get()) else { continue; };
+            let Some(bounds) = page.bounds.get() else { continue; };
+            if let Err(error) = page.resize_surface.enter(bounds, rect.corners, window.scale_factor(), edge) {
+                // Failure leaves the live, final-sized page usable.
+                page.resize_surface.end();
+                eprintln!("Rove split entry unavailable: {error}");
+            }
+        }
+    }
     fn finish_split_resize(&mut self) {
         if let Some(handle) = &self.split_handle { handle.cancel(); }
         if let Some(handle) = &self.sidebar_handle { handle.cancel(); }
@@ -2454,6 +2476,17 @@ impl App {
                 });
                 if let Err(e) = result {
                     self.error(e);
+                } else {
+                    // Wait for the shell's two final slots. sync() immediately
+                    // after Split still has the old single-page rectangle.
+                    let pair = self.secondary.filter(|r| r.width > 0. && r.height > 0.)
+                        .and_then(|_| self.state.active()?.split_with.as_ref())
+                        .map(|other| (self.state.active_tab.clone(), other.clone()));
+                    if pair != self.presented_split {
+                        self.split_entry_pending = pair.is_some();
+                        self.presented_split = pair;
+                    }
+                    self.animate_split_entry();
                 }
                 return;
             }
@@ -2465,6 +2498,7 @@ impl App {
                 if visible && !self.overlay && !command { self.refresh_visible_thumbnails(); }
                 self.overlay = visible;
                 if let Err(e) = self.sync_layout() { self.error(e); }
+                if !visible { self.animate_split_entry(); }
                 // PopupLayer requests focus once its input region is installed.
                 // Tab dragging also uses Overlay and keeps shell capture.
                 if !visible {

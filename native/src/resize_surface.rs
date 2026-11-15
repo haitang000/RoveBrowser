@@ -116,6 +116,10 @@ enum Capture {
     Before,
     After,
 }
+enum Start {
+    Drag(Option<crate::resize_motion::Pose>),
+    Enter(f32),
+}
 struct Layer {
     visual: IDCompositionVisual,
     effect: IDCompositionEffectGroup,
@@ -192,12 +196,31 @@ impl Surface {
                 self.core.clone(),
                 bounds,
                 self.appearance.get(),
-                pose,
+                Start::Drag(pose),
                 corners.map(|r| (r * scale) as f32),
                 scale as f32,
             )?
         };
         self.frame.replace(Some(frame));
+        Ok(())
+    }
+    /// Start on the final viewport, already lifted and tilted away from the
+    /// divider. Only presentation changes while the fresh pixels arrive.
+    pub fn enter(&self, bounds: [i32; 4], corners: [f64; 4], scale: f64, edge: f32) -> Result<()> {
+        self.end();
+        let frame = unsafe {
+            Frame::new(
+                self.source,
+                self.core.clone(),
+                bounds,
+                self.appearance.get(),
+                Start::Enter(edge),
+                corners.map(|r| (r * scale) as f32),
+                scale as f32,
+            )?
+        };
+        self.frame.replace(Some(frame));
+        trace(serde_json::json!({"phase":"split-entry", "bounds":bounds, "edge":edge}));
         Ok(())
     }
     pub fn resize(&self, bounds: [i32; 4]) -> Result<()> {
@@ -517,7 +540,7 @@ impl Frame {
         core: Option<ICoreWebView2>,
         bounds: [i32; 4],
         appearance: Appearance,
-        pose: Option<crate::resize_motion::Pose>,
+        start: Start,
         corners: [f32; 4],
         scale_factor: f32,
     ) -> Result<Box<Self>> {
@@ -635,10 +658,15 @@ impl Frame {
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         );
         let mut motion = Motion::new(appearance.reduce_motion || !enabled.as_bool());
-        if let Some(pose) = pose {
-            motion.resume(pose);
+        match start {
+            Start::Drag(pose) => {
+                if let Some(pose) = pose {
+                    motion.resume(pose);
+                }
+                motion.point(-1., 0.);
+            }
+            Start::Enter(edge) => motion.enter(edge),
         }
-        motion.point(-1., 0.);
         let frame = Box::new(Self {
             source,
             root,
@@ -680,7 +708,9 @@ impl Frame {
         let wrapper = frame.device.CreateSurfaceFromHwnd(source)?;
         frame.old.visual.SetContent(&wrapper)?;
         frame.resize(bounds)?;
-        let cloak = BOOL(1);
+        // Entry already owns the final viewport. Keep it rendering under the
+        // opaque snapshot, just as release() does after a resize.
+        let cloak = BOOL(frame.motion.borrow().dragging() as i32);
         DwmSetWindowAttribute(source, DWMWA_CLOAK, &cloak as *const _ as _, 4)?;
         if !SetWindowSubclass(
             preview,
@@ -1143,6 +1173,29 @@ mod tests {
                 DwmGetWindowAttribute(source, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)?;
                 assert_eq!(cloaked, 0);
             }
+            // Entry uses final bounds immediately and must keep Chromium
+            // visible for capture. Cancelling it cannot retain a style/cloak.
+            for edge in [1., -1.] {
+                surface.enter([20, 20, 200, 150], [8.; 4], 1., edge)?;
+                assert!(surface.active());
+                assert!(!surface.dragging());
+                let mut cloaked = 0u32;
+                DwmGetWindowAttribute(source, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)?;
+                assert_eq!(cloaked, 0, "entry must paint underneath the preview");
+                surface.end();
+                assert!(!surface.active());
+                assert_eq!(GetWindowLongPtrW(source, GWL_EXSTYLE), style);
+            }
+            surface.enter([20, 20, 200, 150], [8.; 4], 1., 1.)?;
+            for _ in 0..80 {
+                if !surface.active() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                surface.frame.borrow().as_ref().unwrap().tick()?;
+            }
+            assert!(!surface.active(), "entry must finish without capture");
+            assert_eq!(GetWindowLongPtrW(source, GWL_EXSTYLE), style);
             drop(surface);
             DestroyWindow(source)?;
             DestroyWindow(root)?;

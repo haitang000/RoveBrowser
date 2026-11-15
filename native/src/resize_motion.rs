@@ -76,6 +76,13 @@ impl Motion {
         self.x.value = pose.x;
         self.y.value = pose.y;
     }
+    /// A newly shown split pane starts lifted beside the divider, then uses
+    /// the same paint handoff and nonlinear settle as a released resize.
+    pub fn enter(&mut self, edge: f32) {
+        self.point(edge, 0.);
+        self.resume(self.target);
+        self.release(0.);
+    }
     pub fn point(&mut self, x: f32, y: f32) {
         self.target = if self.reduced {
             Pose::default()
@@ -229,5 +236,45 @@ mod tests {
         m.release(1.);
         m.paint_ready(1.04);
         assert!(m.sample(1.13, 0.016).finished);
+    }
+    #[test]
+    fn split_entry_mirrors_depth_and_waits_for_paint_before_clearing_blur() {
+        let mut left = Motion::new(false);
+        let mut right = Motion::new(false);
+        left.enter(1.);
+        right.enter(-1.);
+        assert!(!left.dragging());
+        let a = left.sample(0., 0.);
+        let b = right.sample(0., 0.);
+        assert_eq!(a.pose.scale, 0.968);
+        assert_eq!(a.pose.x, -b.pose.x);
+        assert!(a.pose.x < 0.);
+        assert_eq!(a.blend, 0.);
+        // Late pixels retain the lifted scale (and therefore content blur).
+        assert_eq!(left.sample(0.20, 0.016).pose.scale, 0.968);
+        left.paint_ready(0.21);
+        let fading = left.sample(0.28, 0.016);
+        assert!(fading.blend > 0. && fading.blend < 1.);
+        assert_eq!(fading.pose.scale, 0.968);
+        let settling = left.sample(0.40, 0.016);
+        assert!(settling.pose.scale > 0.968 && settling.pose.scale < 1.);
+        let done = left.sample(0.52, 0.016);
+        assert!(done.finished);
+        assert_eq!(done.pose.scale, 1.);
+        assert_eq!(done.pose.x, 0.);
+        assert!(
+            right.sample(0.56, 0.016).finished,
+            "missing pixels must finish"
+        );
+    }
+    #[test]
+    fn reduced_split_entry_only_crossfades() {
+        let mut m = Motion::new(true);
+        m.enter(1.);
+        let first = m.sample(0., 0.);
+        assert_eq!(first.pose.scale, 1.);
+        assert_eq!(first.pose.x, 0.);
+        m.paint_ready(0.04);
+        assert!(m.sample(0.13, 0.016).finished);
     }
 }
