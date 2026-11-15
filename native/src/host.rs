@@ -100,6 +100,7 @@ enum Event {
     ImportRead(Vec<crate::import::Batch>),
     Layout,
     SplitResize,
+    SidebarResize,
     DataCleared(String, bool),
     Command(Command),
     Title(String, String),
@@ -144,6 +145,7 @@ enum Event {
 }
 struct Page {
     view: WebView,
+    resize_surface: Rc<crate::resize_surface::Surface>,
     url: String,
     clip: Rc<WindowClip>,
     thumbnail_version: u64,
@@ -170,6 +172,7 @@ struct NavigationPolicy {
 impl Page {
     fn split_pane(&self) -> crate::split::Pane {
         crate::split::Pane { hwnd: self.view.hwnd(), controller: self.view.controller(),
+            surface: self.resize_surface.clone(),
             clip: self.clip.clone(), bounds: self.bounds.clone(), viewport: self.viewport.clone() }
     }
     fn set_window_bounds(&self, bounds: wry::Rect, scale: f64) -> wry::Result<()> {
@@ -177,6 +180,7 @@ impl Page {
         let size = bounds.size.to_physical::<i32>(scale);
         let next = [position.x, position.y, size.width, size.height];
         if self.bounds.get() != Some(next) {
+            self.resize_surface.end();
             // Move the HWND before asking Chromium to reflow. Wry does these in
             // the opposite order, making visible edges wait on renderer work.
             unsafe { SetWindowPos(self.view.hwnd(), None, position.x, position.y,
@@ -186,6 +190,7 @@ impl Page {
         Ok(())
     }
     fn sync_viewport(&self) -> wry::Result<()> {
+        if self.resize_surface.dragging() { return Ok(()); }
         if let Some([_, _, width, height]) = self.bounds.get() {
             if self.viewport.get() != Some([width, height]) {
                 // SAFETY: controller belongs to this live Page and runs on the
@@ -248,6 +253,7 @@ struct Peek {
 struct PageLayout {
     primary: Rect,
     secondary: Option<Rect>,
+    sidebar: Option<Rect>,
     viewport: Option<crate::layout::Viewport>,
     live_resize: bool,
 }
@@ -277,6 +283,8 @@ struct App {
     import_busy: bool,
     // Drop child controllers before their parent HWND and shared context.
     split_handle: Option<crate::split::SplitHandle>,
+    sidebar_handle: Option<crate::sidebar::SidebarHandle>,
+    resize_appearance: crate::resize_surface::Appearance,
     pages: HashMap<String, Page>,
     data_clear_view: Option<WebView>,
     live_settings: Rc<RefCell<crate::settings::Settings>>,
@@ -315,6 +323,8 @@ struct App {
     secondary: Option<Rect>,
     pending_layout: Rc<Cell<Option<PageLayout>>>,
     layout_viewport: Option<crate::layout::Viewport>,
+    sidebar_rect: Option<Rect>,
+    sidebar_expected_width: Option<f64>,
     live_resize: bool,
     overlay: bool,
     ready: bool,
@@ -394,6 +404,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         import_sources: vec![],
         import_busy: false,
         split_handle: None,
+        sidebar_handle: None,
+        resize_appearance: crate::resize_surface::Appearance::default(),
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
         pages: HashMap::new(),
@@ -429,6 +441,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         secondary: None,
         pending_layout: Rc::new(Cell::new(None)),
         layout_viewport: None,
+        sidebar_rect: None,
+        sidebar_expected_width: None,
         live_resize: false,
         overlay: false,
         ready: false,
@@ -1105,6 +1119,7 @@ impl App {
         self.apply_site_controls(&view, &tab.url, tab.muted);
         view.load_url(&tab.url)?;
         Ok(Page {
+            resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
             view,
             url: tab.url.clone(),
             clip: Rc::new(WindowClip::default()),
@@ -1701,6 +1716,8 @@ impl App {
         // Release native mouse capture and controller references before a tab
         // switch or close can destroy the pages the handle was resizing.
         self.finish_split_resize();
+        self.sidebar_expected_width = None;
+        if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
         if let Some(handle) = &self.split_handle {
             handle.configure(None)?;
         }
@@ -1773,7 +1790,8 @@ impl App {
     // Layout messages arrive every frame during sidebar motion. They must not
     // create/navigate pages, touch profile settings, or repeat ShowWindow calls.
     fn sync_page_bounds(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        if self.split_handle.as_ref().is_some_and(|handle| handle.dragging()) {
+        if self.split_handle.as_ref().is_some_and(|handle| handle.dragging())
+            || self.sidebar_handle.as_ref().is_some_and(|handle| handle.dragging()) {
             return Ok(false);
         }
         let Some(window) = &self.window else {
@@ -1783,6 +1801,7 @@ impl App {
             let changed = self.pages.values().any(|page| page.visible.get());
             for page in self.pages.values() { page.set_visible(false)?; }
             if let Some(handle) = &self.split_handle { handle.configure(None)?; }
+            if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
             return Ok(changed);
         }
         let mut visibility_changed = false;
@@ -1867,6 +1886,19 @@ impl App {
                 });
             handle.configure(config)?;
         }
+        if let Some(handle) = &self.sidebar_handle {
+            let config = self.sidebar_rect.filter(|r| r.width > 0. && r.height > 0.)
+                .filter(|_| !self.state.sidebar_collapsed && !self.overlay && self.peek.is_none() && self.tab_preview.is_none())
+                .zip(self.layout_viewport)
+                .map(|(rect, viewport)| crate::sidebar::Config {
+                    id: self.state.active_tab.clone(), other: second.cloned(),
+                    primary: self.primary, secondary: self.secondary, handle: rect,
+                    preferred: self.state.sidebar_width, viewport, scale: window.scale_factor(),
+                    left: self.pages.get(&self.state.active_tab).map(Page::split_pane),
+                    right: second.and_then(|id| self.pages.get(id)).map(Page::split_pane),
+                });
+            handle.configure(config)?;
+        }
         Ok(visibility_changed)
     }
     fn receive_split_resize(&mut self) {
@@ -1890,9 +1922,39 @@ impl App {
     }
     fn finish_split_resize(&mut self) {
         if let Some(handle) = &self.split_handle { handle.cancel(); }
+        if let Some(handle) = &self.sidebar_handle { handle.cancel(); }
         // Consume the final dimensions before any ordinary layout can reapply
         // an older frame during a navigation or overlay transition.
         self.receive_split_resize();
+        self.receive_sidebar_resize();
+        for page in self.pages.values() { page.resize_surface.end(); }
+    }
+    fn receive_sidebar_resize(&mut self) {
+        let Some(update) = self.sidebar_handle.as_ref().and_then(|handle| handle.take_update()) else { return; };
+        let c = update.config;
+        if c.id != self.state.active_tab || c.other.as_ref() != self.state.active().and_then(|t| t.split_with.as_ref()) { return; }
+        self.primary = c.primary;
+        self.secondary = c.secondary;
+        self.sidebar_rect = Some(c.handle);
+        self.sidebar_expected_width = Some(c.width());
+        self.live_resize = update.resizing;
+        self.pending_layout.take();
+        if let Some(ui) = &self.ui {
+            let event = json!({ "type": "sidebarResize", "width": c.width(), "resizing": update.resizing, "reset": c.preferred.is_none() });
+            let _ = ui.evaluate_script(&format!("window.__ERA_RECEIVE__?.({event})"));
+            if update.commit {
+                // The native strip temporarily owns keyboard focus for Escape.
+                // WebView2's old focus can be a foreign-thread child (or NULL);
+                // restore the trusted controller and accessible separator.
+                let _ = ui.focus();
+                let _ = ui.evaluate_script("document.querySelector('.sidebar-resize-handle')?.focus({preventScroll:true})");
+            }
+        }
+        if update.commit && self.state.sidebar_width != c.preferred {
+            self.state.sidebar_width = c.preferred;
+            self.save(); self.publish();
+        }
+        if let Some(error) = update.error { self.error(error); }
     }
     fn sync_layout(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.sync_page_bounds()?;
@@ -2001,6 +2063,15 @@ impl App {
         }
     }
     fn command(&mut self, c: Command, event_loop: Option<&ActiveEventLoop>) {
+        if let Command::ResizeAppearance { appearance } = &c {
+            if appearance.angle.is_finite() {
+                self.resize_appearance = *appearance;
+                for page in self.pages.values().chain(self.peek.iter().map(|p| &p.page)) {
+                    page.resize_surface.set_appearance(*appearance);
+                }
+            }
+            return;
+        }
         if self.import_busy && matches!(c, Command::OnboardingOpen | Command::OnboardingBack { .. } | Command::OnboardingAdvance { .. }) {
             self.error("正在导入，请稍候"); return;
         }
@@ -2358,8 +2429,11 @@ impl App {
                 }
                 return;
             }
-            Command::Layout { primary, secondary, viewport, live_resize } => {
-                if self.split_handle.as_ref().is_some_and(|handle| handle.dragging()) { return; }
+            Command::Layout { primary, secondary, sidebar, viewport, live_resize } => {
+                self.receive_sidebar_resize();
+                if self.split_handle.as_ref().is_some_and(|handle| handle.dragging())
+                    || self.sidebar_handle.as_ref().is_some_and(|handle| handle.dragging()) { return; }
+                if self.sidebar_expected_width.zip(sidebar).is_some_and(|(width, rect)| (rect.x + rect.width - width).abs() > 1.) { return; }
                 let Some(window) = &self.window else { return; };
                 let size = window.inner_size().to_logical::<f64>(window.scale_factor());
                 let current = crate::layout::Viewport { width: size.width, height: size.height };
@@ -2370,6 +2444,8 @@ impl App {
                     self.primary = primary;
                     self.secondary = secondary;
                     self.layout_viewport = Some(current);
+                    self.sidebar_rect = sidebar;
+                    self.sidebar_expected_width = None;
                     self.live_resize = live_resize;
                 } else {
                     return;
@@ -2722,10 +2798,11 @@ impl ApplicationHandler<Event> for App {
                 .with_ipc_handler(move|req|{
                     if req.uri().scheme_str()!=Some("https")||req.uri().host()!=Some("era.ui")||req.uri().path()!="/index.html"||req.body().len()>16384{return}
                     if let Ok(c)=serde_json::from_str::<Command>(req.body()){
-                        if let Command::Layout { primary, secondary, viewport, live_resize } = c {
+                        if let Command::Layout { primary, secondary, sidebar, viewport, live_resize } = c {
                             if primary.valid() && secondary.is_none_or(|r| r.valid())
+                                && sidebar.is_none_or(|r| r.valid())
                                 && viewport.is_none_or(|v| v.valid())
-                                && pending_layout.replace(Some(PageLayout { primary, secondary, viewport, live_resize })).is_none() {
+                                && pending_layout.replace(Some(PageLayout { primary, secondary, sidebar, viewport, live_resize })).is_none() {
                                 let _ = proxy.send_event(Event::Layout);
                             }
                         } else { let _=proxy.send_event(Event::Command(c)); }
@@ -2780,6 +2857,12 @@ impl ApplicationHandler<Event> for App {
                 },
             )?);
             self.ui = Some(ui);
+            let proxy = self.proxy.clone();
+            let pending_layout = self.pending_layout.clone();
+            self.sidebar_handle = Some(crate::sidebar::SidebarHandle::new(
+                HWND(handle.hwnd.get() as *mut _), self.popup.as_ref().unwrap().hwnd(),
+                move || { pending_layout.take(); let _ = proxy.send_event(Event::SidebarResize); },
+            )?);
             self.window = Some(window);
             self.update_window_frame()?;
             Ok(())
@@ -2812,9 +2895,10 @@ impl ApplicationHandler<Event> for App {
             Event::SplitResize => {
                 self.receive_split_resize();
             }
+            Event::SidebarResize => self.receive_sidebar_resize(),
             Event::Layout => {
                 if let Some(layout) = self.pending_layout.take() {
-                    self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, viewport: layout.viewport, live_resize: layout.live_resize }, Some(event_loop));
+                    self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, sidebar: layout.sidebar, viewport: layout.viewport, live_resize: layout.live_resize }, Some(event_loop));
                 }
             }
             Event::DataCleared(kind, ok) => {
@@ -3175,6 +3259,7 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 self.finish_split_resize();
+                self.sidebar_expected_width = None;
                 self.dismiss_tab_preview();
                 if let Some(w) = &self.window {
                     let size = w.inner_size().to_logical::<f64>(w.scale_factor());

@@ -19,6 +19,7 @@ import { browserKey } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
 import { coverage, isSeeThrough } from "./lib/page-frame";
 import { frameOf, lookOf } from "./lib/space-look";
+import { resizeAppearance } from "./lib/resize-appearance";
 import SpaceEditor from "./components/browser/SpaceEditor.vue";
 import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
 const b = useBrowser();
@@ -75,6 +76,15 @@ function finishFrameAnimation() {
 }
 watch(() => b.settings.reduceMotion, (value) => { document.documentElement.dataset.reduceMotion = String(value); if (value) finishFrameAnimation(); }, { immediate: true });
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const systemMotionReduced = ref(reducedMotion.matches);
+function syncReducedMotion(event: MediaQueryListEvent) { systemMotionReduced.value = event.matches; }
+reducedMotion.addEventListener("change", syncReducedMotion);
+onBeforeUnmount(() => reducedMotion.removeEventListener("change", syncReducedMotion));
+watch(
+  () => JSON.stringify(resizeAppearance(shownSpace.value, b.state.theme, b.settings.reduceMotion || systemMotionReduced.value)),
+  value => { if (b.native) b.send({ type: "resizeAppearance", ...JSON.parse(value) }); },
+  { immediate: true },
+);
 function frameSnapshot(element: HTMLElement) {
   const style = getComputedStyle(element);
   const hasGradient = style.backgroundImage !== "none";
@@ -98,7 +108,7 @@ watch(
     cancelFrameAnimation();
     const ticket = frameGeneration;
     document.documentElement.dataset.theme = theme;
-    document.documentElement.dataset.color = painted.value.custom ? "custom" : b.space.color;
+    document.documentElement.dataset.color = painted.value.custom ? "custom" : shownSpace.value.color;
     if (painted.value.custom) {
       document.documentElement.style.setProperty("--frame", painted.value.start);
       document.documentElement.style.setProperty("--frame-h", String(painted.value.hue));
@@ -193,7 +203,7 @@ onBeforeUnmount(() => {
         :aria-hidden="b.state.sidebarCollapsed"
       >
         <Sidebar />
-        <SidebarResize @resize="pageArea?.layout()" />
+        <SidebarResize @resize="pageArea?.resizeSidebar($event)" />
       </div>
       <button
         v-if="b.state.sidebarCollapsed"

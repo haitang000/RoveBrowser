@@ -9,6 +9,7 @@ import {
 import { useBrowser } from "../../stores/browser";
 import { host } from "../../lib/address";
 import { pageClip } from "../../lib/page-clip";
+import type { Rect } from "../../lib/types";
 import Icon from "../common/Icon.vue";
 import Peek from "./Peek.vue";
 import SettingsPage from "./SettingsPage.vue";
@@ -27,6 +28,7 @@ const other = computed(() =>
 );
 let ro: ResizeObserver;
 let finishResize: (() => void) | undefined;
+let reported: { primary: Rect; secondary: Rect | null; sidebar: Rect | null } | undefined;
 // Zigzag's native ResizeHandle owns the real frames while dragging. This event
 // only keeps the shell headers and fallback content in step with native input.
 watch(() => b.splitResize, (update) => {
@@ -67,6 +69,9 @@ watch(
   },
 );
 function layout() {
+  // Native sidebar capture owns the HWNDs and renderer viewports. Feedback
+  // changes only the shell; sending its intermediate bounds back creates a loop.
+  if (b.sidebarResize?.resizing) return;
   if (!primary.value || !container.value) return;
   const card = container.value.getBoundingClientRect();
   const style = getComputedStyle(container.value);
@@ -79,15 +84,37 @@ function layout() {
   };
   // ResizeObserver runs after layout and before paint. Report this frame's
   // geometry now; another rAF leaves native pages one frame behind the sidebar.
-  b.send({
-    type: "layout",
-    viewport: { width: innerWidth, height: innerHeight },
+  reported = {
+    sidebar: (() => {
+      const r = !b.state.sidebarCollapsed && document.querySelector('.sidebar-resize-handle')?.getBoundingClientRect();
+      return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+    })(),
     primary: rect(primary.value),
     secondary: secondary.value ? rect(secondary.value) : null,
+  };
+  b.send({
+    type: "layout",
+    ...reported,
+    viewport: { width: innerWidth, height: innerHeight },
     liveResize: resizing.value || b.sidebarResizing,
   });
 }
-defineExpose({ layout });
+function resizeSidebar(delta: number) {
+  if (!reported) return layout();
+  const primary = { ...reported.primary, x: reported.primary.x + delta };
+  let secondary = reported.secondary;
+  if (secondary) {
+    const total = primary.width + secondary.width;
+    const gap = secondary.x - reported.primary.x - primary.width;
+    primary.width = Math.max(0, total - delta) * primary.width / Math.max(1, total);
+    secondary = { ...secondary, x: primary.x + primary.width + gap, width: Math.max(0, total - delta) - primary.width };
+  } else primary.width = Math.max(0, primary.width - delta);
+  primary.corners = [0, 0, 0, 0];
+  if (secondary) secondary.corners = [0, 0, 0, 0];
+  reported = { primary, secondary, sidebar: reported.sidebar ? { ...reported.sidebar, x: reported.sidebar.x + delta } : null };
+  b.send({ type: 'layout', ...reported, liveResize: true, viewport: { width: innerWidth, height: innerHeight } });
+}
+defineExpose({ layout, resizeSidebar });
 watch(
   [
     () => b.active?.id,

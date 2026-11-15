@@ -1,6 +1,7 @@
 //! Native split dragging adapted from Zigzag's ResizeHandle, paneFrames and
 //! PageCardView.layout (Copyright 2026 Zigao Wang; Apache-2.0), modified for Win32.
-//! Mouse input changes both real WebView2 viewports before notifying the shell.
+//! Mouse input transforms frozen page snapshots; release commits each viewport
+//! once and blends both new layouts through the same presentation animation.
 use crate::{clip::WindowClip, model::Rect};
 use std::{
     cell::{Cell, RefCell},
@@ -27,13 +28,56 @@ pub const MINIMUM_PANE_WIDTH: f64 = 260.;
 #[derive(Clone)]
 pub struct Pane {
     pub hwnd: HWND,
+    pub surface: Rc<crate::resize_surface::Surface>,
     pub controller: ICoreWebView2Controller,
     pub clip: Rc<WindowClip>,
     pub bounds: Rc<Cell<Option<[i32; 4]>>>,
     pub viewport: Rc<Cell<Option<[i32; 2]>>>,
 }
 impl Pane {
-    fn move_window(&self, rect: Rect, scale: f64) -> Result<()> {
+    pub(crate) fn begin_preview(&self, rect: Rect, scale: f64) {
+        if let Some(bounds) = self.bounds.get() {
+            let _ = self.clip.clear(self.hwnd);
+            if let Err(error) = self.surface.begin(bounds, rect.corners, scale) {
+                eprintln!("Rove resize surface unavailable: {error}");
+            }
+        }
+    }
+    pub(crate) fn end_preview(&self, animate: bool) -> Result<()> {
+        if self.surface.active() {
+            let result = (|| -> Result<()> {
+                if let Some([x, y, width, height]) = self.bounds.get() {
+                    unsafe {
+                        SetWindowPos(
+                            self.hwnd,
+                            None,
+                            x,
+                            y,
+                            width,
+                            height,
+                            SWP_NOACTIVATE | SWP_NOZORDER,
+                        )?;
+                        self.controller.SetBounds(RECT {
+                            left: 0,
+                            top: 0,
+                            right: width,
+                            bottom: height,
+                        })?;
+                    }
+                    self.viewport.set(Some([width, height]));
+                }
+                Ok(())
+            })();
+            if result.is_ok() && animate {
+                self.surface.release();
+            } else {
+                self.surface.end();
+            }
+            result?;
+        }
+        Ok(())
+    }
+    pub(crate) fn move_window(&self, rect: Rect, scale: f64) -> Result<()> {
         self.clip.clear(self.hwnd)?;
         let next = [
             (rect.x * scale).round() as i32,
@@ -42,6 +86,12 @@ impl Pane {
             (rect.height * scale).round() as i32,
         ];
         if self.bounds.get() != Some(next) {
+            if self.surface.dragging() {
+                self.surface.resize(next)?;
+                self.bounds.set(Some(next));
+                return Ok(());
+            }
+            self.surface.end();
             // SAFETY: these are live same-thread child HWNDs. Dimensions derive
             // from the validated page area, including the current monitor DPI.
             unsafe {
@@ -59,7 +109,10 @@ impl Pane {
         }
         Ok(())
     }
-    fn reflow(&self) -> Result<()> {
+    pub(crate) fn reflow(&self) -> Result<()> {
+        if self.surface.dragging() {
+            return Ok(());
+        }
         if let Some([_, _, width, height]) = self.bounds.get() {
             if self.viewport.get() != Some([width, height]) {
                 unsafe {
@@ -302,6 +355,20 @@ fn move_to(s: &State, x: f64) {
     }
     s.busy.set(false);
 }
+fn point_previews(s: &State, lparam: LPARAM) {
+    let mut point = [POINT {
+        x: lparam.0 as u16 as i16 as i32,
+        y: (lparam.0 >> 16) as u16 as i16 as i32,
+    }];
+    unsafe {
+        MapWindowPoints(Some(s.hwnd.get()), Some(s.root), &mut point);
+    }
+    if let Some(c) = s.config.borrow().as_ref() {
+        for pane in [&c.left, &c.right].into_iter().flatten() {
+            pane.surface.pointer(point[0].x as f32, point[0].y as f32);
+        }
+    }
+}
 fn finish(s: &State) {
     if !s.dragging.replace(false) {
         return;
@@ -314,6 +381,18 @@ fn finish(s: &State) {
     let config = s.config.borrow().clone();
     if let Some(config) = config {
         let restore = || -> Result<()> {
+            let left = config
+                .left
+                .as_ref()
+                .map(|pane| pane.end_preview(true))
+                .transpose();
+            let right = config
+                .right
+                .as_ref()
+                .map(|pane| pane.end_preview(true))
+                .transpose();
+            left?;
+            right?;
             if let Some(pane) = &config.left {
                 pane.clip
                     .apply(pane.hwnd, config.layout.primary.corners, config.scale)?;
@@ -353,6 +432,13 @@ unsafe extern "system" fn procedure(
         WM_LBUTTONDOWN => {
             let config = s.config.borrow().clone();
             if let Some(config) = config {
+                if let Some(pane) = &config.left {
+                    pane.begin_preview(config.layout.primary, config.scale);
+                }
+                if let Some(pane) = &config.right {
+                    pane.begin_preview(config.layout.secondary, config.scale);
+                }
+                point_previews(s, lparam);
                 let x = cursor_x(s, lparam, config.scale);
                 s.grab_offset
                     .set(x - config.layout.primary.x - config.layout.primary.width);
@@ -364,13 +450,24 @@ unsafe extern "system" fn procedure(
             return LRESULT(0);
         }
         WM_MOUSEMOVE if s.dragging.get() => {
+            point_previews(s, lparam);
             let scale = s.config.borrow().as_ref().map(|c| c.scale);
             if let Some(scale) = scale {
                 move_to(s, cursor_x(s, lparam, scale));
             }
             return LRESULT(0);
         }
-        WM_LBUTTONUP | WM_CAPTURECHANGED | WM_CANCELMODE => {
+        WM_LBUTTONUP => {
+            if s.dragging.get() {
+                let scale = s.config.borrow().as_ref().map(|c| c.scale);
+                if let Some(scale) = scale {
+                    move_to(s, cursor_x(s, lparam, scale));
+                }
+            }
+            finish(s);
+            return LRESULT(0);
+        }
+        WM_CAPTURECHANGED | WM_CANCELMODE => {
             finish(s);
             return LRESULT(0);
         }

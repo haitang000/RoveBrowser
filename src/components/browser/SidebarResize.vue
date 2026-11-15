@@ -4,18 +4,34 @@ import { useBrowser } from "../../stores/browser";
 import { MIN_SIDEBAR_WIDTH, normalizeSidebarWidth, sidebarWidthLimit, visibleSidebarWidth } from "../../lib/sidebar-width";
 
 const b = useBrowser();
-const emit = defineEmits<{ resize: [] }>();
+const emit = defineEmits<{ resize: [delta: number] }>();
 const preferred = ref(normalizeSidebarWidth(b.state.sidebarWidth));
+const handleElement = ref<HTMLElement>();
 const viewport = ref(innerWidth);
 const width = computed(() => visibleSidebarWidth(preferred.value, viewport.value));
 const maximum = computed(() => sidebarWidthLimit(viewport.value));
 let finishResize: ((commit?: boolean) => void) | undefined;
+let restoreNativeTransition = 0;
 
 function paint() {
   const style = document.documentElement.style;
   if (preferred.value === undefined) style.removeProperty("--sidebar-width");
   else style.setProperty("--sidebar-width", `${width.value}px`);
 }
+watch(() => b.sidebarResize, (update) => {
+  if (!update) return;
+  const track = handleElement.value?.parentElement;
+  cancelAnimationFrame(restoreNativeTransition);
+  track?.style.setProperty('transition', 'none');
+  b.sidebarResizing = update.resizing;
+  preferred.value = update.reset ? undefined : update.width;
+  paint();
+  // A fast native press/move/release can arrive before Vue paints its resizing
+  // class. Keep the final width unanimated until it has actually been painted.
+  if (!update.resizing) restoreNativeTransition = requestAnimationFrame(() => {
+    restoreNativeTransition = requestAnimationFrame(() => track?.style.removeProperty('transition'));
+  });
+}, { flush: 'sync' });
 watch(() => b.state.sidebarWidth, (value) => {
   if (b.sidebarResizing) return;
   preferred.value = normalizeSidebarWidth(value);
@@ -39,6 +55,7 @@ function resize(event: PointerEvent) {
   const track = handle.parentElement!;
   const startX = event.clientX;
   const startWidth = track.getBoundingClientRect().width;
+  let reportedWidth = startWidth;
   const previous = preferred.value;
   let moved = false;
   handle.focus({ preventScroll: true });
@@ -53,9 +70,10 @@ function resize(event: PointerEvent) {
     moved = true;
     preferred.value = value;
     paint();
-    // Submit the new page bounds in this input callback, before the next
-    // ResizeObserver/paint turn can leave the real WebViews behind the track.
-    emit("resize");
+    // The DOM fallback updates cached geometry without forcing style/layout on
+    // every pointer event. Desktop mouse input uses the native strip instead.
+    emit("resize", value - reportedWidth);
+    reportedWidth = value;
   };
   const finish = (commit = true) => {
     finishResize = undefined;
@@ -108,6 +126,7 @@ onMounted(() => {
   document.addEventListener("visibilitychange", visibility);
 });
 onBeforeUnmount(() => {
+  cancelAnimationFrame(restoreNativeTransition);
   finishResize?.();
   window.removeEventListener("resize", windowResize);
   window.removeEventListener("blur", blur);
@@ -117,7 +136,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="sidebar-resize-handle" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical"
+  <div ref="handleElement" class="sidebar-resize-handle" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical"
     :aria-valuemin="MIN_SIDEBAR_WIDTH" :aria-valuemax="maximum" :aria-valuenow="width" :aria-valuetext="`${width} 像素`"
     tabindex="0" title="拖动调整侧栏宽度，双击恢复默认" @pointerdown="resize" @dblclick.prevent="reset" @keydown="key" />
 </template>

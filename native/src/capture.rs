@@ -14,7 +14,7 @@ use windows::Win32::{
 };
 use wry::{WebView, WebViewExtWindows};
 
-fn bytes(stream: &IStream) -> windows::core::Result<Vec<u8>> {
+pub(crate) fn bytes(stream: &IStream) -> windows::core::Result<Vec<u8>> {
     let mut stat = STATSTG::default();
     // SAFETY: stream is an owned in-memory COM stream on the WebView's UI thread.
     unsafe {

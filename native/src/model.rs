@@ -252,6 +252,11 @@ pub enum Command {
     },
     #[serde(rename = "tabPreviewRefresh")]
     TabPreviewRefresh { id: String },
+    #[serde(rename = "resizeAppearance")]
+    ResizeAppearance {
+        #[serde(flatten)]
+        appearance: crate::resize_surface::Appearance,
+    },
     #[serde(rename = "windowChrome")]
     WindowChrome {
         maximize: Rect,
@@ -371,6 +376,8 @@ pub enum Command {
     Layout {
         primary: Rect,
         secondary: Option<Rect>,
+        #[serde(default)]
+        sidebar: Option<Rect>,
         #[serde(default)]
         viewport: Option<crate::layout::Viewport>,
         #[serde(default, rename = "liveResize")]

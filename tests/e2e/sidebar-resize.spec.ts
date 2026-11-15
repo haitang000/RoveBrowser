@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
 import type { BrowserState, Rect } from "../../src/lib/types";
+import { resizeAppearance } from "../../src/lib/resize-appearance";
 
 const handleFor = (page: Page) => page.getByRole("separator", { name: "调整侧栏宽度" });
 const trackFor = (page: Page) => page.locator(".sidebar-track");
@@ -83,7 +84,7 @@ test("keyboard resizing, double-click reset and narrow windows preserve the pref
 type Report = { primary: Rect; secondary?: Rect; liveResize: boolean };
 declare global {
   interface Window {
-    __sidebarTest: { writes: (number | null)[]; layout?: Report; presentedWidth?: number; overlays: boolean[] };
+    __sidebarTest: { writes: (number | null)[]; layout?: Report; presentedWidth?: number; overlays: boolean[]; layouts: number; appearance?: ReturnType<typeof resizeAppearance> };
   }
 }
 async function nativeShell(page: Page, state: BrowserState) {
@@ -91,10 +92,11 @@ async function nativeShell(page: Page, state: BrowserState) {
   await page.addInitScript(state => {
     window.__ERA_NATIVE__ = true;
     window.__ERA_INITIAL_STATE__ = state;
-    window.__sidebarTest = { writes: [], overlays: [] };
+    window.__sidebarTest = { writes: [], overlays: [], layouts: 0 };
     window.ipc = { postMessage(message) {
       const command = JSON.parse(message);
-      if (command.type === "layout") window.__sidebarTest.layout = command;
+      if (command.type === "resizeAppearance") window.__sidebarTest.appearance = command;
+      if (command.type === "layout") { window.__sidebarTest.layout = command; window.__sidebarTest.layouts++; }
       if (command.type === "overlay") window.__sidebarTest.overlays.push(command.visible);
       if (command.type === "presented") window.__sidebarTest.presentedWidth = document.querySelector(".sidebar-track")!.getBoundingClientRect().width;
       if (command.type === "sidebarWidth") {
@@ -108,6 +110,27 @@ async function nativeShell(page: Page, state: BrowserState) {
   await page.goto("/");
   await expect.poll(() => page.evaluate(() => window.__sidebarTest.presentedWidth)).toBe(state.sidebarWidth ?? 240);
 }
+
+test("native resize colors update from the active Space, custom stops and appearance", async ({ page }) => {
+  const state = initialState();
+  state.activeTab = "github";
+  await nativeShell(page, state);
+  const active = state.spaces.find(space => space.id === state.activeSpace)!;
+  await expect.poll(() => page.evaluate(() => window.__sidebarTest.appearance?.start))
+    .toEqual(resizeAppearance(active, state.theme, false).start);
+  active.color = "sage";
+  state.theme = "dark";
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+  await expect.poll(() => page.evaluate(() => window.__sidebarTest.appearance?.start))
+    .toEqual(resizeAppearance(active, "dark", false).start);
+  Object.assign(active, { hue: 0, hue2: 0.34, brightness: 0.85, brightness2: 0.8, angle: 185 });
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+  await expect.poll(() => page.evaluate(() => window.__sidebarTest.appearance?.angle)).toBe(275);
+  const actual = await page.evaluate(() => window.__sidebarTest.appearance!);
+  expect(actual.start[0]).toBeGreaterThan(actual.start[1]);
+  expect(actual.end[1]).toBeGreaterThan(actual.end[0]);
+  expect(actual.dark).toBe(true);
+});
 
 for (const split of [false, true]) test(`native ${split ? "split" : "single"} pages follow resizing, with one preference write on release`, async ({ page }) => {
   const state = initialState();
@@ -146,10 +169,16 @@ for (const split of [false, true]) test(`sidebar input submits ${split ? "both v
   await page.evaluate(async point => {
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     const handle = document.querySelector('.sidebar-resize-handle')!;
+    const bounds = Element.prototype.getBoundingClientRect;
+    let reads = 0;
+    Element.prototype.getBoundingClientRect = function () { reads++; return bounds.call(this); };
+    try {
     for (const delta of [1, 100, -40, 80]) {
+      reads = 0;
       handle.dispatchEvent(new PointerEvent('pointermove', {
         pointerId: 1, clientX: point.x + delta, clientY: point.y, bubbles: true,
       }));
+      if (reads !== 0) throw Error('Sidebar pointer input forced a synchronous DOM layout');
       const layout = window.__sidebarTest.layout!;
       const slots = [...document.querySelectorAll('.page-pane > .webview-slot')];
       slots.forEach((slot, i) => {
@@ -162,6 +191,39 @@ for (const split of [false, true]) test(`sidebar input submits ${split ? "both v
       if (viewport.width !== innerWidth || viewport.height !== innerHeight)
         throw Error('Layout is missing its source viewport');
     }
+    } finally { Element.prototype.getBoundingClientRect = bounds; }
   }, point);
   await page.mouse.up();
+});
+
+test('native sidebar feedback paints the shell without sending intermediate layouts or preference writes back', async ({ page }) => {
+  const state = initialState();
+  state.activeTab = 'github';
+  state.tabs.find(tab => tab.id === 'github')!.splitWith = 'wiki';
+  await nativeShell(page, state);
+  await page.evaluate(() => {
+    window.__sidebarTest.layouts = 0;
+    window.__ERA_RECEIVE__!({ type: 'sidebarResize', width: 400, resizing: true });
+  });
+  await expect(trackFor(page)).toHaveCSS('width', '400px');
+  await expect(trackFor(page)).toHaveCSS('transition-duration', '0s');
+  await expect(page.locator('.browser-shell')).toHaveClass(/sidebar-resizing/);
+  expect(await page.evaluate(() => window.__sidebarTest.layouts)).toBe(0);
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'sidebarResize', width: 320, resizing: true }));
+  await expect(trackFor(page)).toHaveCSS('width', '320px');
+  expect(await page.evaluate(() => window.__sidebarTest.layouts)).toBe(0);
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'sidebarResize', width: 320, resizing: false }));
+  await expect(page.locator('.browser-shell')).not.toHaveClass(/sidebar-resizing/);
+  await expect.poll(() => page.evaluate(() => window.__sidebarTest.layouts)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__sidebarTest.writes)).toEqual([]);
+  expect(await page.evaluate(() => window.__sidebarTest.overlays)).toEqual([]);
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'sidebarResize', width: 240, resizing: false, reset: true }));
+  await expect(trackFor(page)).toHaveCSS('width', '240px');
+  // A complete native drag can be delivered before Vue renders even once.
+  // The final feedback must not accidentally restart the collapse transition.
+  expect(await page.evaluate(() => {
+    window.__ERA_RECEIVE__!({ type: 'sidebarResize', width: 240, resizing: true });
+    window.__ERA_RECEIVE__!({ type: 'sidebarResize', width: 400, resizing: false });
+    return document.querySelector('.sidebar-track')!.getBoundingClientRect().width;
+  })).toBe(400);
 });

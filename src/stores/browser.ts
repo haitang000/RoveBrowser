@@ -28,6 +28,7 @@ export const useBrowser = defineStore("browser", () => {
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
   const splitResize = ref<{ ratio: number; resizing: boolean }>();
+  const sidebarResize = ref<{ width: number; resizing: boolean; reset: boolean }>();
   const sidebarResizing = ref(false);
   const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
   const previewAnimationDone = ref(0);
@@ -194,6 +195,7 @@ export const useBrowser = defineStore("browser", () => {
         "tabPreview",
         "tabPreviewRefresh",
         "windowChrome",
+        "resizeAppearance",
         "popupState",
         "popupLayer",
         "popupReady",
@@ -479,6 +481,8 @@ export const useBrowser = defineStore("browser", () => {
     if (native && !popupWindow) send({ type: "downloadsPanel", open });
   });
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "sidebarResize" && typeof e.width === "number" && Number.isFinite(e.width))
+      sidebarResize.value = { width: e.width, resizing: Boolean(e.resizing), reset: Boolean(e.reset) };
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
       splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
     if (e.type === "tabPreviewPresented" && e.ticket !== undefined) previewPresentedTicket.value = e.ticket;
@@ -665,6 +669,7 @@ export const useBrowser = defineStore("browser", () => {
     contextMenu,
     popupArea,
     splitResize,
+    sidebarResize,
     sidebarResizing,
     hoverPreview,
     previewAnimationDone,

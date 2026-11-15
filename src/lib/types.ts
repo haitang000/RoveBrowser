@@ -128,6 +128,8 @@ declare global {
       importBusy?: boolean;
       defaultBrowser?: { http: boolean; https: boolean };
       ratio?: number;
+      width?: number;
+      reset?: boolean;
       resizing?: boolean;
       state?: BrowserState;
       entries?: HistoryEntry[];

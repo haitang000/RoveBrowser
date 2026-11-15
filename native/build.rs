@@ -9,7 +9,9 @@ fn main() {
     println!("cargo:rerun-if-changed=../dist");
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let icon_png = manifest_dir.join("assets").join("icon.png");
+    let app_manifest = manifest_dir.join("app.manifest");
     println!("cargo:rerun-if-changed={}", icon_png.display());
+    println!("cargo:rerun-if-changed={}", app_manifest.display());
 
     // The executable icon is a Windows resource. Skip it for any other target.
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
@@ -23,10 +25,11 @@ fn main() {
     let rc_path = out_dir.join("icon.rc");
     // rc.exe treats backslash as an escape, so the absolute path is doubled.
     let escaped = icon_ico.display().to_string().replace('\\', "\\\\");
-    fs::write(&rc_path, format!("1 ICON \"{escaped}\"\n"))
+    let manifest = app_manifest.display().to_string().replace('\\', "\\\\");
+    fs::write(&rc_path, format!("1 ICON \"{escaped}\"\n1 24 \"{manifest}\"\n"))
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", rc_path.display()));
-    // Icon only. Do not attach an application manifest; that would replace the
-    // process DPI settings already established at startup.
+    // Compatibility enables layered child surfaces on Windows 10/11. There are
+    // deliberately no DPI declarations: winit still sets process DPI at startup.
     embed_resource::compile(&rc_path, embed_resource::NONE)
         .manifest_required()
         .unwrap_or_else(|error| panic!("failed to embed the application icon: {error}"));

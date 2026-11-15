@@ -354,7 +354,7 @@ test("restores the full-width titlebar and framed page even for a saved borderle
   expect(area).toMatchObject({ x: 240, y: 32, width: 1032, height: 780 });
   expect(await page.locator('.page-area').evaluate(e => getComputedStyle(e).borderRadius)).toBe('8px');
   expect(await page.locator('.browser-shell').getAttribute('class')).not.toContain('borderless');
-  const content = (await page.locator('.new-tab-content').boundingBox())!;
+  const content = (await page.locator('.nt-home').boundingBox())!;
   expect(Math.abs(content.x + content.width / 2 - area.x - area.width / 2)).toBeLessThan(1);
 });
 

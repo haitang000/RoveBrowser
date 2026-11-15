@@ -32,8 +32,11 @@ function savedState() {
 const server = createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(`<!doctype html><title>Sidebar fixture ${req.url}</title>
-    <style>html{background:#164e63;color:white;font:24px system-ui}body{margin:32px}</style>
-    <h1>Live viewport ${req.url}</h1><p id="width"></p><script>
+    <style>html{background:#164e63;color:white;font:24px system-ui}body{margin:32px}
+    .columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+    .panel{background:#ffffff18;border:1px solid #ffffff40;border-radius:12px;padding:20px;font-size:18px}</style>
+    <h1>Live viewport ${req.url}</h1><p id="width"></p>
+    <div class="columns">${['Frozen snapshot', 'Fresh layout', 'Final size'].map(title => `<section class="panel"><h2>${title}</h2><p>Resize the sidebar to change this grid. The renderer should lay out these cards once on release while the old image scales in perspective.</p></section>`).join('')}</div><script>
     window.marker=crypto.randomUUID();function tick(){document.querySelector('#width').textContent=innerWidth;requestAnimationFrame(tick)}tick();</script>`);
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -46,8 +49,26 @@ async function waitFor(fn, label) {
   throw Error('Timed out: ' + label);
 }
 let child, uiBrowser, pageBrowser, ui;
+let desktopReview = process.env.ERA_SMOKE_REVIEW === '1';
 const send = command => ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
 const sidebarWidth = () => ui.locator('.sidebar-track').evaluate(e => e.getBoundingClientRect().width);
+async function useDomInput() {
+  await ui.evaluate(() => {
+    window.__nativeSidebarFeedback = [];
+    const receive = window.__ERA_RECEIVE__;
+    window.__ERA_RECEIVE__ = event => {
+      if (event.type === 'sidebarResize') window.__nativeSidebarFeedback.push(event);
+      receive(event);
+    };
+    const post = window.chrome.webview.postMessage.bind(window.chrome.webview);
+    window.chrome.webview.postMessage = message => {
+      const command = JSON.parse(message);
+      if (command.type === 'layout') { command.sidebar = null; post(JSON.stringify(command)); }
+      else post(message);
+    };
+    window.dispatchEvent(new Event('resize'));
+  });
+}
 async function start() {
   child = spawn(resolve(process.env.ERA_SMOKE_EXE || 'native/target/debug/rove.exe'), [], {
     env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) }, windowsHide: true, stdio: 'pipe',
@@ -56,6 +77,11 @@ async function start() {
   uiBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 'UI debugger');
   ui = await waitFor(() => uiBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === 'https://era.ui/index.html'), 'shell');
   await ui.waitForSelector('.sidebar-resize-handle');
+  // CDP injects input into a WebView, bypassing the native strip and potentially
+  // stealing its focus/capture. This fixture deliberately checks the DOM fallback
+  // with real page controllers; native mouse/capture is covered by sidebar.rs
+  // and desktop input against the same fixture in review mode.
+  if (!desktopReview) await useDomInput();
 }
 async function stop() {
   const stopped = child && child.exitCode === null && child.signalCode === null && once(child, 'exit');
@@ -89,6 +115,7 @@ async function drag(pages, target) {
     } catch (error) {
       console.error(JSON.stringify(await ui.evaluate(() => ({
         events: window.__sidebarEvents,
+        native: window.__nativeSidebarFeedback,
         width: document.querySelector('.sidebar-track').getBoundingClientRect().width,
         resizing: document.querySelector('.browser-shell').classList.contains('sidebar-resizing'),
       }))));
@@ -116,15 +143,18 @@ try {
   const left = await site('/left');
   await left.waitForSelector('h1');
   if (process.env.ERA_SMOKE_REVIEW === '1') {
-    console.log(JSON.stringify({ reviewReady: true, pid: child.pid, port, output }));
+    console.log(JSON.stringify({ reviewReady: true, pid: child.pid, port, output, profile }));
     for (let i = 0; i < 300; i++) {
       if (await access(join(output, 'resume')).then(() => true, () => false)) break;
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     console.log(JSON.stringify({ desktopDragWidth: await sidebarWidth(), savedWidth: savedState().sidebarWidth }));
+    desktopReview = false;
+    await useDomInput();
     await send({ type: 'sidebarWidth', width: 240 });
     await waitFor(async () => await sidebarWidth() === 240, 'reset review width');
   }
+  if (process.env.ERA_SMOKE_REVIEW_ONLY !== '1') {
   await drag([left], 336);
   const leftId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
   await send({ type: 'new', url: base + '/right' });
@@ -147,4 +177,5 @@ try {
   const report = { passed: true, profile, checks: ['single viewport', 'split viewports', 'save on release', 'collapse/expand', 'restart', 'reset'] };
   await writeFile(join(output, 'result.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
+  }
 } finally { await stop(); server.close(); }
