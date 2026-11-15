@@ -1,10 +1,10 @@
-//! Native resize borders and caption buttons, including the Windows 11 Snap flyout.
+//! Native resize borders and caption buttons.
 //! WebView2 owns descendant HWNDs on other threads. Instead of subclassing those
 //! windows, cover the borders/buttons with an almost transparent input surface.
-//! The UI paints the entire background. The root receives WM_NCHITTEST/HTMAXBUTTON and the
-//! system supplies its own Snap menu. The close button is the exception: its hit stays on
-//! this surface. Falling through to the WebView underneath swallows the button release, so
-//! the window never sees WM_CLOSE. No synthetic layout flyout.
+//! The UI paints the entire background. Resize edges fall through to the root.
+//! Minimize, maximize, and close stay on this surface: falling through to the
+//! WebView underneath swallows the button release, so the root never sees it.
+//! No synthetic layout flyout.
 use crate::model::Rect;
 use std::cell::{Cell, RefCell};
 use windows::{
@@ -114,6 +114,12 @@ struct State {
     paint_count: Cell<usize>,
     #[cfg(test)]
     close_count: Cell<usize>,
+    /// When set, WM_SYSCOMMAND is recorded and not performed. Production and the
+    /// winit caption test leave this off so real minimize/maximize still run.
+    #[cfg(test)]
+    capture_commands: Cell<bool>,
+    #[cfg(test)]
+    posted_command: Cell<u32>,
 }
 pub struct Caption {
     root: HWND,
@@ -213,11 +219,16 @@ impl Caption {
             paint_count: Cell::new(0),
             #[cfg(test)]
             close_count: Cell::new(0),
+            #[cfg(test)]
+            capture_commands: Cell::new(false),
+            #[cfg(test)]
+            posted_command: Cell::new(0),
         });
-        // This same-thread owned surface covers only the borders/buttons. Its
-        // HTTRANSPARENT result lets the root receive real non-client input before
-        // WebView2 can capture the pointer; no asynchronous drag IPC is needed.
-        // A top-level layered surface remains visible over a non-redirected root.
+        // This same-thread owned surface covers only the borders/buttons.
+        // Resize edges return HTTRANSPARENT so the root can size the window.
+        // Caption buttons stay HTCLIENT: WebView2 swallows a release that falls
+        // through, and no asynchronous drag IPC is needed. A top-level layered
+        // surface remains visible over a non-redirected root.
         let surface = unsafe {
             CreateWindowExW(
                 WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
@@ -432,7 +443,7 @@ impl Drop for Caption {
         }
     }
 }
-fn resize_owns_close(s: &State, point: POINT) -> bool {
+fn resize_owns_point(s: &State, point: POINT) -> bool {
     let Ok(root) = (unsafe { GetParent(s.surface.get()) }) else {
         return false;
     };
@@ -442,6 +453,12 @@ fn resize_owns_close(s: &State, point: POINT) -> bool {
     let mut bounds = RECT::default();
     unsafe { GetClientRect(s.surface.get(), &mut bounds) }.is_ok()
         && resize_hit(bounds, point, s.scale.get()).is_some()
+}
+fn surface_button(s: &State, point: POINT) -> Option<Button> {
+    if resize_owns_point(s, point) {
+        return None;
+    }
+    button_at(s.rect.get(), point)
 }
 unsafe fn command_root(s: &State, hwnd: HWND) -> HWND {
     if hwnd == s.surface.get() {
@@ -513,11 +530,9 @@ unsafe extern "system" fn procedure(
             if hwnd == s.surface.get() {
                 let mut point = message_point(lparam);
                 // WebView2 covers the caption and takes the mouse release when this
-                // hit falls through. Keep the close click on the surface. Resize
-                // edges still fall through so the root can return HTTOP/HTRIGHT.
-                if ScreenToClient(hwnd, &mut point).as_bool()
-                    && !resize_owns_close(s, point)
-                    && button_at(s.rect.get(), point) == Some(Button::Close)
+                // hit falls through. Keep every caption button on the surface.
+                // Resize edges still fall through so the root can return HTTOP/HTRIGHT.
+                if ScreenToClient(hwnd, &mut point).as_bool() && surface_button(s, point).is_some()
                 {
                     return LRESULT(HTCLIENT as isize);
                 }
@@ -581,10 +596,8 @@ unsafe extern "system" fn procedure(
                 s.pressed
                     .get()
                     .filter(|button| contains(button.rect(s.rect.get()), point))
-            } else if !resize_owns_close(s, point) && button_at(s.rect.get(), point) == Some(Button::Close) {
-                Some(Button::Close)
             } else {
-                None
+                surface_button(s, point)
             };
             set_hot(s, hot);
             let mut track = TRACKMOUSEEVENT {
@@ -602,9 +615,9 @@ unsafe extern "system" fn procedure(
         }
         WM_LBUTTONDOWN if hwnd == s.surface.get() => {
             let point = message_point(lparam);
-            if button_at(s.rect.get(), point) == Some(Button::Close) {
-                s.pressed.set(Some(Button::Close));
-                set_hot(s, Some(Button::Close));
+            if let Some(button) = surface_button(s, point) {
+                s.pressed.set(Some(button));
+                set_hot(s, Some(button));
                 let _ = SetCapture(hwnd);
                 return LRESULT(0);
             }
@@ -640,6 +653,11 @@ unsafe extern "system" fn procedure(
         #[cfg(test)]
         WM_CLOSE if hwnd != s.surface.get() => {
             s.close_count.set(s.close_count.get() + 1);
+            return LRESULT(0);
+        }
+        #[cfg(test)]
+        WM_SYSCOMMAND if hwnd != s.surface.get() && s.capture_commands.get() => {
+            s.posted_command.set((wparam.0 & 0xfff0) as u32);
             return LRESULT(0);
         }
         WM_NCACTIVATE if hwnd != s.surface.get() => {
@@ -1079,12 +1097,12 @@ mod tests {
         assert_eq!(button_at(r, POINT { x: 1210, y: 32 }), None);
     }
     #[test]
-    fn surface_close_click_posts_wm_close_without_falling_through() {
+    fn surface_caption_clicks_minimize_maximize_and_close() {
         unsafe {
             let root = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 w!("STATIC"),
-                w!("Close click"),
+                w!("Caption clicks"),
                 WS_POPUP,
                 -1600,
                 80,
@@ -1112,6 +1130,7 @@ mod tests {
             )
             .unwrap();
             let caption = Caption::new(root, ui).unwrap();
+            caption.state.capture_commands.set(true);
             caption
                 .update(
                     Rect {
@@ -1128,47 +1147,52 @@ mod tests {
                     1.,
                 )
                 .unwrap();
-            let close = Button::Close.rect(caption.state.rect.get());
-            let center = POINT {
-                x: (close.left + close.right) / 2,
-                y: (close.top + close.bottom) / 2,
-            };
-            let mut screen = center;
-            assert!(ClientToScreen(caption.state.surface.get(), &mut screen).as_bool());
-            let coords = LPARAM((((screen.y as u16 as u32) << 16) | screen.x as u16 as u32) as isize);
-            assert_eq!(
-                SendMessageW(caption.state.surface.get(), WM_NCHITTEST, None, Some(coords)).0,
-                HTCLIENT as isize,
-                "close clicks must stay on the caption surface"
-            );
-            let maximize = Button::Maximize.rect(caption.state.rect.get());
-            let mut max_screen = POINT {
-                x: (maximize.left + maximize.right) / 2,
-                y: (maximize.top + maximize.bottom) / 2,
-            };
-            assert!(ClientToScreen(caption.state.surface.get(), &mut max_screen).as_bool());
-            let max_coords =
-                LPARAM((((max_screen.y as u16 as u32) << 16) | max_screen.x as u16 as u32) as isize);
-            assert_eq!(
-                SendMessageW(caption.state.surface.get(), WM_NCHITTEST, None, Some(max_coords)).0,
-                HTTRANSPARENT as isize,
-                "maximize still falls through so Windows can show Snap layouts"
-            );
-            let client = LPARAM((((center.y as u16 as u32) << 16) | center.x as u16 as u32) as isize);
-            SendMessageW(caption.state.surface.get(), WM_LBUTTONDOWN, None, Some(client));
-            SendMessageW(caption.state.surface.get(), WM_LBUTTONUP, None, Some(LPARAM(0)));
-            let mut message = MSG::default();
-            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
-                let _ = TranslateMessage(&message);
-                DispatchMessageW(&message);
+            for button in Button::ALL {
+                let rect = button.rect(caption.state.rect.get());
+                let mut screen = POINT {
+                    x: (rect.left + rect.right) / 2,
+                    y: (rect.top + rect.bottom) / 2,
+                };
+                assert!(ClientToScreen(caption.state.surface.get(), &mut screen).as_bool());
+                let coords =
+                    LPARAM((((screen.y as u16 as u32) << 16) | screen.x as u16 as u32) as isize);
+                assert_eq!(
+                    SendMessageW(caption.state.surface.get(), WM_NCHITTEST, None, Some(coords)).0,
+                    HTCLIENT as isize,
+                    "{button:?} must stay on the caption surface"
+                );
             }
-            assert_eq!(caption.state.close_count.get(), 0, "releasing outside cancels close");
-            SendMessageW(caption.state.surface.get(), WM_LBUTTONDOWN, None, Some(client));
-            SendMessageW(caption.state.surface.get(), WM_LBUTTONUP, None, Some(client));
-            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
-                let _ = TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
+            let click = |button: Button, inside: bool| {
+                let rect = button.rect(caption.state.rect.get());
+                let center = POINT {
+                    x: (rect.left + rect.right) / 2,
+                    y: (rect.top + rect.bottom) / 2,
+                };
+                let client =
+                    LPARAM((((center.y as u16 as u32) << 16) | center.x as u16 as u32) as isize);
+                SendMessageW(caption.state.surface.get(), WM_LBUTTONDOWN, None, Some(client));
+                let up = if inside { client } else { LPARAM(0) };
+                SendMessageW(caption.state.surface.get(), WM_LBUTTONUP, None, Some(up));
+                let mut message = MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            };
+            caption.state.posted_command.set(0);
+            click(Button::Minimize, false);
+            assert_eq!(caption.state.posted_command.get(), 0, "dragging off cancels minimize");
+            click(Button::Minimize, true);
+            assert_eq!(caption.state.posted_command.get(), SC_MINIMIZE);
+            click(Button::Maximize, true);
+            assert_eq!(caption.state.posted_command.get(), SC_MAXIMIZE);
+            let style = GetWindowLongPtrW(root, GWL_STYLE);
+            SetWindowLongPtrW(root, GWL_STYLE, style | WS_MAXIMIZE.0 as isize);
+            assert!(IsZoomed(root).as_bool());
+            click(Button::Maximize, true);
+            assert_eq!(caption.state.posted_command.get(), SC_RESTORE);
+            assert_eq!(caption.state.close_count.get(), 0);
+            click(Button::Close, true);
             assert_eq!(caption.state.close_count.get(), 1);
             let _ = DestroyWindow(ui);
             let _ = DestroyWindow(root);
@@ -1338,7 +1362,27 @@ mod tests {
                         Some(coords)
                     )
                     .0,
-                    HTTRANSPARENT as isize
+                    HTCLIENT as isize,
+                    "caption buttons stay on the surface so WebView2 cannot take the release"
+                );
+                let mut corner = POINT {
+                    x: 800 - corner,
+                    y: 600 - near,
+                };
+                assert!(ClientToScreen(root.0, &mut corner).as_bool());
+                let corner_coords = LPARAM(
+                    (((corner.y as u16 as u32) << 16) | corner.x as u16 as u32) as isize,
+                );
+                assert_eq!(
+                    SendMessageW(
+                        caption.state.surface.get(),
+                        WM_NCHITTEST,
+                        None,
+                        Some(corner_coords)
+                    )
+                    .0,
+                    HTTRANSPARENT as isize,
+                    "resize corners still fall through to the root"
                 );
             }
             // Maximizing at the same dimensions must remove the resize inset;
