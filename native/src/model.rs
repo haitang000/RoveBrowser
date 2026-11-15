@@ -327,7 +327,12 @@ pub enum Command {
         space_id: String,
     },
     #[serde(rename = "reorder")]
-    Reorder { id: String, before: String },
+    Reorder {
+        id: String,
+        before: String,
+        #[serde(default)]
+        after: bool,
+    },
     #[serde(rename = "space")]
     SwitchSpace { id: String },
     #[serde(rename = "spaceCreate")]

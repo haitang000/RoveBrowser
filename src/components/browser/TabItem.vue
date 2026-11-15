@@ -36,17 +36,6 @@ function close() {
 }
 function activate() { b.send({ type: props.tab.bookmarkId ? "bookmarkOpen" : "activate", id: props.tab.bookmarkId || props.tab.id }); }
 function unload() { b.send(props.tab.bookmarkId ? { type: "bookmarkUnload", id: props.tab.bookmarkId } : { type: "close", id: props.tab.id }); }
-function drag(e: DragEvent, id: string) {
-  e.dataTransfer?.setData("text/era-tab", id);
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-  b.dragging = true;
-}
-function drop(e: DragEvent) {
-  const id = e.dataTransfer?.getData("text/era-tab");
-  if (id && id !== props.tab.id)
-    b.send({ type: "reorder", id, before: props.tab.id });
-  b.dragging = false;
-}
 </script>
 <template>
   <div
@@ -63,10 +52,6 @@ function drop(e: DragEvent) {
     :aria-describedby="b.previewTarget === (tab.bookmarkId || tab.id) ? 'tab-hover-preview' : undefined"
     :style="{ '--tab-freshness': fade }"
     draggable="true"
-    @dragstart="drag($event, tab.id)"
-    @dragend="b.dragging = false"
-    @dragover.prevent
-    @drop.prevent.stop="drop"
     @mousedown.middle.prevent
     @auxclick.middle.prevent.stop="unload"
     @click="activate"

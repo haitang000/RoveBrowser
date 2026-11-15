@@ -144,14 +144,15 @@ function unpin(s: BrowserState, id: string, space?: string) {
   const active = s.tabs.find((t) => t.id === s.activeTab);
   if (active) s.activeSpace = active.spaceId;
 }
-function moveBefore(items: Favorite[], id: string, before: string) {
+function moveBefore(items: Favorite[], id: string, before: string, after = false) {
   if (id === before || !items.some((f) => f.id === before)) return;
   const partner = items.find((f) => f.id === id)?.splitWith;
   const targetPartner = items.find((f) => f.id === before)?.splitWith;
   if (partner === before) return;
   const moving = items.filter((f) => f.id === id || f.id === partner);
   for (const item of moving) items.splice(items.indexOf(item), 1);
-  items.splice(items.findIndex((f) => f.id === before || f.id === targetPartner), 0, ...moving);
+  const targets = items.flatMap((f, index) => f.id === before || f.id === targetPartner ? [index] : []);
+  items.splice(after ? targets.at(-1)! + 1 : targets[0]!, 0, ...moving);
 }
 export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string) => void): boolean {
   const id = String(c.id || s.activeTab);
@@ -202,13 +203,13 @@ export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string)
     case "reorder": {
       const target = bookmarkId(s, String(c.before));
       if (target && s.pins!.some((f) => f.id === target)) {
-        const mark = keep(s, id, false, savedPage(s, target)!.spaceId); moveBefore(s.pins!, mark, target);
+        const mark = keep(s, id, false, savedPage(s, target)!.spaceId); moveBefore(s.pins!, mark, target, c.after === true);
       } else {
         const mark = bookmarkId(s, id);
         if (mark) openBookmark(s, mark);
         const source = mark ? liveTab(s, mark)!.id : id;
         if (mark) unpin(s, id, s.activeSpace);
-        if (source !== c.before) { const index = s.tabs.findIndex((t) => t.id === source); if (index >= 0 && s.tabs.some((t) => t.id === c.before)) { const [t] = s.tabs.splice(index, 1); s.tabs.splice(s.tabs.findIndex((t) => t.id === c.before), 0, t); } }
+        if (source !== c.before) { const index = s.tabs.findIndex((t) => t.id === source); if (index >= 0 && s.tabs.some((t) => t.id === c.before)) { const [t] = s.tabs.splice(index, 1); s.tabs.splice(s.tabs.findIndex((t) => t.id === c.before) + (c.after === true ? 1 : 0), 0, t); } }
       }
       break;
     }

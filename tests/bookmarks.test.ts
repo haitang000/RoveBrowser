@@ -66,3 +66,14 @@ it("uses Zigzag's home-page title rule without shortening deep-page titles", () 
   expect(bookmarkTitle("Inbox (3) - Gmail", "https://gmail.com/")).toBe("Gmail");
   expect(bookmarkTitle("Project - GitHub", "https://github.com/team/project")).toBe("Project - GitHub");
 });
+
+it("reorders regular tabs and pins after the last row while accepting old before-only commands", () => {
+  let s = reduce(initialState(), { type: "new", url: "https://example.com/end" });
+  const last = s.activeTab;
+  s = reduce(s, { type: "reorder", id: "start", before: last, after: true });
+  expect(s.tabs.at(-1)?.id).toBe("start");
+  s = reduce(s, { type: "reorder", id: "start", before: last });
+  expect(s.tabs.findIndex((tab) => tab.id === "start")).toBe(s.tabs.findIndex((tab) => tab.id === last) - 1);
+  s = reduce(s, { type: "reorder", id: "github", before: "wiki", after: true });
+  expect(s.pins!.map((pin) => pin.id)).toEqual(["pin-wiki", "pin-github"]);
+});

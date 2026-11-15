@@ -93,15 +93,21 @@ test("opening fades and slides in; closing frees the gap while the old row fades
   await expect(closing).toHaveCount(0);
 });
 
-test("dropping reorders regular and pinned rows with position transitions", async ({ page }) => {
+test("dragging reorders regular and pinned neighbours before release and commits that order", async ({ page }) => {
   await setup(page);
   await slowMotion(page);
   for (const [source, target, list] of [
     ["gamma", "alpha", '[aria-label="标签页"]'],
     ["wiki", "github", ".pinned-tabs"],
   ]) {
-    await page.locator(`[data-tab-id="${source}"]`).dragTo(page.locator(`[data-tab-id="${target}"]`));
-    await expect(page.locator(`[data-tab-id="${source}"]`)).toHaveClass(/tab-move/);
+    const from = (await page.locator(`[data-tab-id="${source}"]`).boundingBox())!;
+    const to = (await page.locator(`[data-tab-id="${target}"]`).boundingBox())!;
+    await page.mouse.move(from.x + 60, from.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(to.x + 60, to.y + 6, { steps: 6 });
+    await page.mouse.move(to.x + 60, to.y + 6);
+    await expect(page.locator(`[data-tab-id="${target}"]`)).toHaveClass(/tab-move/);
+    await page.mouse.up();
     const order = await page.locator(`${list} .tab-row`).evaluateAll((rows) => rows.map((row) => row.getAttribute("data-tab-id")));
     expect(order.indexOf(source)).toBe(order.indexOf(target) - 1);
     await finishMotion(page);

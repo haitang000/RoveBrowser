@@ -8,7 +8,10 @@ import Favorites from "./Favorites.vue";
 import TabMenu from "./TabMenu.vue";
 import SpaceDeck from "./SpaceDeck.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
+import { provideTabDrag } from "../../lib/tab-drag";
 const b = useBrowser();
+const sidebar = ref<HTMLElement>();
+const tabDrag = provideTabDrag(sidebar);
 const spaceDeck = ref<InstanceType<typeof SpaceDeck>>();
 const swipeShares = ref<Record<string, number> | null>(null);
 function showMenu(e: MouseEvent, tab: Tab) {
@@ -20,7 +23,7 @@ function showMenu(e: MouseEvent, tab: Tab) {
 }
 </script>
 <template>
-  <aside class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)">
+  <aside ref="sidebar" class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)" @dragstart.capture="tabDrag.start">
     <div class="sidebar-header">
       <h1 class="space-name editable" :class="{compact: !b.settings.largeSpaceNames}" :title="`${b.space.name} · 编辑空间`" role="button" tabindex="0" @click="b.toggleSpaceEditor(b.space.id)" @keydown.enter.prevent="b.toggleSpaceEditor(b.space.id)">
         <SpaceGlyph v-if="b.space.icon" :icon="b.space.icon" :size="b.settings.largeSpaceNames ? 22 : 13" />

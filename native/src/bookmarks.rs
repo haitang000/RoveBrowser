@@ -591,7 +591,7 @@ impl State {
             Command::FavoriteTab { id, before } => {
                 let mark = self.keep_tab(id, true, None)?;
                 if let Some(before) = before {
-                    move_before(&mut self.favorites, &mark, before);
+                    move_before(&mut self.favorites, &mark, before, false);
                 }
             }
             Command::Pin { id } => {
@@ -611,7 +611,7 @@ impl State {
                     self.active_space = t.space_id.clone();
                 }
             }
-            Command::Reorder { id, before } => {
+            Command::Reorder { id, before, after } => {
                 let target = self.bookmark_id(before);
                 if let Some(target) = target.filter(|id| self.pins.iter().any(|f| &f.id == id)) {
                     let space = self
@@ -619,7 +619,7 @@ impl State {
                         .and_then(|f| f.space_id.clone())
                         .unwrap();
                     let mark = self.keep_tab(id, false, Some(&space))?;
-                    move_before(&mut self.pins, &mark, &target);
+                    move_before(&mut self.pins, &mark, &target, *after);
                 } else {
                     let mark = self.bookmark_id(id);
                     if let Some(mark) = &mark {
@@ -645,7 +645,7 @@ impl State {
                             if self.tabs[a].space_id == self.tabs[b].space_id {
                                 let t = self.tabs.remove(a);
                                 let at = self.tabs.iter().position(|t| &t.id == before).unwrap();
-                                self.tabs.insert(at, t);
+                                self.tabs.insert(at + usize::from(*after), t);
                             }
                         }
                     }
@@ -657,7 +657,7 @@ impl State {
     }
 }
 
-fn move_before(items: &mut Vec<Favorite>, id: &str, before: &str) {
+fn move_before(items: &mut Vec<Favorite>, id: &str, before: &str, after: bool) {
     if id == before {
         return;
     }
@@ -681,16 +681,45 @@ fn move_before(items: &mut Vec<Favorite>, id: &str, before: &str) {
         return;
     }
     items.retain(|f| !moving.iter().any(|m| m.id == f.id));
-    let target = items
-        .iter()
-        .position(|f| f.id == before || Some(&f.id) == target_partner.as_ref())
-        .unwrap();
+    let matches_target = |f: &Favorite| f.id == before || Some(&f.id) == target_partner.as_ref();
+    let target = if after {
+        items.iter().rposition(matches_target).unwrap() + 1
+    } else {
+        items.iter().position(matches_target).unwrap()
+    };
     items.splice(target..target, moving);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reorder_supports_inserting_after_the_last_tab_and_pin() {
+        let mut s = State::default();
+        s.new_tab("https://example.com/a").unwrap();
+        let a = s.active_tab.clone();
+        s.new_tab("https://example.com/b").unwrap();
+        let b = s.active_tab.clone();
+        let command: Command = serde_json::from_value(serde_json::json!({
+            "type": "reorder", "id": a, "before": b, "after": true
+        })).unwrap();
+        s.apply(&command).unwrap();
+        assert_eq!(s.tabs.last().unwrap().id, a);
+        // Existing before-only commands retain their original interpretation.
+        let command: Command = serde_json::from_value(serde_json::json!({
+            "type": "reorder", "id": a, "before": b
+        })).unwrap();
+        s.apply(&command).unwrap();
+        assert_eq!(s.tabs.last().unwrap().id, b);
+        s.keep_tab(&a, false, None).unwrap();
+        s.keep_tab(&b, false, None).unwrap();
+        let command: Command = serde_json::from_value(serde_json::json!({
+            "type": "reorder", "id": a, "before": b, "after": true
+        })).unwrap();
+        s.apply(&command).unwrap();
+        assert_eq!(s.pins.last().unwrap().id, s.bookmark_id(&a).unwrap());
+    }
+
     #[test]
     fn favorite_limits_are_atomic_for_regular_tabs_pins_and_split_groups() {
         let mut s = State::default();
