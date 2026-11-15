@@ -1,5 +1,31 @@
 # 实际验证记录
 
+## 0.1.2 正式版发布验证（2026-11-15）
+
+统一 npm、Cargo、锁文件和界面版本为 `0.1.2`，发布内容为下述普通浏览偶发卡死修复。
+
+- TypeScript／Vite 生产构建、107 项前端单元测试、128 项串行 Rust 测试及生产目标 Clippy（`-D warnings`）通过。修复实现另通过 20 项窗口布局 E2E 与普通浏览、刷新、窗口缩放和侧栏专项，具体范围见下节。
+- Rust 1.99.1、静态 CRT 的 Windows x64 Release 与正式安装程序构建通过，安装程序产品版本为 `0.1.2`。
+- 隔离安装器冒烟 19 项通过：beta5 覆盖升级到 0.1.2、中文路径、安装后二进制 SHA-256 一致、HTTP／HTTPS 注册、快捷方式、冷启动链接、卸载清理、保留 SQLite 与资料标记、不改变系统默认应用选择。结果位于 `.local/installer-smoke-4561e2b4-8061-4945-ad8d-ee3bbaabd89c/checks.json`。
+
+已有综合回归超时及未覆盖的平台范围见下节，不计为本次通过项。
+
+## 普通浏览偶发卡死修复（2026-11-15）
+
+在独立临时资料中复现了普通文章链接跳转和连续刷新时的整窗未响应。线程采样显示主线程停在 WebView2 的 `EmbeddedBrowserWebView.dll → NtUserSetWindowPos`，相关窗口是 CSS `app-region: drag` 创建的多个标题栏子窗口；调用栈同时包含 UIAutomationCore 窗口钩子。仅移除该 CSS 拖拽区域的对照构建即可通过相同浏览流程，历史数据库与宿主导航事件没有卡在写入路径。
+
+标题栏改为复用已有的同线程原生透明输入层，通过 `HTCAPTION` 和根窗口非客户区消息执行系统拖动、双击最大化／还原，避免由 WebView2 创建拖拽子窗口。前端从标题栏矩形减去导航、地址栏和窗口按钮，并在窗口尺寸、侧栏宽度与引导界面变化后更新命中区域。输入层只在标题栏和既有边缘／按钮区域处理像素；拖拽像素保留 alpha=1，避免 layered window 将完全透明像素的鼠标输入穿透。页面区域继续保持透明。
+
+新增 `npm run test:native:browsing`：真实 WebView2、本地文章 fixture、独立临时资料。默认执行 100 次真实链接点击，支持 `ERA_BROWSING_ROUNDS` 加长；另检查 30 次 SPA 路由／标题变化、20 次新标签加载／关闭、原网页 DOM 保留、每轮宿主历史查询响应，以及正常退出时会话与历史落盘。结果可通过 `ERA_SMOKE_OUTPUT` 指定目录，避免被界面 E2E 清理。
+
+最终 Debug 构建通过 300 次链接跳转、30 次 SPA 更新及 20 次标签开关，宿主查询最慢 23ms。刷新专项再次通过工具栏／命令／Ctrl+R／F5、30 次连续刷新和写锁下清除历史，写锁期间响应 6–35ms。原生窗口缩放 5 组、侧栏调宽／折叠／重启 9 组检查也通过。结果分别保留在 `.local/browsing-hang/{browsing-final,reload-final,resize-final,sidebar-final}/result.json`。
+
+107 项前端单元测试、128 项串行 Rust 测试、20 项窗口布局 E2E、TypeScript／Vite 构建、生产目标 Clippy（`-D warnings`）以及 Debug／Release 构建通过。新增真实 HWND／GDI 测试覆盖 100%、125%、150%、200% DPI、负屏幕坐标、标题栏输入像素透明度、控件放行与缩放边缘优先级；界面检查还覆盖 480／960／1280px 及控件尺寸不变时的侧栏调宽。
+
+computer-use 在独立资料窗口中实测标题栏拖动、双击最大化／还原、最大化按钮、关闭按钮和地址栏点击／Esc 收起。系统右键菜单未确认弹出，不计为通过项。本机 WebView2 Runtime 为 157.0.4341.46；物理多屏混合 DPI、其他 Runtime 和数小时真实浏览会话未覆盖。
+
+综合 `test:native` 仍在侧栏动画中间视口断言超时：`native viewport follows intermediate sidebar width (true, 240ms, pane 0)`。修复前基线也在同一检查点失败，未将综合回归计为通过；证据保留于 `.local/browsing-hang/native-final/`。
+
 ## 0.1.1 正式版发布验证（2026-11-15）
 
 统一 npm、Cargo、锁文件和界面版本为 `0.1.1`，发布内容为下述刷新未响应修复。安装器测试的文件版本改为从当前版本计算。

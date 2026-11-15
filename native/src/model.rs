@@ -262,6 +262,8 @@ pub enum Command {
     #[serde(rename = "windowChrome")]
     WindowChrome {
         maximize: Rect,
+        #[serde(default, rename = "dragRegions")]
+        drag_regions: Vec<Rect>,
         #[serde(rename = "viewportWidth")]
         viewport_width: f64,
         background: [u8; 4],

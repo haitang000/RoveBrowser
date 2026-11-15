@@ -1,4 +1,4 @@
-//! Native resize borders and caption buttons.
+//! Native resize borders, titlebar dragging and caption buttons.
 //! WebView2 owns descendant HWNDs on other threads. Instead of subclassing those
 //! windows, cover the borders/buttons with an almost transparent input surface.
 //! The UI paints the entire background. Resize edges fall through to the root.
@@ -104,6 +104,7 @@ struct State {
     surface: Cell<HWND>,
     rect: Cell<RECT>,
     anchor: Cell<Option<Anchor>>,
+    drag_regions: RefCell<Vec<[f64; 4]>>,
     palette: Cell<Palette>,
     hot: Cell<Option<Button>>,
     pressed: Cell<Option<Button>>,
@@ -205,6 +206,7 @@ impl Caption {
             surface: Cell::new(HWND::default()),
             rect: Cell::new(RECT::default()),
             anchor: Cell::new(None),
+            drag_regions: RefCell::new(Vec::new()),
             palette: Cell::new(Palette {
                 input: input_marker([255, 255, 255, 98], [0, 0, 0, 158]),
                 hover: [255, 255, 255, 98],
@@ -224,7 +226,7 @@ impl Caption {
             #[cfg(test)]
             posted_command: Cell::new(0),
         });
-        // This same-thread owned surface covers only the borders/buttons.
+        // This same-thread owned surface covers the borders, buttons and drag regions.
         // Resize edges return HTTRANSPARENT so the root can size the window.
         // Caption buttons stay HTCLIENT: WebView2 swallows a release that falls
         // through, and no asynchronous drag IPC is needed. A top-level layered
@@ -296,6 +298,18 @@ impl Caption {
             }
         }
         Ok(caption)
+    }
+    /// Own dragging here instead of WebView2's CSS app-region child HWNDs.
+    /// Updating those HWNDs during navigation can hang inside SetWindowPos.
+    pub fn set_drag_regions(&self, regions: &[Rect]) {
+        if regions.len() > 16 || !regions.iter().all(|r| r.valid() && r.y + r.height <= 64.) {
+            return;
+        }
+        let next: Vec<_> = regions.iter().map(|r| [r.x, r.y, r.width, r.height]).collect();
+        if *self.state.drag_regions.borrow() != next {
+            *self.state.drag_regions.borrow_mut() = next;
+            self.state.cut.set(None);
+        }
     }
     pub fn update(
         &self,
@@ -387,6 +401,17 @@ impl Caption {
                 {
                     return Err(Error::from_thread());
                 }
+                for [x, y, width, height] in self.state.drag_regions.borrow().iter().copied() {
+                    let drag = Region::new(RECT {
+                        left: (x * scale).round() as i32,
+                        top: (y * scale).round() as i32,
+                        right: (((x + width) * scale).round() as i32).min(client.right),
+                        bottom: (((y + height) * scale).round() as i32).min(client.bottom),
+                    })?;
+                    if CombineRgn(Some(surface.0), Some(surface.0), Some(drag.0), RGN_OR).0 == 0 {
+                        return Err(Error::from_thread());
+                    }
+                }
                 // This owned overlay is not clipped by its owner's DWM frame.
                 // Limit hover fills to the same outline, also on the fallback.
                 let radius = if border == 0 { 0 } else { (self.radius() * scale).round() as i32 };
@@ -460,6 +485,12 @@ fn surface_button(s: &State, point: POINT) -> Option<Button> {
     }
     button_at(s.rect.get(), point)
 }
+fn drag_owns_point(s: &State, point: POINT) -> bool {
+    let scale = s.scale.get();
+    let x = point.x as f64 / scale;
+    let y = point.y as f64 / scale;
+    s.drag_regions.borrow().iter().any(|r| x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3])
+}
 unsafe fn command_root(s: &State, hwnd: HWND) -> HWND {
     if hwnd == s.surface.get() {
         GetParent(hwnd).unwrap_or(hwnd)
@@ -532,9 +563,11 @@ unsafe extern "system" fn procedure(
                 // WebView2 covers the caption and takes the mouse release when this
                 // hit falls through. Keep every caption button on the surface.
                 // Resize edges still fall through so the root can return HTTOP/HTRIGHT.
-                if ScreenToClient(hwnd, &mut point).as_bool() && surface_button(s, point).is_some()
-                {
-                    return LRESULT(HTCLIENT as isize);
+                if ScreenToClient(hwnd, &mut point).as_bool() {
+                    if surface_button(s, point).is_some() { return LRESULT(HTCLIENT as isize); }
+                    if !resize_owns_point(s, point) && drag_owns_point(s, point) {
+                        return LRESULT(HTCAPTION as isize);
+                    }
                 }
                 return LRESULT(HTTRANSPARENT as isize);
             }
@@ -555,7 +588,15 @@ unsafe extern "system" fn procedure(
                 if let Some(button) = button_at(s.rect.get(), p) {
                     return LRESULT(button.hit() as isize);
                 }
+                if drag_owns_point(s, p) { return LRESULT(HTCAPTION as isize); }
             }
+        }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK | WM_NCRBUTTONDOWN | WM_NCRBUTTONUP
+            if hwnd == s.surface.get() && wparam.0 == HTCAPTION as usize =>
+        {
+            // Let USER32 move/maximize the root, retaining Snap and its native
+            // modal move loop. No WebView2 callback or renderer round trip.
+            return SendMessageW(command_root(s, hwnd), msg, Some(wparam), Some(lparam));
         }
         WM_NCMOUSEMOVE if hwnd != s.surface.get() => {
             let hot = Button::ALL
@@ -835,15 +876,21 @@ unsafe fn paint_layered(hwnd: HWND, bounds: RECT, s: &State, maximized: bool) ->
     let opaque_close =
         (s.hot.get() == Some(Button::Close)).then(|| Button::Close.rect(s.rect.get()));
     let palette = s.palette.get();
-    // Only the perimeter and caption buttons belong to this HWND's region.
-    // Leave interior pixels at alpha zero; hover work scales with the perimeter.
+    // Layered windows ignore mouse input on pixels with zero alpha, even when
+    // their HWND region and WM_NCHITTEST include that point. Keep the titlebar
+    // input marker at alpha one too; the HWND region excludes toolbar controls.
+    let titlebar_bottom = s.drag_regions.borrow().iter()
+        .map(|r| ((r[1] + r[3]) * s.scale.get()).round() as i32)
+        .max().unwrap_or(0).max(border);
+    // Leave the page interior untouched; hover work scales with the perimeter
+    // and the short titlebar band rather than the entire window area.
     for y in 0..size.cy {
-        let mut ranges = if y < border || y >= size.cy - border {
+        let mut ranges = if y < titlebar_bottom || y >= size.cy - border {
             [0..size.cx, 0..0, 0..0]
         } else {
             [0..border, size.cx - border..size.cx, 0..0]
         };
-        if y >= border && y < size.cy - border && y >= buttons.top && y < buttons.bottom {
+        if y >= titlebar_bottom && y < size.cy - border && y >= buttons.top && y < buttons.bottom {
             // Exclude the two edge strips already covered above.
             ranges[2] = buttons.left.max(border)..buttons.right.min(size.cx - border);
         }
@@ -968,6 +1015,46 @@ unsafe fn paint_button(dc: HDC, button: Button, s: &State, maximized: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_titlebar_hits_keep_controls_and_resize_edges_separate_at_each_dpi() -> Result<()> {
+        struct Root(HWND);
+        impl Drop for Root {
+            fn drop(&mut self) { unsafe { let _ = DestroyWindow(self.0); } }
+        }
+        unsafe {
+            let root = Root(CreateWindowExW(WINDOW_EX_STYLE::default(), w!("STATIC"), w!("Drag test"),
+                WS_POPUP, -1200, 100, 800, 600, None, None, None, None)?);
+            let ui = CreateWindowExW(WINDOW_EX_STYLE::default(), w!("STATIC"), w!("UI"),
+                WS_CHILD, 0, 0, 800, 600, Some(root.0), None, None, None)?;
+            let caption = Caption::new(root.0, ui)?;
+            caption.set_drag_regions(&[Rect { x: 0., y: 6., width: 240., height: 32., ..Rect::default() }]);
+            for scale in [1., 1.25, 1.5, 2.] {
+                caption.refresh(scale)?;
+                let hit = |x: f64, y: f64| {
+                    let mut point = POINT { x: (x * scale).round() as i32, y: (y * scale).round() as i32 };
+                    let _ = ClientToScreen(caption.state.surface.get(), &mut point);
+                    SendMessageW(caption.state.surface.get(), WM_NCHITTEST, None,
+                        Some(LPARAM(((point.y as u16 as u32) << 16 | point.x as u16 as u32) as isize))).0
+                };
+                assert_eq!(hit(100., 20.), HTCAPTION as isize);
+                let layer = caption.state.layer.borrow();
+                let bitmap = layer.as_ref().unwrap();
+                let pixel = *bitmap.bits.add((20. * scale).round() as usize * bitmap.size.cx as usize + (100. * scale).round() as usize);
+                assert_eq!(pixel >> 24, 1, "drag pixels must receive layered-window mouse input");
+                drop(layer);
+                assert_eq!(hit(260., 20.), HTTRANSPARENT as isize, "toolbar keeps its input");
+                assert_eq!(hit(100., 2.), HTTRANSPARENT as isize, "resize edge reaches root");
+                let region = Region::new(RECT::default())?;
+                assert_ne!(GetWindowRgn(caption.state.surface.get(), region.0).0, 0);
+                assert!(PtInRegion(region.0, (100. * scale) as i32, (20. * scale) as i32).as_bool());
+                assert!(!PtInRegion(region.0, (260. * scale) as i32, (20. * scale) as i32).as_bool());
+            }
+            caption.set_drag_regions(&[]);
+            caption.refresh(1.)?;
+            assert!(!drag_owns_point(&caption.state, POINT { x: 100, y: 20 }));
+        }
+        Ok(())
+    }
     #[test]
     fn shared_ink_colors_preserve_distinct_hover_glyph_and_input_alpha() {
         let palette = Palette {

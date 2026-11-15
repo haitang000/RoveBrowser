@@ -2398,12 +2398,14 @@ impl App {
             }
             Command::WindowChrome {
                 maximize,
+                drag_regions,
                 viewport_width,
                 background,
                 hover,
                 foreground,
             } => {
                 if let (Some(caption), Some(window)) = (&self.caption, &self.window) {
+                    caption.set_drag_regions(&drag_regions);
                     if let Err(e) = caption.update(
                         maximize,
                         viewport_width,

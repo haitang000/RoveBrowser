@@ -223,7 +223,6 @@ kbd {
   --frame: #000;
 }
 .titlebar {
-  app-region: drag;
   height: var(--titlebar-block);
   display: grid;
   grid-template-columns: clamp(64px, calc(100vw - 400px), var(--sidebar-width)) minmax(0, 1fr) auto;

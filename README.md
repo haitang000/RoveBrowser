@@ -1,8 +1,8 @@
 # Rove
 
-Rove 是一款面向 Windows 10/11 的浏览器，使用 WebView2 加载网页，以工作区、侧栏标签和分屏组织浏览。界面与部分交互参考并移植自 Zigzag；当前正式版本为 **0.1.1**，功能范围与已知限制见下文。
+Rove 是一款面向 Windows 10/11 的浏览器，使用 WebView2 加载网页，以工作区、侧栏标签和分屏组织浏览。界面与部分交互参考并移植自 Zigzag；当前正式版本为 **0.1.2**，功能范围与已知限制见下文。
 
-[下载发行版](https://github.com/haitang000/RoveBrowser/releases/latest) · [0.1.1 更新说明](docs/releases/0.1.1.md) · [反馈问题](https://github.com/haitang000/RoveBrowser/issues) · [验证记录](docs/VALIDATION.md)
+[下载发行版](https://github.com/haitang000/RoveBrowser/releases/latest) · [0.1.2 更新说明](docs/releases/0.1.2.md) · [反馈问题](https://github.com/haitang000/RoveBrowser/issues) · [验证记录](docs/VALIDATION.md)
 
 ## 功能概览
 
@@ -73,6 +73,7 @@ npm run test:e2e                        # 界面测试，使用本机 Microsoft 
 cargo test --manifest-path native/Cargo.toml -- --test-threads=1
 cargo build --manifest-path native/Cargo.toml
 npm run test:native                     # Windows 原生宿主 / WebView2 冒烟测试
+npm run test:native:browsing            # 普通链接跳转、SPA 路由和标签切换期间的宿主响应（需先构建 Debug）
 npm run test:native:reload              # 刷新、写锁期间窗口响应与历史清除专项（需先构建 Debug）
 npm run test:native:new-tab             # Widget 操作、GitHub 实际请求和 SQLite 重启恢复（需先构建 Debug）
 npm run test:native:sidebar             # 侧栏调宽、真实视口和重启恢复专项（需先构建 Debug）

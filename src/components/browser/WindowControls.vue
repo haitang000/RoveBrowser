@@ -2,6 +2,7 @@
 import { useBrowser } from "../../stores/browser";
 import { host } from "../../lib/address";
 import { isSettingsUrl } from "../../lib/settings";
+import { titlebarDragRegions } from "../../lib/window-chrome";
 import Icon from "../common/Icon.vue";
 import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 const b = useBrowser();
@@ -14,6 +15,7 @@ let context: CanvasRenderingContext2D | null;
 function report() {
   if (!b.native || !maximize.value) return;
   const shell = maximize.value.closest('.browser-shell')!;
+  const header = maximize.value.closest('header')!;
   const r = maximize.value.getBoundingClientRect(), style = getComputedStyle(shell);
   const frame = style.backgroundImage === "none"
     ? style.backgroundColor
@@ -41,6 +43,9 @@ function report() {
     type: "windowChrome",
     maximize: { x: r.x, y: r.y, width: r.width, height: r.height },
     viewportWidth: innerWidth,
+    dragRegions: titlebarDragRegions(header.getBoundingClientRect(),
+      [...header.querySelectorAll('.browser-navigation, .address-field, .window-controls')]
+        .map(element => element.getBoundingClientRect())),
     ...palette,
   });
 }
@@ -53,7 +58,12 @@ watch(
 );
 onMounted(() => {
   observer = new ResizeObserver(report);
-  if (maximize.value) observer.observe(maximize.value);
+  if (maximize.value) {
+    observer.observe(maximize.value);
+    const header = maximize.value.closest('header')!;
+    observer.observe(header);
+    header.querySelectorAll('.titlebar-identity, .browser-navigation, .address-field').forEach(element => observer.observe(element));
+  }
   const shell = maximize.value?.closest('.browser-shell');
   shell?.addEventListener("frame-background-change", report);
   paletteObserver = new MutationObserver(report);

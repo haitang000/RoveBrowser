@@ -6,7 +6,7 @@ declare global {
   interface Window {
     __windowTest: {
       layout?: Layout;
-      chrome?: { maximize: Rect; viewportWidth: number; background: number[]; hover: number[]; foreground: number[] };
+      chrome?: { maximize: Rect; viewportWidth: number; background: number[]; hover: number[]; foreground: number[]; dragRegions: Rect[] };
       glass: boolean[];
       presented?: { theme?: string; width: number; fonts: string };
       samples: { expected: number; reported: number }[];
@@ -301,6 +301,46 @@ test("native caption geometry keeps three equal buttons flush with the window ed
     expect(navigation.x + navigation.width).toBeLessThan(address.x);
     expect(address.x + address.width).toBeLessThan(buttons[0]!.x);
   }
+});
+
+test("native titlebar dragging avoids WebView2 app-region windows and toolbar controls", async ({ page }) => {
+  await nativeShell(page, initialState());
+  for (const width of [1280, 480, 960]) {
+    await page.setViewportSize({ width, height: 820 });
+    await expect.poll(() => page.evaluate(() => window.__windowTest.chrome?.viewportWidth)).toBe(width);
+    const regions = await page.evaluate(() => window.__windowTest.chrome!.dragRegions);
+    expect(regions.length).toBeGreaterThan(0);
+    expect(await page.locator('.titlebar').evaluate(el => getComputedStyle(el).getPropertyValue('app-region'))).not.toBe('drag');
+    const controls = await page.locator('.browser-navigation, .address-field, .window-controls').evaluateAll(elements => elements.map(el => {
+      const { x, y, width, height } = el.getBoundingClientRect();
+      return { x, y, width, height };
+    }));
+    for (const region of regions) {
+      for (const control of controls) {
+        expect(region.x >= control.x + control.width || region.x + region.width <= control.x
+          || region.y >= control.y + control.height || region.y + region.height <= control.y).toBe(true);
+      }
+    }
+  }
+});
+
+test("titlebar hit regions follow sidebar resizing even when toolbar controls keep their sizes", async ({ page }) => {
+  await nativeShell(page, initialState());
+  const original = (await page.locator('.browser-navigation').boundingBox())!;
+  for (const width of [360, 200, 300]) {
+    await page.evaluate(width => window.__ERA_RECEIVE__!({ type: 'sidebarResize', width, resizing: true }), width);
+    await expect.poll(async () => (await page.locator('.browser-navigation').boundingBox())!.x).toBe(width + 6);
+    expect((await page.locator('.browser-navigation').boundingBox())!.width).toBe(original.width);
+    await expect.poll(() => page.evaluate(() => {
+      const regions = window.__windowTest.chrome!.dragRegions;
+      return [...document.querySelectorAll('.browser-navigation, .address-field, .window-controls')].every(element => {
+        const control = element.getBoundingClientRect();
+        return regions.every(region => region.x >= control.right || region.x + region.width <= control.left
+          || region.y >= control.bottom || region.y + region.height <= control.top);
+      });
+    })).toBe(true);
+  }
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'sidebarResize', width: 300, resizing: false }));
 });
 
 test("native gradients fill the outer frame and caption ink retains its own alpha", async ({ page }) => {
