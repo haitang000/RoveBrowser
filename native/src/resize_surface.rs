@@ -39,7 +39,7 @@ use windows::{
                 IDCompositionScaleTransform, IDCompositionSurface, IDCompositionTarget,
                 IDCompositionVisual,
             },
-            Dwm::{DwmSetWindowAttribute, DWMWA_CLOAK},
+            Dwm::{DwmFlush, DwmSetWindowAttribute, DWMWA_CLOAK},
             Dxgi::{
                 Common::{DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM},
                 IDXGIAdapter, IDXGIDevice,
@@ -62,6 +62,10 @@ use windows::{
 };
 const SUBCLASS: usize = 0x52535641;
 const TIMER: usize = 1;
+// A 16 ms USER timer can round up to two 15.6 ms system ticks (~32 Hz).
+// The minimum interval keeps this fallback clock near one system tick;
+// pointer/layout events still present immediately on the same UI thread.
+const FRAME_INTERVAL_MS: u32 = USER_TIMER_MINIMUM;
 thread_local! {
     // All page previews belong to the UI thread. Reuse its device rather than
     // initializing D3D/D2D synchronously for each pane on every mouse press.
@@ -138,6 +142,18 @@ struct Layer {
     effect: IDCompositionEffectGroup,
     scale: IDCompositionScaleTransform,
     size: Cell<[i32; 2]>,
+    fitted: Cell<Option<[f32; 2]>>,
+    snapshot: RefCell<Option<IDCompositionSurface>>,
+}
+#[derive(Clone, Copy)]
+struct Presentation {
+    size: [i32; 2],
+    matrix: [[f32; 4]; 4],
+    lift: f32,
+    blur: f32,
+    opacity: f32,
+    slide: f32,
+    blend: f32,
 }
 struct Frame {
     source: HWND,
@@ -154,7 +170,7 @@ struct Frame {
     card_clip: IDCompositionRectangleClip,
     viewport_clip: IDCompositionRectangleClip,
     background_scale: IDCompositionScaleTransform,
-    background: FluidBackground,
+    background: Option<FluidBackground>,
     corners: [f32; 4],
     scale_factor: f32,
     old: Layer,
@@ -163,9 +179,12 @@ struct Frame {
     pixels: mpsc::Receiver<(Capture, Option<Pixels>)>,
     sender: mpsc::Sender<(Capture, Option<Pixels>)>,
     bounds: Cell<[i32; 4]>,
+    positioned: Cell<Option<[i32; 4]>>,
+    presented: Cell<Option<Presentation>>,
     frozen: Cell<bool>,
     paint_requested: Cell<bool>,
     paint_ready: Cell<bool>,
+    source_prepared: Cell<bool>,
     restored: Cell<bool>,
     started: Instant,
     previous_tick: Cell<f32>,
@@ -496,20 +515,39 @@ unsafe fn rounded(
     width: f32,
     height: f32,
     radii: [f32; 4],
+    previous: Option<([i32; 2], [f32; 4])>,
 ) -> Result<()> {
-    let [tl, tr, br, bl] = radii.map(|r| r.clamp(0., width.min(height).max(0.) / 2.));
-    clip.SetLeft2(0.)?;
-    clip.SetTop2(0.)?;
-    clip.SetRight2(width)?;
-    clip.SetBottom2(height)?;
-    clip.SetTopLeftRadiusX2(tl)?;
-    clip.SetTopLeftRadiusY2(tl)?;
-    clip.SetTopRightRadiusX2(tr)?;
-    clip.SetTopRightRadiusY2(tr)?;
-    clip.SetBottomRightRadiusX2(br)?;
-    clip.SetBottomRightRadiusY2(br)?;
-    clip.SetBottomLeftRadiusX2(bl)?;
-    clip.SetBottomLeftRadiusY2(bl)
+    let radii = radii.map(|r| r.clamp(0., width.min(height).max(0.) / 2.));
+    let old_radii = previous.map(|(size, radii)| {
+        radii.map(|r| r.clamp(0., (size[0].min(size[1]).max(0) as f32) / 2.))
+    });
+    if previous.is_none() {
+        clip.SetLeft2(0.)?;
+        clip.SetTop2(0.)?;
+    }
+    if previous.is_none_or(|(size, _)| size[0] as f32 != width) {
+        clip.SetRight2(width)?;
+    }
+    if previous.is_none_or(|(size, _)| size[1] as f32 != height) {
+        clip.SetBottom2(height)?;
+    }
+    if old_radii.is_none_or(|old| old[0] != radii[0]) {
+        clip.SetTopLeftRadiusX2(radii[0])?;
+        clip.SetTopLeftRadiusY2(radii[0])?;
+    }
+    if old_radii.is_none_or(|old| old[1] != radii[1]) {
+        clip.SetTopRightRadiusX2(radii[1])?;
+        clip.SetTopRightRadiusY2(radii[1])?;
+    }
+    if old_radii.is_none_or(|old| old[2] != radii[2]) {
+        clip.SetBottomRightRadiusX2(radii[2])?;
+        clip.SetBottomRightRadiusY2(radii[2])?;
+    }
+    if old_radii.is_none_or(|old| old[3] != radii[3]) {
+        clip.SetBottomLeftRadiusX2(radii[3])?;
+        clip.SetBottomLeftRadiusY2(radii[3])?;
+    }
+    Ok(())
 }
 impl Layer {
     unsafe fn new(device: &IDCompositionDevice, size: [i32; 2]) -> Result<Self> {
@@ -523,13 +561,21 @@ impl Layer {
             effect,
             scale,
             size: Cell::new(size),
+            fitted: Cell::new(None),
+            snapshot: RefCell::new(None),
         })
     }
     unsafe fn fit(&self, size: [i32; 2]) -> Result<()> {
-        self.scale
-            .SetScaleX2(size[0].max(1) as f32 / self.size.get()[0].max(1) as f32)?;
-        self.scale
-            .SetScaleY2(size[1].max(1) as f32 / self.size.get()[1].max(1) as f32)
+        let scale = std::array::from_fn(|i| size[i].max(1) as f32 / self.size.get()[i].max(1) as f32);
+        let previous = self.fitted.get();
+        if previous.is_none_or(|value| value[0] != scale[0]) {
+            self.scale.SetScaleX2(scale[0])?;
+        }
+        if previous.is_none_or(|value| value[1] != scale[1]) {
+            self.scale.SetScaleY2(scale[1])?;
+        }
+        self.fitted.set(Some(scale));
+        Ok(())
     }
     unsafe fn bitmap(&self, device: &IDCompositionDevice, pixels: Pixels) -> Result<()> {
         let surface = bitmap(
@@ -541,7 +587,15 @@ impl Layer {
         )?;
         self.visual.SetContent(&surface)?;
         self.size.set([pixels.width as i32, pixels.height as i32]);
+        self.snapshot.replace(Some(surface));
         Ok(())
+    }
+    unsafe fn copy_snapshot(&self, from: &Self) -> Result<bool> {
+        let Some(surface) = from.snapshot.borrow().clone() else { return Ok(false); };
+        self.visual.SetContent(&surface)?;
+        self.size.set(from.size.get());
+        self.snapshot.replace(Some(surface));
+        Ok(true)
     }
 }
 unsafe fn composition_device() -> Result<IDCompositionDevice> {
@@ -684,7 +738,13 @@ impl Frame {
         let built = (|| -> Result<_> {
             let target = device.CreateTargetForHwnd(preview, true)?;
             let root_visual = device.CreateVisual()?;
-            let (background_visual, background) = FluidBackground::new(&device, appearance)?;
+            // Flat sidebar motion covers the entire viewport with opaque page
+            // content. Its fluid backdrop would be invisible, even while blurred.
+            let background = if matches!(start, Start::Blur(_)) {
+                None
+            } else {
+                Some(FluidBackground::new(&device, appearance)?)
+            };
             let card = device.CreateVisual()?;
             let content = device.CreateVisual()?;
             let blurred = device.CreateVisual()?;
@@ -731,8 +791,10 @@ impl Frame {
             let old = Layer::new(&device, size)?;
             let new = Layer::new(&device, size)?;
             new.effect.SetOpacity2(1.)?;
-            root_visual.AddVisual(&background_visual, false, None::<&IDCompositionVisual>)?;
-            root_visual.AddVisual(&card, true, &background_visual)?;
+            if let Some((visual, _)) = &background {
+                root_visual.AddVisual(visual, false, None::<&IDCompositionVisual>)?;
+            }
+            root_visual.AddVisual(&card, true, None::<&IDCompositionVisual>)?;
             card.AddVisual(&content, false, None::<&IDCompositionVisual>)?;
             content.AddVisual(&blurred, false, None::<&IDCompositionVisual>)?;
             blurred.AddVisual(&card_background, false, None::<&IDCompositionVisual>)?;
@@ -749,7 +811,7 @@ impl Frame {
                 card_clip,
                 viewport_clip,
                 background_scale,
-                background,
+                background.map(|(_, background)| background),
                 old,
                 new,
             ))
@@ -818,9 +880,12 @@ impl Frame {
             pixels,
             sender,
             bounds: Cell::new(bounds),
+            positioned: Cell::new(None),
+            presented: Cell::new(None),
             frozen: Cell::new(false),
             paint_requested: Cell::new(false),
             paint_ready: Cell::new(false),
+            source_prepared: Cell::new(false),
             restored: Cell::new(false),
             started: Instant::now(),
             previous_tick: Cell::new(0.),
@@ -854,7 +919,7 @@ impl Frame {
         {
             return Err(windows::core::Error::from_thread());
         }
-        if SetTimer(Some(preview), TIMER, 16, None) == 0 {
+        if SetTimer(Some(preview), TIMER, FRAME_INTERVAL_MS, None) == 0 {
             return Err(windows::core::Error::from_thread());
         }
         frame.capture(Capture::Before);
@@ -865,26 +930,36 @@ impl Frame {
         self.tick()
     }
     unsafe fn position(&self, bounds: [i32; 4]) -> Result<()> {
-        self.bounds.set(bounds);
         let mut origin = POINT {
             x: bounds[0],
             y: bounds[1],
         };
         windows::Win32::Graphics::Gdi::ClientToScreen(self.root, &mut origin).ok()?;
-        SetWindowPos(
-            self.preview,
-            Some(HWND_TOP),
-            origin.x,
-            origin.y,
-            bounds[2],
-            bounds[3],
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )?;
+        let next = [origin.x, origin.y, bounds[2], bounds[3]];
+        let previous = self.positioned.get();
+        if previous != Some(next) {
+            // Preserve the compositor's previous pixels until the resized
+            // visual tree arrives; discarding them can expose an empty target.
+            let mut flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+            if let Some(previous) = previous {
+                // raise() owns explicit stacking changes, not width samples.
+                flags |= SWP_NOZORDER;
+                if previous[..2] == next[..2] { flags |= SWP_NOMOVE; }
+                if previous[2..] == next[2..] { flags |= SWP_NOSIZE; }
+            } else {
+                flags |= SWP_SHOWWINDOW;
+            }
+            SetWindowPos(self.preview, Some(HWND_TOP), next[0], next[1], next[2], next[3], flags)?;
+            self.positioned.set(Some(next));
+        }
+        self.bounds.set(bounds);
         Ok(())
     }
     unsafe fn present(&self, sample: crate::resize_motion::Sample) -> Result<()> {
         let [_, _, width, height] = self.bounds.get();
         let size = [width, height];
+        let previous = self.presented.get();
+        let resized = previous.is_none_or(|value| value.size != size);
         if trace_enabled() && !self.motion.borrow().dragging() {
             trace(
                 serde_json::json!({"phase":"settling", "time":self.now(), "scale":sample.pose.scale,
@@ -892,56 +967,65 @@ impl Frame {
                 "opacity":sample.opacity, "slide":sample.slide, "blur":sample.blur, "bounds":self.bounds.get()}),
             );
         }
-        self.background_scale.SetScaleX2(width.max(1) as f32)?;
-        self.background_scale.SetScaleY2(height.max(1) as f32)?;
-        let time = if self.motion.borrow().reduced {
-            0.
-        } else {
-            self.now()
-        };
-        self.background.present(width as f32, height as f32, time)?;
-        rounded(
-            &self.viewport_clip,
-            width as f32,
-            height as f32,
-            self.corners,
-        )?;
+        if resized {
+            self.background_scale.SetScaleX2(width.max(1) as f32)?;
+            self.background_scale.SetScaleY2(height.max(1) as f32)?;
+            rounded(
+                &self.viewport_clip, width as f32, height as f32, self.corners,
+                previous.map(|value| (value.size, self.corners)),
+            )?;
+        }
+        if let Some(background) = &self.background {
+            let time = if self.motion.borrow().reduced { 0. } else { self.now() };
+            background.present(width as f32, height as f32, time)?;
+        }
         // 18 CSS px while lifted. Morph back to each pane's real corners as
         // the final scale reaches 1:1, so the handoff never changes its outline.
         let lift = ((1. - sample.pose.scale) / 0.032).clamp(0., 1.);
         // Blur has its own channel for flat sidebar transitions. Only the inner
         // subtree is filtered; the outline and background stay sharp.
-        self.blur
-            .SetStandardDeviation2(3. * self.scale_factor * sample.blur)?;
-        rounded(
-            &self.card_clip,
-            width as f32,
-            height as f32,
-            self.corners
-                .map(|r| r + (LIFTED_RADIUS * self.scale_factor - r) * lift),
-        )?;
+        if previous.is_none_or(|value| value.blur != sample.blur) {
+            self.blur.SetStandardDeviation2(3. * self.scale_factor * sample.blur)?;
+        }
+        if resized || previous.is_none_or(|value| value.lift != lift) {
+            rounded(
+                &self.card_clip, width as f32, height as f32,
+                self.corners.map(|r| r + (LIFTED_RADIUS * self.scale_factor - r) * lift),
+                previous.map(|value| (value.size, self.corners.map(|r|
+                    r + (LIFTED_RADIUS * self.scale_factor - r) * value.lift))),
+            )?;
+        }
         self.old.fit(size)?;
         self.new.fit(size)?;
-        self.card_effect.SetOpacity2(sample.opacity)?;
+        if previous.is_none_or(|value| value.opacity != sample.opacity) {
+            self.card_effect.SetOpacity2(sample.opacity)?;
+        }
         if let Some(effect) = self.exit_effect.borrow().as_ref() {
             // Fade the flat background too, so it cannot disappear in one frame.
             effect.SetOpacity2(sample.opacity)?;
         }
-
-        self.card.SetOffsetX2(width as f32 * sample.slide)?;
-        for (row, values) in projection(sample.pose, width as f32, height as f32)
-            .iter()
-            .enumerate()
-        {
+        let slide = width as f32 * sample.slide;
+        if previous.is_none_or(|value| value.slide != slide) {
+            self.card.SetOffsetX2(slide)?;
+        }
+        let matrix = projection(sample.pose, width as f32, height as f32);
+        for (row, values) in matrix.iter().enumerate() {
             for (col, value) in values.iter().enumerate() {
-                self.projection
-                    .SetMatrixElement2(row as i32, col as i32, *value)?;
+                if previous.is_none_or(|last| last.matrix[row][col] != *value) {
+                    self.projection.SetMatrixElement2(row as i32, col as i32, *value)?;
+                }
             }
         }
         // The new image is opaque underneath; fading ONLY the old layer avoids
         // the background leaking through (and flashing) halfway through a fade.
-        self.old.effect.SetOpacity2(1. - sample.blend)?;
-        self.device.Commit()
+        if previous.is_none_or(|value| value.blend != sample.blend) {
+            self.old.effect.SetOpacity2(1. - sample.blend)?;
+        }
+        self.device.Commit()?;
+        self.presented.set(Some(Presentation {
+            size, matrix, lift, blur: sample.blur, opacity: sample.opacity, slide, blend: sample.blend,
+        }));
+        Ok(())
     }
     fn capture(&self, kind: Capture) {
         let Some(core) = &self.core else {
@@ -999,6 +1083,16 @@ impl Frame {
                     );
                     if pixels.width as i32 == w && pixels.height as i32 == h {
                         self.new.bitmap(&self.device, pixels)?;
+                        // A late/missing Before capture must not leave a live
+                        // HWND wrapper above the independent final bitmap.
+                        if !self.frozen.get() {
+                            self.old.copy_snapshot(&self.new)?;
+                            self.frozen.set(true);
+                        }
+                        // Restore the source under immutable pixels, before
+                        // the crossfade/settle. Layered-style changes can
+                        // rebuild its DWM surface and must precede the reveal.
+                        if self.exit.borrow().is_none() { self.prepare_covered_source()?; }
                         self.paint_ready.set(true);
                         self.motion.borrow_mut().paint_ready(now);
                         trace(serde_json::json!({"phase":"painted", "size":self.new.size.get()}));
@@ -1056,11 +1150,15 @@ impl Frame {
             self.capture(Capture::After);
         }
         if elapsed.is_some_and(|t| t >= PAINT_LIMIT) && !self.paint_ready.replace(true) {
-            self.new
-                .visual
-                .SetContent(&self.device.CreateSurfaceFromHwnd(self.source)?)?;
-            let [_, _, w, h] = self.bounds.get();
-            self.new.size.set([w, h]);
+            if self.new.copy_snapshot(&self.old)? {
+                // Retain valid pixels if final capture fails. A live HWND
+                // wrapper would vanish when its layered style is restored.
+                if self.exit.borrow().is_none() { self.prepare_covered_source()?; }
+            } else {
+                self.new.visual.SetContent(&self.device.CreateSurfaceFromHwnd(self.source)?)?;
+                let [_, _, w, h] = self.bounds.get();
+                self.new.size.set([w, h]);
+            }
         }
         let sample = self.motion.borrow_mut().sample(now, dt);
         if sample.finished {
@@ -1079,6 +1177,34 @@ impl Frame {
             return Ok(());
         }
         self.present(sample)
+    }
+    unsafe fn prepare_covered_source(&self) -> Result<()> {
+        if self.source_prepared.get() { return Ok(()); }
+        let [_, _, width, height] = self.bounds.get();
+        self.old.fit([width, height])?;
+        self.new.fit([width, height])?;
+        self.device.Commit()?;
+        // The Before and After captures can arrive in the same tick. Submit
+        // their independent pixels before invalidating the live HWND wrapper.
+        let _ = DwmFlush();
+        self.prepare_source();
+        Ok(())
+    }
+    unsafe fn prepare_source(&self) {
+        // A held/exit preview may have cloaked an already prepared source again.
+        let cloak = BOOL(0);
+        let _ = DwmSetWindowAttribute(self.source, DWMWA_CLOAK, &cloak as *const _ as _, 4);
+        if self.source_prepared.replace(true) { return; }
+        if GetWindowLongPtrW(self.source, GWL_EXSTYLE) != self.old_style {
+            SetWindowLongPtrW(self.source, GWL_EXSTYLE, self.old_style);
+        }
+        let _ = windows::Win32::Graphics::Gdi::RedrawWindow(
+            Some(self.source), None, None,
+            windows::Win32::Graphics::Gdi::RDW_INVALIDATE
+                | windows::Win32::Graphics::Gdi::RDW_FRAME
+                | windows::Win32::Graphics::Gdi::RDW_ALLCHILDREN,
+        );
+        trace(serde_json::json!({"phase":"source-prepared", "bounds":self.bounds.get()}));
     }
     unsafe fn restore(&self) {
         if self.restored.replace(true) {
@@ -1099,20 +1225,13 @@ impl Frame {
                 }
             }
         }
-        trace(serde_json::json!({"phase":"restored", "bounds":self.bounds.get()}));
         let _ = KillTimer(Some(self.preview), TIMER);
-        let cloak = BOOL(0);
-        let _ = DwmSetWindowAttribute(self.source, DWMWA_CLOAK, &cloak as *const _ as _, 4);
-        SetWindowLongPtrW(self.source, GWL_EXSTYLE, self.old_style);
+        self.prepare_source();
+        // Wait only at the final handoff, with the covering bitmap still up.
+        // Animation frames never block on the desktop compositor.
+        let _ = DwmFlush();
         let _ = ShowWindow(self.preview, SW_HIDE);
-        let _ = windows::Win32::Graphics::Gdi::RedrawWindow(
-            Some(self.source),
-            None,
-            None,
-            windows::Win32::Graphics::Gdi::RDW_INVALIDATE
-                | windows::Win32::Graphics::Gdi::RDW_FRAME
-                | windows::Win32::Graphics::Gdi::RDW_ALLCHILDREN,
-        );
+        trace(serde_json::json!({"phase":"restored", "bounds":self.bounds.get()}));
         let _ = RemoveWindowSubclass(self.preview, Some(procedure), SUBCLASS);
         let _ = DestroyWindow(self.preview);
     }
@@ -1385,6 +1504,49 @@ mod tests {
                 assert_eq!(GetWindowLongPtrW(source, GWL_EXSTYLE), style);
                 DwmGetWindowAttribute(source, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)?;
                 assert_eq!(cloaked, 0);
+            }
+            // The source must regain its normal DWM style while immutable
+            // snapshots still cover it, including either missing capture.
+            for (before, after) in [(true, true), (false, true), (true, false)] {
+                surface.begin_blur([20, 20, 200, 150], [8.; 4], 1.)?;
+                let pixels = |width: u32| Pixels {
+                    width, height: 150,
+                    bgra: [160, 120, 80, 255].repeat((width * 150) as usize),
+                };
+                if before {
+                    let frame = surface.frame.borrow();
+                    let frame = frame.as_ref().unwrap();
+                    frame.sender.send((Capture::Before, Some(pixels(200)))).unwrap();
+                    frame.tick()?;
+                }
+                surface.resize([60, 20, 360, 150])?;
+                surface.release();
+                {
+                    let frame = surface.frame.borrow();
+                    let frame = frame.as_ref().unwrap();
+                    if after {
+                        frame.sender.send((Capture::After, Some(pixels(360)))).unwrap();
+                    } else {
+                        frame.motion.borrow_mut().release(frame.now() - PAINT_LIMIT - 0.01);
+                    }
+                    frame.tick()?;
+                    assert!(!frame.restored.get(), "the covering preview must remain during preparation");
+                    assert!(frame.source_prepared.get());
+                    assert_eq!(GetWindowLongPtrW(source, GWL_EXSTYLE), style);
+                    assert!(frame.old.snapshot.borrow().is_some());
+                    assert!(frame.new.snapshot.borrow().is_some(), "handoff must not depend on an invalidated HWND wrapper");
+                    assert_eq!(frame.new.size.get()[0], if after { 360 } else { 200 });
+                    let start = frame.now() - 1.;
+                    frame.motion.borrow_mut().release(start);
+                    frame.motion.borrow_mut().paint_ready(start);
+                    frame.tick()?;
+                    assert!(frame.restored.get());
+                    let last = frame.presented.get().unwrap();
+                    assert_eq!(last.blend, 1., "submit the exact final frame before removing its cover");
+                    assert_eq!(last.blur, 0.);
+                    assert_eq!(last.matrix, projection(crate::resize_motion::Pose::default(), 360., 150.));
+                }
+                surface.end();
             }
             // Entry uses final bounds immediately and must keep Chromium
             // visible for capture. Cancelling it cannot retain a style/cloak.
