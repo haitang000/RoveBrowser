@@ -292,6 +292,11 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     case "sidebar":
       s.sidebarCollapsed = !s.sidebarCollapsed;
+      s.sidebarHidden = false;
+      break;
+    case "sidebarFocus":
+      s.sidebarCollapsed = !s.sidebarCollapsed;
+      s.sidebarHidden = s.sidebarCollapsed;
       break;
     case "sidebarWidth":
       if (c.width === null) delete s.sidebarWidth;

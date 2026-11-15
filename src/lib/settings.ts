@@ -90,6 +90,7 @@ export const SHORTCUTS = [
     value: combo(9, true, true),
   },
   { id: "sidebar", title: "显示或隐藏侧栏", group: "窗口", value: combo(66) },
+  { id: "sidebarFocus", title: "完全收起或展开侧栏", group: "窗口", value: combo(70, true, true) },
   {
     id: "desk",
     title: "全部标签页",

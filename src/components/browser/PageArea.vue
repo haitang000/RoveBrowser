@@ -23,6 +23,7 @@ const b = useBrowser(),
   container = ref<HTMLElement>(),
   ratio = ref(0.5),
   resizing = ref(false),
+  sidebarMotion = ref(false),
   drop = ref(false);
 const other = computed(() =>
   b.state.tabs.find((t) => t.id === b.active?.splitWith),
@@ -98,6 +99,7 @@ function layout() {
     ...reported,
     viewport: { width: innerWidth, height: innerHeight },
     liveResize: resizing.value || b.sidebarResizing,
+    sidebarMotion: sidebarMotion.value,
   });
 }
 function resizeSidebar(delta: number) {
@@ -116,11 +118,26 @@ function resizeSidebar(delta: number) {
   b.send({ type: 'layout', ...reported, liveResize: true, viewport: { width: innerWidth, height: innerHeight } });
 }
 defineExpose({ layout, resizeSidebar });
+let sidebarGeneration = 0;
+watch(() => b.state.sidebarCollapsed, () => {
+  const ticket = ++sidebarGeneration;
+  const track = container.value?.parentElement?.querySelector(".sidebar-track");
+  // Reading the running CSS transition also flushes its new target. Retargeting
+  // a transition keeps its current width when the shortcut reverses mid-flight.
+  const motion = track?.getAnimations().find(animation =>
+    animation instanceof CSSTransition && animation.transitionProperty === "width");
+  sidebarMotion.value = Boolean(motion);
+  layout();
+  if (motion) void motion.finished.catch(() => {}).then(() => {
+    if (ticket !== sidebarGeneration) return;
+    sidebarMotion.value = false;
+    layout();
+  });
+}, { flush: "post" });
 watch(
   [
     () => b.active?.id,
     () => b.active?.splitWith,
-    () => b.state.sidebarCollapsed,
     () => b.sidebarResizing,
     ratio,
     resizing,
@@ -135,6 +152,7 @@ onMounted(() => {
   window.addEventListener("resize", layout);
 });
 onBeforeUnmount(() => {
+  sidebarGeneration++;
   finishResize?.();
   ro?.disconnect();
   window.removeEventListener("resize", layout);
@@ -198,7 +216,7 @@ function split(e: DragEvent) {
   <main
     ref="container"
     class="page-area"
-    :class="{ split: other, dropping: drop, resizing: resizing || b.sidebarResizing }"
+    :class="{ split: other, dropping: drop, resizing: resizing || b.sidebarResizing, 'sidebar-motion-preview': sidebarMotion && !b.native }"
     :style="{ '--split-ratio': ratio }"
     @dragover.prevent="drop = true"
     @dragleave.self="drop = false"

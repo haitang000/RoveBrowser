@@ -1,11 +1,12 @@
 // Check sidebar resizing against real WebView2 viewports and SQLite restart.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { access, mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from '@playwright/test';
 import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
@@ -52,6 +53,29 @@ let child, uiBrowser, pageBrowser, ui;
 let desktopReview = process.env.ERA_SMOKE_REVIEW === '1';
 const send = command => ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
 const sidebarWidth = () => ui.locator('.sidebar-track').evaluate(e => e.getBoundingClientRect().width);
+const execFileAsync = promisify(execFile);
+async function focusShortcut(pages, width) {
+  const markers = await Promise.all(pages.map(page => page.evaluate(() => window.marker)));
+  for (const collapsed of [true, false]) {
+    for (const page of pages) await page.evaluate(() => {
+      window.focusWidths = [];
+      window.onresize = () => window.focusWidths.push(innerWidth);
+    });
+    // Trusted OS input reaches the focused page's native accelerator handler.
+    await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+      resolve('scripts/real-keys.ps1'), '-ProcessId', String(child.pid), '-Action', 'ctrl-shift-f']);
+    await waitFor(async () => await sidebarWidth() === (collapsed ? 0 : width), 'focus shortcut layout');
+    assert.equal(await ui.locator('.reveal-sidebar').count(), 0, 'no reveal button in fully hidden mode');
+    await waitFor(() => savedState().sidebarHidden === collapsed, 'fully hidden state saved');
+    const widths = await ui.locator('.page-pane > .webview-slot').evaluateAll(slots => slots.map(e => e.getBoundingClientRect().width));
+    for (let i = 0; i < pages.length; i++) {
+      await waitFor(async () => Math.abs(await pages[i].evaluate(() => innerWidth) - widths[i]) <= 1, 'final focus viewport');
+      assert.equal(await pages[i].evaluate(() => window.marker), markers[i], 'toggle preserves the open page');
+      assert.ok((await pages[i].evaluate(() => window.focusWidths)).length <= 1, 'renderer reflows once after the snapshot animation');
+    }
+    assert.equal(await ui.locator('.find-bar').count(), 0, 'Ctrl+Shift+F does not open Find');
+  }
+}
 async function useDomInput() {
   await ui.evaluate(() => {
     window.__nativeSidebarFeedback = [];
@@ -156,6 +180,7 @@ try {
   }
   if (process.env.ERA_SMOKE_REVIEW_ONLY !== '1') {
   await drag([left], 336);
+  await focusShortcut([left], 336);
   const leftId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
   await send({ type: 'new', url: base + '/right' });
   const right = await site('/right');
@@ -164,6 +189,7 @@ try {
   await send({ type: 'split', id: leftId, other: rightId });
   await ui.locator('.split-divider').waitFor();
   await drag([left, right], 360);
+  await focusShortcut([left, right], 360);
   await send({ type: 'sidebar' });
   await waitFor(async () => await sidebarWidth() === 0, 'collapsed');
   await send({ type: 'sidebar' });
@@ -174,7 +200,7 @@ try {
   await ui.getByRole('separator', { name: '调整侧栏宽度' }).dblclick();
   await waitFor(() => savedState().sidebarWidth === undefined, 'reset clears preference');
   await waitFor(async () => await sidebarWidth() === 240, 'default restored');
-  const report = { passed: true, profile, checks: ['single viewport', 'split viewports', 'save on release', 'collapse/expand', 'restart', 'reset'] };
+  const report = { passed: true, profile, checks: ['single viewport', 'split viewports', 'save on release', 'collapse/expand', 'Ctrl+Shift+F from a focused page', 'fully hidden sidebar', 'one reflow after perspective motion', 'restart', 'reset'] };
   await writeFile(join(output, 'result.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
   }

@@ -84,6 +84,8 @@ export interface BrowserState {
   closed: Tab[];
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
+  /** Fully hidden mode omits the reveal button as well. */
+  sidebarHidden?: boolean;
   /** Preferred width in CSS pixels; absent uses the responsive default. */
   sidebarWidth?: number;
   settings?: import("./settings").Settings;

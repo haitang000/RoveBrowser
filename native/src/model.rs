@@ -137,6 +137,8 @@ pub struct State {
     pub closed: Vec<Tab>,
     pub theme: String,
     pub sidebar_collapsed: bool,
+    #[serde(default)]
+    pub sidebar_hidden: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_width: Option<f64>,
     #[serde(default)]
@@ -365,6 +367,8 @@ pub enum Command {
     Theme,
     #[serde(rename = "sidebar")]
     Sidebar,
+    #[serde(rename = "sidebarFocus")]
+    SidebarFocus,
     #[serde(rename = "sidebarWidth")]
     SidebarWidth { width: Option<f64> },
     #[serde(rename = "split")]
@@ -387,6 +391,8 @@ pub enum Command {
         viewport: Option<crate::layout::Viewport>,
         #[serde(default, rename = "liveResize")]
         live_resize: bool,
+        #[serde(default, rename = "sidebarMotion")]
+        sidebar_motion: bool,
     },
     #[serde(rename = "overlay")]
     Overlay {
@@ -633,6 +639,7 @@ impl Default for State {
             closed: vec![],
             theme: "light".into(),
             sidebar_collapsed: false,
+            sidebar_hidden: false,
             sidebar_width: None,
             settings: crate::settings::Settings::default(),
             new_tab: crate::new_tab::NewTab::default(),
@@ -1210,7 +1217,10 @@ impl State {
                 }
                 .into()
             }
-            Command::Sidebar => self.sidebar_collapsed = !self.sidebar_collapsed,
+            Command::Sidebar | Command::SidebarFocus => {
+                self.sidebar_collapsed = !self.sidebar_collapsed;
+                self.sidebar_hidden = matches!(c, Command::SidebarFocus) && self.sidebar_collapsed;
+            }
             Command::SidebarWidth { width } => {
                 if width.is_some_and(|width| !width.is_finite()) {
                     return Err("侧栏宽度无效".into());

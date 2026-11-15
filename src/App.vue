@@ -207,7 +207,7 @@ onBeforeUnmount(() => {
         <SidebarResize @resize="pageArea?.resizeSidebar($event)" />
       </div>
       <button
-        v-if="b.state.sidebarCollapsed"
+        v-if="b.state.sidebarCollapsed && !b.state.sidebarHidden"
         class="reveal-sidebar icon-button"
         aria-label="展开侧栏"
         title="展开侧栏 (Ctrl+B)"

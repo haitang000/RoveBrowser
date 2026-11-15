@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)][int]$ProcessId,
-  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'escape')][string]$Action,
+  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'ctrl-shift-f', 'escape')][string]$Action,
   [double]$xFrac = 0.62,
   [double]$yFrac = 0.5
 )
@@ -37,20 +37,23 @@ $y = [int]($rect.Top + ($rect.Bottom - $rect.Top) * $yFrac)
 [Native.Win]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
 [Native.Win]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
 Start-Sleep -Milliseconds 350
-function Send-Key([byte]$key, [bool]$ctrl) {
+function Send-Key([byte]$key, [bool]$ctrl, [bool]$shift = $false) {
   if ($ctrl) {
     [Native.Win]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 30
   }
+  if ($shift) { [Native.Win]::keybd_event(0x10, 0, 0, [UIntPtr]::Zero) }
   [Native.Win]::keybd_event($key, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 60
   [Native.Win]::keybd_event($key, 0, 2, [UIntPtr]::Zero)
+  if ($shift) { [Native.Win]::keybd_event(0x10, 0, 2, [UIntPtr]::Zero) }
   if ($ctrl) { [Native.Win]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero) }
   Start-Sleep -Milliseconds 300
 }
 switch ($Action) {
   'click-page' { }
   'ctrl-j' { Send-Key 0x4A $true }   # Ctrl+J
+  'ctrl-shift-f' { Send-Key 0x46 $true $true }
   'escape' { Send-Key 0x1B $false }  # Esc
 }
 [Native.Win]::SetCursorPos($oldX, $oldY) | Out-Null

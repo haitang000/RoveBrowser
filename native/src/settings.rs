@@ -20,6 +20,7 @@ pub fn default_shortcuts() -> Vec<(&'static str, Shortcut)> {
         ("cycle", 9, true, false, false),
         ("cyclePrevious", 9, true, false, true),
         ("sidebar", 66, true, false, false),
+        ("sidebarFocus", 70, true, false, true),
         ("desk", 220, true, false, true),
         ("settings", 188, true, false, false),
         ("reload", 82, true, false, false),

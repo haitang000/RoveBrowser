@@ -186,6 +186,11 @@ impl Page {
                 self.bounds.set(Some(next));
                 return Ok(());
             }
+            if self.resize_surface.dragging() {
+                self.resize_surface.resize(next)?;
+                self.bounds.set(Some(next));
+                return Ok(());
+            }
             self.resize_surface.end();
             // Move the HWND before asking Chromium to reflow. Wry does these in
             // the opposite order, making visible edges wait on renderer work.
@@ -262,6 +267,7 @@ struct PageLayout {
     sidebar: Option<Rect>,
     viewport: Option<crate::layout::Viewport>,
     live_resize: bool,
+    sidebar_motion: bool,
 }
 /// The runtime state every page's events share. Bundled so registering a page
 /// stays a short argument list as more event families move onto it.
@@ -338,6 +344,7 @@ struct App {
     sidebar_rect: Option<Rect>,
     sidebar_expected_width: Option<f64>,
     live_resize: bool,
+    sidebar_motion: bool,
     overlay: bool,
     ready: bool,
     last_error: Option<String>,
@@ -466,6 +473,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         sidebar_rect: None,
         sidebar_expected_width: None,
         live_resize: false,
+        sidebar_motion: false,
         overlay: false,
         ready: false,
         last_error: None,
@@ -1849,9 +1857,19 @@ impl App {
                 None
             };
             if let Some(r) = r.filter(|r| r.width > 0. && r.height > 0.) {
+                if self.sidebar_motion && !self.overlay && self.peek.is_none()
+                    && page.visible.get() && !page.resize_surface.dragging()
+                    && !page.resize_surface.relocating() && !self.resize_appearance.reduce_motion {
+                    if let Some(bounds) = page.bounds.get() {
+                        page.clip.clear(page.view.hwnd())?;
+                        page.resize_surface.begin(bounds, r.corners, window.scale_factor())?;
+                        // Reuse the resize gesture's plane: the left edge recedes.
+                        page.resize_surface.pointer(bounds[0] as f32, (bounds[1] + bounds[3] / 2) as f32);
+                    }
+                }
                 if self.live_resize { page.clip.clear(page.view.hwnd())?; }
                 page.set_window_bounds(self.bounds(r), window.scale_factor())?;
-                if !self.live_resize {
+                if !self.live_resize && !page.resize_surface.dragging() {
                     page.clip.apply(page.view.hwnd(), r.corners, window.scale_factor())?;
                 }
                 visibility_changed |= !page.visible.get();
@@ -2019,7 +2037,17 @@ impl App {
         // an older frame during a navigation or overlay transition.
         self.receive_split_resize();
         self.receive_sidebar_resize();
-        for page in self.pages.values() { page.resize_surface.end(); }
+        self.sidebar_motion = false;
+        let mut errors = vec![];
+        for page in self.pages.values() {
+            // A cancelled sidebar animation has cached presentation bounds;
+            // commit those before dropping its surface or the HWND stays behind.
+            if page.resize_surface.dragging() && !page.resize_surface.relocating() {
+                if let Err(error) = page.split_pane().end_preview(false) { errors.push(error); }
+            }
+            page.resize_surface.end();
+        }
+        for error in errors { self.error(error); }
     }
     fn receive_sidebar_resize(&mut self) {
         let Some(update) = self.sidebar_handle.as_ref().and_then(|handle| handle.take_update()) else { return; };
@@ -2140,6 +2168,7 @@ impl App {
             "close" => self.command(Command::Close { id: None }, None),
             "restore" => self.command(Command::Restore, None),
             "sidebar" => self.command(Command::Sidebar, None),
+            "sidebarFocus" => self.command(Command::SidebarFocus, None),
             "reload" => self.command(Command::Reload, None),
             "back" => self.command(Command::Back, None),
             "forward" => self.command(Command::Forward, None),
@@ -2519,7 +2548,7 @@ impl App {
                 }
                 return;
             }
-            Command::Layout { primary, secondary, sidebar, viewport, live_resize } => {
+            Command::Layout { primary, secondary, sidebar, viewport, live_resize, sidebar_motion } => {
                 self.receive_sidebar_resize();
                 if self.split_handle.as_ref().is_some_and(|handle| handle.dragging())
                     || self.sidebar_handle.as_ref().is_some_and(|handle| handle.dragging()) { return; }
@@ -2530,6 +2559,7 @@ impl App {
                 // A renderer can finish an older resize after the native window
                 // has moved on. It must not shrink the pages back to that frame.
                 if viewport.is_some_and(|viewport| !viewport.matches(current)) { return; }
+                let finish_sidebar = self.sidebar_motion && !sidebar_motion;
                 if primary.valid() && secondary.is_none_or(|r| r.valid()) {
                     self.primary = primary;
                     self.secondary = secondary;
@@ -2537,6 +2567,7 @@ impl App {
                     self.sidebar_rect = sidebar;
                     self.sidebar_expected_width = None;
                     self.live_resize = live_resize;
+                    self.sidebar_motion = sidebar_motion;
                 } else {
                     return;
                 }
@@ -2554,6 +2585,15 @@ impl App {
                     return;
                 }
                 let result = self.sync_page_bounds().and_then(|changed| {
+                    if finish_sidebar {
+                        for page in self.pages.values() {
+                            if page.resize_surface.dragging() && !page.resize_surface.relocating() {
+                                page.split_pane().end_preview(true)?;
+                            }
+                        }
+                        // Reapply final corners after releasing the frozen plane.
+                        self.sync_page_bounds()?;
+                    }
                     // Showing a newly created controller can change its z-order.
                     if changed { self.sync_layout() } else { Ok(()) }
                 });
@@ -2789,6 +2829,19 @@ impl App {
                 }
                 return;
             }
+            Command::Sidebar | Command::SidebarFocus => {
+                // Reversing a shortcut keeps the current compositor plane alive.
+                // Ordinary sync() cancels resize surfaces, so only publish state.
+                if let Some(handle) = &self.sidebar_handle { handle.cancel(); }
+                if let Some(handle) = &self.split_handle { handle.cancel(); }
+                self.receive_sidebar_resize();
+                self.receive_split_resize();
+                self.dismiss_tab_preview();
+                if let Err(error) = self.state.apply(&c) { self.error(error); return; }
+                self.save();
+                self.publish();
+                return;
+            }
             _ => {
                 self.dismiss_tab_preview();
                 if matches!(
@@ -2903,11 +2956,11 @@ impl ApplicationHandler<Event> for App {
                 .with_ipc_handler(move|req|{
                     if req.uri().scheme_str()!=Some("https")||req.uri().host()!=Some("era.ui")||req.uri().path()!="/index.html"||req.body().len()>16384{return}
                     if let Ok(c)=serde_json::from_str::<Command>(req.body()){
-                        if let Command::Layout { primary, secondary, sidebar, viewport, live_resize } = c {
+                        if let Command::Layout { primary, secondary, sidebar, viewport, live_resize, sidebar_motion } = c {
                             if primary.valid() && secondary.is_none_or(|r| r.valid())
                                 && sidebar.is_none_or(|r| r.valid())
                                 && viewport.is_none_or(|v| v.valid())
-                                && pending_layout.replace(Some(PageLayout { primary, secondary, sidebar, viewport, live_resize })).is_none() {
+                                && pending_layout.replace(Some(PageLayout { primary, secondary, sidebar, viewport, live_resize, sidebar_motion })).is_none() {
                                 let _ = proxy.send_event(Event::Layout);
                             }
                         } else { let _=proxy.send_event(Event::Command(c)); }
@@ -3013,7 +3066,7 @@ impl ApplicationHandler<Event> for App {
             Event::SidebarResize => self.receive_sidebar_resize(),
             Event::Layout => {
                 if let Some(layout) = self.pending_layout.take() {
-                    self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, sidebar: layout.sidebar, viewport: layout.viewport, live_resize: layout.live_resize }, Some(event_loop));
+                    self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, sidebar: layout.sidebar, viewport: layout.viewport, live_resize: layout.live_resize, sidebar_motion: layout.sidebar_motion }, Some(event_loop));
                 }
             }
             Event::DataCleared(kind, ok) => {
