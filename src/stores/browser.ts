@@ -67,6 +67,8 @@ export const useBrowser = defineStore("browser", () => {
     commandMode = ref<"new" | "edit">("new"),
     deskOpen = ref(false),
     settingsOpen = ref(false),
+    creationMenu = ref<Rect>(),
+    spaceCreation = ref<LookFields & { name: string; icon?: string }>(),
     spaceEditor = ref<string>(),
     spacePreview = ref<{ id: string; look: LookFields }>(),
     dragging = ref(false),
@@ -133,6 +135,7 @@ export const useBrowser = defineStore("browser", () => {
   const onboardingOpen = computed(() => state.value.onboarding?.completed === false);
   function openOnboarding() {
     commandOpen.value = false; settingsOpen.value = false; deskOpen.value = false;
+    closeSpaceCreation();
     contextMenu.value = undefined; downloadsOpen.value = false; closeFind();
     send({ type: "onboardingOpen" });
   }
@@ -155,6 +158,7 @@ export const useBrowser = defineStore("browser", () => {
     spacePreview.value = undefined;
   }
   function toggleSpaceEditor(id: string) {
+    closeSpaceCreation();
     if (spaceEditor.value === id) {
       closeSpaceEditor();
       return;
@@ -168,15 +172,40 @@ export const useBrowser = defineStore("browser", () => {
   function previewSpace(id: string, look: LookFields) {
     spacePreview.value = { id, look };
   }
+  function closeSpaceCreation() {
+    creationMenu.value = undefined;
+    spaceCreation.value = undefined;
+  }
+  function openSpaceCreation() {
+    if (state.value.spaces.length >= 16) {
+      error.value = "最多创建 16 个工作区";
+      return;
+    }
+    commandOpen.value = false;
+    deskOpen.value = false;
+    settingsOpen.value = false;
+    contextMenu.value = undefined;
+    creationMenu.value = undefined;
+    closeSpaceEditor();
+    closeDownloads();
+    closeFind();
+    if (peek.value) send({ type: "peekClose" });
+    error.value = "";
+    if (state.value.sidebarCollapsed) send({ type: "sidebar" });
+    spaceCreation.value = { name: "", color: "graphite" };
+  }
   watch(() => state.value.activeSpace, (id) => {
     if (spaceEditor.value && spaceEditor.value !== id) closeSpaceEditor();
+    closeSpaceCreation();
   });
   watch([commandOpen, deskOpen, settingsOpen], ([command, desk, settings]) => {
     if ((command || desk || settings) && spaceEditor.value) closeSpaceEditor();
+    if (command || desk || settings) closeSpaceCreation();
   });
   function openSettings(pane?: SettingsPane) {
     commandOpen.value = false; settingsOpen.value = false; deskOpen.value = false;
     closeSpaceEditor();
+    closeSpaceCreation();
     send({ type: "settingsOpen", ...(pane ? { pane } : {}) });
   }
   const overlay = computed(
@@ -184,6 +213,8 @@ export const useBrowser = defineStore("browser", () => {
       commandOpen.value ||
       deskOpen.value ||
       settingsOpen.value ||
+      Boolean(creationMenu.value) ||
+      Boolean(spaceCreation.value) ||
       Boolean(spaceEditor.value) ||
       Boolean(contextMenu.value) ||
       dragging.value,
@@ -333,6 +364,7 @@ export const useBrowser = defineStore("browser", () => {
     }
   }
   function openCommand(mode: "new" | "edit" = "new") {
+    closeSpaceCreation();
     error.value = "";
     commandMode.value = mode;
     commandOpen.value = true;
@@ -452,6 +484,7 @@ export const useBrowser = defineStore("browser", () => {
       settingsOpen.value = false;
       contextMenu.value = undefined;
       closeSpaceEditor();
+      closeSpaceCreation();
     }
     // Reveal the sidebar trigger when opened from a page shortcut.
     if (next && state.value.sidebarCollapsed) send({ type: "sidebar" });
@@ -643,11 +676,11 @@ export const useBrowser = defineStore("browser", () => {
   // Only transient UI state crosses the trusted popup bridge. Each renderer keeps
   // its own DOM; native browser state continues to come from the host.
   let receivingPopup = false;
-  watch([commandOpen, deskOpen, settingsOpen, contextMenu, spaceEditor], (surfaces) => {
+  watch([commandOpen, deskOpen, settingsOpen, contextMenu, spaceEditor, creationMenu, spaceCreation], (surfaces) => {
     if (surfaces.some(Boolean)) closeDownloads();
   });
   watch(() => peek.value?.id, (id) => { if (id) closeDownloads(); });
-  const popupFields = { commandOpen, commandMode, deskOpen, settingsOpen, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, downloadsFocus, downloadsAnchor };
+  const popupFields = { commandOpen, commandMode, deskOpen, settingsOpen, creationMenu, spaceCreation, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, downloadsFocus, downloadsAnchor };
   function receivePopup(patch: Record<string, unknown>) {
     receivingPopup = true;
     for (const [key, value] of Object.entries(patch)) {
@@ -762,6 +795,10 @@ export const useBrowser = defineStore("browser", () => {
     commandMode,
     deskOpen,
     settingsOpen,
+    creationMenu,
+    spaceCreation,
+    openSpaceCreation,
+    closeSpaceCreation,
     spaceEditor,
     spacePreview,
     closeSpaceEditor,

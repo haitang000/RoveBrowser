@@ -60,9 +60,11 @@ try {
   pageBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port + 1}`), 'webpage debugger');
   const site = path => waitFor(() => pageBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === base + path), path);
   const left = await site('/left'); await left.waitForSelector('h1');
+  await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('title')) === base + '/left', 'left tab state synchronized');
   const leftId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
   await send({ type: 'new', url: base + '/right' });
   const right = await site('/right'); await right.waitForSelector('h1');
+  await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('title')) === base + '/right', 'right tab state synchronized');
   const rightId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
   await send({ type: 'activate', id: leftId });
   await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id')) === leftId, 'primary activation');

@@ -10,9 +10,13 @@ test("command bar floats over the current page and follows its bounds", async ({
     await expect(page.locator(".command-scrim")).toHaveCSS("opacity", "1");
     await expect(page.getByRole("combobox")).toHaveValue(/^https:\/\/en\.wikipedia\.org\/?$/);
     for (let i = 0; i < 2; i++) {
+      await expect.poll(() => page.evaluate(() => {
+        const area = document.querySelector(".page-area")!.getBoundingClientRect();
+        const panel = document.querySelector(".command-panel")!.getBoundingClientRect();
+        return Math.abs(panel.x + panel.width / 2 - area.x - area.width / 2);
+      })).toBeLessThan(1);
       const area = await page.locator(".page-area").boundingBox();
       const panel = await page.locator(".command-panel").boundingBox();
-      expect(Math.abs(panel!.x + panel!.width / 2 - area!.x - area!.width / 2)).toBeLessThan(1);
       expect(panel!.x).toBeGreaterThan(area!.x);
       expect(panel!.y + panel!.height).toBeLessThan(area!.y + area!.height);
       await page.keyboard.press("Control+b");

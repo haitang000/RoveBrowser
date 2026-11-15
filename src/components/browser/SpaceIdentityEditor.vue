@@ -13,6 +13,7 @@ import {
 } from "../../lib/space-icon";
 
 const name = defineModel<string>("name", { required: true });
+defineProps<{ placeholder?: string }>();
 const icon = defineModel<string | undefined>("icon");
 const picking = defineModel<boolean>("picking", { default: false });
 const fieldId = `space-name-${Math.random().toString(36).slice(2, 8)}`;
@@ -93,6 +94,7 @@ function onEsc(event: KeyboardEvent) {
       <input
         :id="fieldId"
         v-model="name"
+        :placeholder="placeholder"
         aria-label="工作区名称"
         maxlength="40"
         autocomplete="off"

@@ -60,9 +60,9 @@ try {
         & node (Join-Path $PSScriptRoot 'native-profile-fixture.mjs') $profile
         if ($LASTEXITCODE -ne 0) { throw 'Profile fixture creation failed' }
         Set-Content -LiteralPath (Join-Path $profile 'keep.txt') -Value 'user data marker'
-        Install $newSetup (Join-Path $testRoot 'beta6-upgrade.log') $false
+        Install $newSetup (Join-Path $testRoot 'upgrade.log') $false
     } finally { Pop-Location }
-    Check 'Beta6Version' ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayVersion -eq $version)
+    Check 'ReleaseVersion' ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayVersion -eq $version)
     Check 'BinaryMatchesRelease' ((Get-FileHash -LiteralPath $installedExe).Hash -eq (Get-FileHash -LiteralPath (Join-Path $payload 'Rove.exe')).Hash)
     $command = (Get-Item -LiteralPath "$progKey\shell\open\command").GetValue('')
     Check 'QuotedUnicodeCommand' ($command -eq "`"$installedExe`" -- `"%1`"")
@@ -73,10 +73,16 @@ try {
     try {
         $env:ERA_DATA_DIR = $profile
         $process = Start-Process -FilePath $installedExe -ArgumentList @('--','"http://127.0.0.1:9/beta6?source=installer&b=2"') -WindowStyle Hidden -PassThru
-        Start-Sleep -Seconds 5
-        Check 'InstalledAppRuns' (-not $process.HasExited)
-        & node (Join-Path $PSScriptRoot 'native-profile-fixture.mjs') $profile 'http://127.0.0.1:9/beta6?source=installer&b=2'
-        Check 'InstalledColdLinkLaunch' ($LASTEXITCODE -eq 0)
+        $launchDeadline = [DateTime]::UtcNow.AddSeconds(45)
+        $urlSaved = $false
+        do {
+            Start-Sleep -Milliseconds 500
+            $process.Refresh()
+            Check 'InstalledAppRuns' (-not $process.HasExited)
+            & node (Join-Path $PSScriptRoot 'native-profile-fixture.mjs') $profile 'http://127.0.0.1:9/beta6?source=installer&b=2' 2>$null
+            $urlSaved = $LASTEXITCODE -eq 0
+        } while (-not $urlSaved -and [DateTime]::UtcNow -lt $launchDeadline)
+        Check 'InstalledColdLinkLaunch' $urlSaved
     } finally {
         if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit(5000) | Out-Null }
         $env:ERA_DATA_DIR = $previousDataDir

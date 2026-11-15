@@ -67,12 +67,12 @@ try{
   checks.push('分屏+Peek：三个真实网页背景均保留，Esc只关闭命令栏并将焦点返回Peek');
   await popup.getByRole('button',{name:'关闭 Peek',exact:true}).click();
   await popup.locator('.peek-layer').waitFor({state:'detached'});
-  await ui.getByRole('button',{name:'工作区与外观',exact:true}).click();
-  await popup.getByRole('dialog',{name:'工作区与外观'}).waitFor();
+  await ui.getByRole('button',{name:'新建',exact:true}).click();
+  await popup.getByRole('menu',{name:'新建',exact:true}).waitFor();
   assert.equal(await ui.getByRole('dialog').count(),0);
   for(const page of [first,second])assert.equal(await page.evaluate(()=>document.visibilityState),'visible');
   await popup.keyboard.press('Escape');
-  await popup.getByRole('dialog',{name:'工作区与外观'}).waitFor({state:'detached'});
+  await popup.getByRole('menu',{name:'新建',exact:true}).waitFor({state:'detached'});
   await ui.getByRole('button',{name:'全部标签页',exact:true}).click();
   await popup.getByRole('dialog',{name:'全部标签页'}).waitFor();
   await popup.keyboard.press('Escape');

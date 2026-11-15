@@ -41,6 +41,14 @@ async function launch(){
   uiBrowser=await waitFor(()=>chromium.connectOverCDP(`http://127.0.0.1:${port}`),'UI debugger')
   const ui=await waitFor(async()=>uiBrowser.contexts().flatMap(c=>c.pages()).find(p=>p.url()==='https://era.ui/index.html'),'UI page')
   await ui.waitForSelector('.sidebar')
+  await ui.evaluate(() => {
+    window.__nativeSmokeState = window.__ERA_INITIAL_STATE__;
+    const receive = window.__ERA_RECEIVE__;
+    window.__ERA_RECEIVE__ = event => {
+      if (event.type === 'state') window.__nativeSmokeState = event.state;
+      receive(event);
+    };
+  });
   await ui.evaluate(() => window.ipc.postMessage(JSON.stringify({ type: 'settingsUpdate', settings: { ...window.__ERA_INITIAL_STATE__.settings, askBeforeQuit: false } })))
   popup=await waitFor(()=>ui.context().pages().find(p=>p.url().endsWith('?popup')),'popup renderer')
   // MainWindowHandle is nonzero only for a visible top-level process window.
@@ -132,6 +140,7 @@ try{
   await waitFor(()=>ui.locator('.favorite-tile').filter({has:ui.getByRole('button',{name:'我的常用网页',exact:true})}).locator('img').getAttribute('src').then(src=>src?.startsWith('data:image/png;base64,')),'favorite PNG cached');
   await favoriteWeb.evaluate(()=>window.__favoriteMarker='one shared favorite page');
   await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();
+  await waitFor(()=>ui.locator('.sidebar-header .space-name').textContent().then(name=>name==='Work'),'work space selected before favorite');
   await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click();
   assert.equal(await favoriteWeb.evaluate(()=>window.__favoriteMarker),'one shared favorite page');
   await waitFor(async()=>await ui.locator('.space-name').last().textContent()==='Work','favorite remains in current workspace');
@@ -139,13 +148,18 @@ try{
   await waitFor(()=>Promise.resolve(favoriteWeb.isClosed()),'favorite controller unloaded');
   assert.match(await ui.locator('.favorite-tile').filter({has:ui.getByRole('button',{name:'我的常用网页',exact:true})}).locator('img').getAttribute('src'),/^data:image\/png;base64,/);
   await ui.getByRole('button',{name:'工作区 Personal',exact:true}).click();
+  await waitFor(()=>ui.locator('.sidebar-header .space-name').textContent().then(name=>name==='Personal'),'personal space selected before pin');
   await ui.getByRole('tab',{name:'First fixture',exact:false}).click();
+  await waitFor(()=>ui.evaluate(url=>window.__nativeSmokeState.tabs.find(t=>t.id===window.__nativeSmokeState.activeTab)?.url===url,base+'/first'),'source tab selected before pin');
   assert.equal(await web.evaluate(()=>window.__favoriteMarker),'reuse existing page');
   checks.push('顶部置顶网站经右键编辑、拖拽排序和移除，图标卸载后保留；全工作区复用一个独立控制器，卸载后固定项保留');
   await send(ui,{type:'pin'});
   const retainedPin=ui.locator('.pinned-tabs .tab-row.selected');await retainedPin.waitFor();
+  await waitFor(()=>ui.evaluate(()=>Boolean(window.__nativeSmokeState.tabs.find(t=>t.id===window.__nativeSmokeState.activeTab)?.bookmarkId)),'pin saved before reading identity');
   const retainedID=await retainedPin.getAttribute('data-bookmark-id');
+  assert.equal(retainedID,await ui.evaluate(()=>window.__nativeSmokeState.tabs.find(t=>t.id===window.__nativeSmokeState.activeTab).bookmarkId));
   await web.getByRole('link',{name:'Next',exact:true}).click();await web.waitForURL(base+'/second');
+  await waitFor(()=>ui.evaluate(url=>window.__nativeSmokeState.tabs.some(t=>t.url===url&&!t.loading),base+'/second'),'pin navigation finished in host');
   assert.equal(await retainedPin.locator('.tab-title').textContent(),'First fixture');
   await send(ui,{type:'bookmarkReset',id:retainedID});await web.waitForURL(base+'/first');
   await web.evaluate(()=>window.__pinMarker='controller retained');
@@ -156,13 +170,16 @@ try{
   await waitFor(()=>ui.getByRole('tab',{selected:true}).getAttribute('data-bookmark-id').then(id=>id===retainedID),'pin active after reopening');
   const countBeforeSignIn=await ui.getByRole('tab').count();
   await web.getByRole('link',{name:'Sign in',exact:true}).click();await web.waitForURL(`http://localhost:${server.address().port}/login`);
+  await waitFor(()=>ui.evaluate(url=>window.__nativeSmokeState.tabs.some(t=>t.url===url&&!t.loading),`http://localhost:${server.address().port}/login`),'sign-in navigation finished in host');
   assert.equal(await ui.getByRole('tab').count(),countBeforeSignIn);
   await send(ui,{type:'bookmarkReset',id:retainedID});await web.waitForURL(base+'/first');
   checks.push('固定项保持保存的标题和网址；同站导航与返回起始网址复用控制器，跨站链接新开标签，登录链接在原页继续');
   await web.evaluate(()=>window.__promotionMarker='same controller through all representations');
   await send(ui,{type:'favoriteTab',id:retainedID});
   const promoted=ui.locator('.favorites').getByRole('button',{name:'First fixture',exact:true});await promoted.waitFor();
-  await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();await promoted.click();
+  await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();
+  await waitFor(()=>ui.locator('.sidebar-header .space-name').textContent().then(name=>name==='Work'),'work space selected before promoted favorite');
+  await promoted.click();
   assert.equal(await web.evaluate(()=>window.__promotionMarker),'same controller through all representations');
   await send(ui,{type:'bookmarkPin',id:retainedID,spaceId:'personal'});
   await send(ui,{type:'bookmarkUnpin',id:retainedID,spaceId:'personal'});
@@ -174,6 +191,7 @@ try{
   const middleTab=ui.getByRole('tab',{name:'Second fixture'});
   await middleTab.waitFor();
   await ui.getByRole('tab',{name:'First fixture'}).click();
+  await waitFor(()=>ui.evaluate(url=>window.__nativeSmokeState.tabs.find(t=>t.id===window.__nativeSmokeState.activeTab)?.url===url,base+'/first'),'first tab active before background close');
   await middleTab.click({button:'middle'});
   await middleTab.waitFor({state:'detached'});
   assert.equal(await ui.getByRole('tab',{selected:true}).getAttribute('title'),base+'/first');
@@ -331,7 +349,7 @@ try{
   if(uiBrowser){
     const ui=uiBrowser.contexts().flatMap(c=>c.pages()).find(p=>p.url()==='https://era.ui/index.html');
     if(ui){
-      await writeFile(join(output,'native-failure.json'),JSON.stringify({checks,error:String(error),ui:await popup.locator('.peek-layer').evaluateAll(es=>es.map(e=>({html:e.outerHTML.slice(0,6000),animations:e.getAnimations({subtree:true}).map(a=>({state:a.playState,time:a.currentTime}))}))).catch(()=>null)},null,2));
+      await writeFile(join(output,'native-failure.json'),JSON.stringify({checks,error:String(error),state:await ui.evaluate(()=>window.__nativeSmokeState).catch(()=>null),ui:await popup.locator('.peek-layer').evaluateAll(es=>es.map(e=>({html:e.outerHTML.slice(0,6000),animations:e.getAnimations({subtree:true}).map(a=>({state:a.playState,time:a.currentTime}))}))).catch(()=>null)},null,2));
       await ui.screenshot({path:join(output,'native-failure.png')}).catch(()=>{});
     }
   }

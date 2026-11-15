@@ -135,8 +135,7 @@ function runAction(id: string) {
   else if (id === "close-below") b.send({ type: "closeBelow" });
   else if (id === "reopen") b.send({ type: "restore" });
   else if (id === "new-space") {
-    const colors = ["sky", "sage", "sand", "rose", "lavender", "mint", "peach", "graphite"];
-    b.send({ type: "spaceCreate", name: `Space ${b.state.spaces.length + 1}`, color: colors[b.state.spaces.length % colors.length] });
+    b.openSpaceCreation();
   } else if (id.startsWith("space:")) b.send({ type: "space", id: id.slice(6) });
   else if (id.startsWith("move:") && active) b.send({ type: "move", id: active.id, spaceId: id.slice(5) });
   b.commandOpen = false;

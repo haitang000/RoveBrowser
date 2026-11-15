@@ -5,6 +5,17 @@ import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 const b = useBrowser();
 const downloadButton = ref<HTMLElement>();
+function toggleCreationMenu(event: MouseEvent) {
+  if (b.creationMenu) { b.creationMenu = undefined; return; }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  b.commandOpen = false;
+  b.settingsOpen = false;
+  b.deskOpen = false;
+  b.contextMenu = undefined;
+  b.closeSpaceEditor();
+  b.closeDownloads();
+  b.creationMenu = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+}
 let observer: ResizeObserver;
 function syncAnchor() {
   const rect = downloadButton.value?.getBoundingClientRect();
@@ -75,12 +86,16 @@ defineProps<{ swipeShares?: Record<string, number> | null }>();
       </button>
     </div>
     <button
-      class="icon-button"
-      title="工作区与外观"
-      aria-label="工作区与外观"
-      @click="b.settingsOpen = true"
+      class="icon-button creation-trigger"
+      :class="{ active: b.creationMenu }"
+      title="新建"
+      aria-label="新建"
+      aria-haspopup="menu"
+      :aria-expanded="Boolean(b.creationMenu)"
+      aria-controls="creation-menu"
+      @click="toggleCreationMenu"
     >
-      <Icon name="plus" :size="14" />
+      <Icon :name="b.creationMenu ? 'close' : 'plus'" :size="14" />
     </button>
   </footer>
 </template>

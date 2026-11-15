@@ -13,6 +13,7 @@ import FindBar from "./FindBar.vue";
 import StatusToast from "./StatusToast.vue";
 import ActionToast from "./ActionToast.vue";
 import DownloadsPanel from "./DownloadsPanel.vue";
+import CreationMenu from "./CreationMenu.vue";
 import { browserKey } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
 import { frameOf } from "../../lib/space-look";
@@ -54,7 +55,7 @@ function report() {
     return surfaceRegion(bounds, shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout, downloads });
-  const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
+  const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.creationMenu ? "creation" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
   const focus = Boolean(active && active !== focusKey);
   focusKey = active;
   if (next !== last || focus) {
@@ -62,7 +63,7 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus, downloads });
   }
   if (focus) {
-    const selector = active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : ".context-menu input, .context-menu button";
+    const selector = active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "creation" ? ".creation-menu button:not(:disabled)" : ".context-menu input, .context-menu button";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }
@@ -90,5 +91,5 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
-  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
+  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><CreationMenu v-if="b.creationMenu" /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
 </template>

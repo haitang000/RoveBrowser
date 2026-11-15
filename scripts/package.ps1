@@ -20,7 +20,7 @@ Set-Content -LiteralPath (Join-Path $bundleRoot '运行说明.txt') -Encoding ut
 需要 Windows 10/11 和 Microsoft Edge WebView2 Evergreen Runtime。
 前端资源已嵌入，不需要安装 Node.js 或 Rust 才能运行。
 默认数据沿用当前用户 LocalAppData 下的 EraBrowser 目录，保留已有标签和登录状态。
-这是基础开发版，功能范围与已知限制见 README.md 和 docs/VALIDATION.md。
+版本与功能范围见 README.md，更新说明见 docs/releases，验证记录与已知限制见 docs/VALIDATION.md。
 '@
 if ($SkipArchive) {
     Get-Item -LiteralPath $bundleRoot

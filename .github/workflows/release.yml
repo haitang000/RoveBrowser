@@ -88,5 +88,12 @@ jobs:
           foreach ($artifact in @($archives[0], $installers[0])) {
             if ($artifact.Length -le 0) { throw "Release artifact is empty: $($artifact.FullName)" }
           }
-          gh release upload $env:RELEASE_TAG $archives[0].FullName $installers[0].FullName --clobber
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($env:RELEASE_TAG -ne "v$version") { throw 'Release tag does not match package.json.' }
+          $checksums = Join-Path release 'SHA256SUMS.txt'
+          @($archives[0], $installers[0]) | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -LiteralPath $checksums -Encoding ascii
+          gh release upload $env:RELEASE_TAG $archives[0].FullName $installers[0].FullName $checksums --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }

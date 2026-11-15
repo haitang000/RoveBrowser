@@ -25,7 +25,7 @@ test('removes the manager and heading, caps additions at eight and allows reorde
   await expect(page.getByRole('tab', { name: 'Wikipedia' })).toBeVisible();
   await page.locator('.favorite-tile').last().dragTo(page.locator('.favorite-tile').first());
   await expect(page.locator('.favorite-open').first()).toHaveAttribute('aria-label', 'Linear');
-  await page.getByRole('button', { name: '工作区与外观', exact: true }).click();
+  await page.locator('.sidebar-header .space-name').click();
   await expect(page.getByRole('button', { name: '管理顶部常用网站', exact: true })).toHaveCount(0);
 });
 
@@ -45,7 +45,7 @@ test('context editing and tab promotion work without the manager', async ({ page
   await page.getByRole('button', { name: '工作区 Work', exact: true }).click();
   await edited.click();
   await expect(edited).toHaveClass(/chosen/);
-  await expect(page.getByRole('heading', { name: 'Work', exact: true })).toBeVisible();
+  await expect(page.locator('.sidebar-header .space-name')).toHaveText('Work');
   await expect(page.getByRole('dialog', { name: '顶部常用网站', exact: true })).toHaveCount(0);
 });
 

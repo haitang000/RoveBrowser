@@ -77,9 +77,9 @@ test("unloaded favorites remain unloaded; snapshots update while a split is prev
 test("preview stays inside a narrow viewport and works with reduced motion and dark theme", async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 400 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.getByRole('button', { name: '工作区与外观', exact: true }).click();
-  await page.getByRole('button', { name: '切换深色模式', exact: true }).click();
-  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('combobox', { name: '外观', exact: true }).selectOption('dark');
+  await page.keyboard.press('Control+w');
   await page.locator('.pinned-tabs [data-bookmark-id="pin-wiki"]').hover();
   await expect(page.locator(preview)).toBeVisible();
   const rect = await page.locator(preview).boundingBox();

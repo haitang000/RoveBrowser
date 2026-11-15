@@ -22,6 +22,7 @@ import { frameOf, lookOf } from "./lib/space-look";
 import { resizeAppearance } from "./lib/resize-appearance";
 import SpaceEditor from "./components/browser/SpaceEditor.vue";
 import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
+import CreationMenu from "./components/browser/CreationMenu.vue";
 import { shareSnapshot } from "./lib/state-snapshot";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
@@ -30,6 +31,7 @@ const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)")
 const transparencyReduced = ref(reducedTransparency.matches);
 const glassAllowed = computed(() => !transparencyReduced.value);
 const shownSpace = computed(() => {
+  if (b.spaceCreation) return b.spaceCreation;
   const preview = b.spacePreview;
   return preview && preview.id === b.space?.id ? { ...b.space, ...preview.look } : b.space;
 });
@@ -191,6 +193,7 @@ onBeforeUnmount(() => {
       glass: glassActive,
       'glass-neutral': glassActive && painted.neutralGlass,
       'custom-frame': painted.custom,
+      'space-creating': Boolean(b.spaceCreation),
     }"
     :style="shellStyle"
   >
@@ -216,7 +219,7 @@ onBeforeUnmount(() => {
         <Icon name="sidebar" /></button
       ><PageArea ref="pageArea"><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
     </div>
-    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><SpaceEditor v-if="b.spaceEditor" :key="b.spaceEditor" /><TabPreview />
+    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><SpaceEditor v-if="b.spaceEditor" :key="b.spaceEditor" /><CreationMenu v-if="!b.native && b.creationMenu" /><TabPreview />
     <ErrorToast v-if="!b.native" /><DownloadsPanel v-if="!b.native" />
     </template>
   </div>

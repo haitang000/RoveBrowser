@@ -24,7 +24,7 @@ public static class RoveRegions {
     int type = GetWindowRgn(window, region);
     RECT box; int ok = GetRgnBox(region, out box);
     DeleteObject(region);
-    Rows.Add(string.Format("{{\"class\":\"{0}\",\"regionType\":{1},\"ok\":{2},\"left\":{3},\"top\":{4},\"right\":{5},\"bottom\":{6}}}", name, type, ok, box.Left, box.Top, box.Right, box.Bottom));
+    Rows.Add(string.Format("{{\"class\":\"{0}\",\"regionType\":{1},\"ok\":{2},\"left\":{3},\"top\":{4},\"right\":{5},\"bottom\":{6},\"visible\":{7}}}", name, type, ok, box.Left, box.Top, box.Right, box.Bottom, IsWindowVisible(window) ? "true" : "false"));
     IntPtr child = GetWindow(window, 5);
     while (child != IntPtr.Zero) { Walk(child); child = GetWindow(child, 2); }
   }

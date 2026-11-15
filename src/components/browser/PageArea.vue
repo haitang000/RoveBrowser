@@ -216,6 +216,8 @@ function split(e: DragEvent) {
   <main
     ref="container"
     class="page-area"
+    :inert="Boolean(b.spaceCreation)"
+    :aria-hidden="b.spaceCreation ? true : undefined"
     :class="{ split: other, dropping: drop, resizing: resizing || b.sidebarResizing, 'sidebar-motion-preview': sidebarMotion && !b.native }"
     :style="{ '--split-ratio': ratio }"
     @dragover.prevent="drop = true"

@@ -1,6 +1,6 @@
 {
   "name": "rove",
-  "version": "0.1.0-beta7",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -24,6 +24,7 @@
     "test:native:favicons": "node scripts/native-favicon-smoke.mjs",
     "test:native:command": "node scripts/native-command-smoke.mjs",
     "test:native:spaces": "node scripts/native-spaces-smoke.mjs",
+    "test:native:space-create": "node scripts/native-space-creation-smoke.mjs",
     "test:native:preview": "node scripts/native-tab-preview-smoke.mjs",
     "test:native:settings": "node scripts/native-settings-smoke.mjs",
     "test:native:new-tab": "node scripts/native-new-tab-smoke.mjs",

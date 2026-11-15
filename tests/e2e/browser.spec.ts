@@ -77,14 +77,14 @@ test("spaces, dark mode, pinning and split container", async ({ page }) => {
   await expect(page.locator("iframe")).toHaveCount(0);
   await page.getByRole("button", { name: "关闭分屏" }).click();
   await expect(page.locator(".page-pane")).toHaveCount(1);
-  await page.getByRole("button", { name: "工作区与外观" }).click();
-  await page.getByRole("button", { name: "切换深色模式" }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator(".browser-shell")).toHaveCSS(
     "background-color",
     "rgb(29, 39, 54)",
   );
-  await page.getByRole("button", { name: "关闭设置" }).click();
+  await page.keyboard.press("Control+w");
   await page.screenshot({ path: "test-results/ui-dark.png" });
   await page.keyboard.press("Control+Shift+Backslash");
   await expect(

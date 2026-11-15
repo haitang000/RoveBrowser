@@ -1832,9 +1832,9 @@ impl App {
         let Some(window) = &self.window else {
             return Ok(false);
         };
-        if !self.state.onboarding.completed {
-            let changed = self.pages.values().any(|page| page.visible.get());
-            for page in self.pages.values() { page.set_visible(false)?; }
+        if !self.state.onboarding.completed || self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null()) {
+            let changed = self.pages.values().chain(self.peek.iter().map(|peek| &peek.page)).any(|page| page.visible.get());
+            for page in self.pages.values().chain(self.peek.iter().map(|peek| &peek.page)) { page.set_visible(false)?; }
             if let Some(handle) = &self.split_handle { handle.configure(None)?; }
             if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
             return Ok(changed);
@@ -2631,8 +2631,17 @@ impl App {
             }
             Command::PopupState { popup } => {
                 if let Some(patch) = popup.as_object() {
+                    let was_creating = self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null());
                     for (key, value) in patch { self.popup_state.insert(key.clone(), value.clone()); }
                     self.emit(json!({"type":"popupState","popup":patch}));
+                    let creating = self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null());
+                    if creating != was_creating {
+                        self.finish_split_resize();
+                        if let Err(e) = self.sync_layout() { self.error(e); }
+                        if creating {
+                            if let Some(ui) = &self.ui { let _ = ui.focus(); }
+                        }
+                    }
                 }
                 return;
             }
@@ -2645,7 +2654,10 @@ impl App {
                     if let Err(e) = result { self.error(e); }
                 }
                 if regions.is_empty() {
-                    if let Some(page) = self.page() { let _ = page.focus(); }
+                    if self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null()) {
+                        if let Some(ui) = &self.ui { let _ = ui.focus(); }
+                    }
+                    else if let Some(page) = self.page() { let _ = page.focus(); }
                     else if let Some(ui) = &self.ui { let _ = ui.focus(); }
                 }
                 if !downloads {

@@ -1,8 +1,8 @@
 # Rove
 
-Rove 是一款面向 Windows 10/11 的实验性浏览器，使用 WebView2 加载网页，以工作区、侧栏标签和分屏组织浏览。界面与部分交互参考并移植自 Zigzag；项目仍处于 beta 阶段，不是生产发行版。
+Rove 是一款面向 Windows 10/11 的浏览器，使用 WebView2 加载网页，以工作区、侧栏标签和分屏组织浏览。界面与部分交互参考并移植自 Zigzag；当前正式版本为 **0.1.0**，功能范围与已知限制见下文。
 
-[下载发行版](https://github.com/haitang000/RoveBrowser/releases) · [反馈问题](https://github.com/haitang000/RoveBrowser/issues) · [验证记录](docs/VALIDATION.md)
+[下载发行版](https://github.com/haitang000/RoveBrowser/releases/latest) · [0.1.0 更新说明](docs/releases/0.1.0.md) · [反馈问题](https://github.com/haitang000/RoveBrowser/issues) · [验证记录](docs/VALIDATION.md)
 
 ## 功能概览
 
@@ -13,7 +13,9 @@ Rove 是一款面向 Windows 10/11 的实验性浏览器，使用 WebView2 加�
 - **首次引导和导入**：可从 Edge、Chrome、Firefox、Brave、Vivaldi、Opera 的配置导入书签和历史，并从 CSV 导入密码。导入的密码使用 Windows DPAPI 加密，并需用户手动选择填充。
 - **会话恢复**：工作区、标签和历史保存在 SQLite；网站登录等站点状态由 WebView2 管理。支持通过 Windows 设置将 Rove 设为 HTTP/HTTPS 链接的默认浏览器。
 
-默认快捷键包括 `Ctrl+L`、`Ctrl+T`、`Ctrl+W`、`Ctrl+Shift+T`、`Ctrl+Tab`、`Ctrl+B`、`Ctrl+R`、`Alt+←/→` 和 `Ctrl+,`；`Ctrl+1` 至 `Ctrl+9` 切换工作区。快捷键可在设置中修改。
+点击侧栏底部的「新建」可创建 Space、分屏或标签页。创建 Space 时可先填写名称、选择图标与主题，确认后自动切换；取消会回到原来的网页。
+
+默认快捷键包括 `Ctrl+L`、`Ctrl+T`、`Ctrl+W`、`Ctrl+Shift+T`、`Ctrl+Tab`、`Ctrl+B`、`Ctrl+R`、`Alt+←/→` 和 `Ctrl+,`；`Ctrl+1` 至 `Ctrl+9` 切换工作区，`Ctrl+Shift+F` 切换侧栏完整展开。快捷键可在设置中修改。
 
 ## 安装与使用
 
