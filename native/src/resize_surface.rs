@@ -133,7 +133,7 @@ struct Frame {
     card_clip: IDCompositionRectangleClip,
     viewport_clip: IDCompositionRectangleClip,
     background_scale: IDCompositionScaleTransform,
-    gradient_scale: IDCompositionScaleTransform,
+    background: FluidBackground,
     corners: [f32; 4],
     scale_factor: f32,
     old: Layer,
@@ -236,6 +236,92 @@ impl Surface {
     }
 }
 const GRADIENT_SIZE: u32 = 128;
+const LIFTED_RADIUS: f32 = 18.;
+struct FluidBlob {
+    visual: IDCompositionVisual,
+    scale: IDCompositionScaleTransform,
+}
+struct FluidBackground {
+    scale: IDCompositionScaleTransform,
+    blobs: Vec<FluidBlob>,
+}
+// Upload soft colour fields once; every animation frame only changes their
+// compositor transforms. No texture redraw, browser paint or layout is needed.
+fn radial(color: [u8; 3]) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity((GRADIENT_SIZE * GRADIENT_SIZE * 4) as usize);
+    for y in 0..GRADIENT_SIZE {
+        for x in 0..GRADIENT_SIZE {
+            let dx = 2. * x as f32 / (GRADIENT_SIZE - 1) as f32 - 1.;
+            let dy = 2. * y as f32 / (GRADIENT_SIZE - 1) as f32 - 1.;
+            let t = (1. - dx.hypot(dy)).clamp(0., 1.);
+            let alpha = 0.94 * t * t * (3. - 2. * t);
+            for c in [2, 1, 0] {
+                pixels.push((color[c] as f32 * alpha).round() as u8);
+            }
+            pixels.push((255. * alpha).round() as u8);
+        }
+    }
+    pixels
+}
+fn fluid_pose(index: usize, now: f32) -> [f32; 4] {
+    let phase = index as f32 * 2.1;
+    let t = now * 0.8;
+    let cx = 0.5 + 0.52 * (t + phase).cos();
+    let cy = 0.5 + 0.55 * (t * 0.83 + phase + 0.7).sin();
+    let sx = 1.55 + 0.22 * (t * 0.67 + phase).sin();
+    let sy = 1.65 + 0.20 * (t * 0.71 + phase).cos();
+    [cx - sx / 2., cy - sy / 2., sx, sy]
+}
+impl FluidBackground {
+    unsafe fn new(
+        device: &IDCompositionDevice,
+        appearance: Appearance,
+    ) -> Result<(IDCompositionVisual, Self)> {
+        let visual = device.CreateVisual()?;
+        let scale = device.CreateScaleTransform()?;
+        visual.SetTransform(&scale)?;
+        visual.SetContent(&bitmap(
+            device,
+            GRADIENT_SIZE,
+            GRADIENT_SIZE,
+            Some(&gradient(appearance)),
+            None,
+        )?)?;
+        let mut blobs = Vec::with_capacity(3);
+        for color in [appearance.start, appearance.end, appearance.start] {
+            let blob = device.CreateVisual()?;
+            let transform = device.CreateScaleTransform()?;
+            blob.SetTransform(&transform)?;
+            blob.SetContent(&bitmap(
+                device,
+                GRADIENT_SIZE,
+                GRADIENT_SIZE,
+                Some(&radial(color)),
+                None,
+            )?)?;
+            visual.AddVisual(&blob, true, None::<&IDCompositionVisual>)?;
+            blobs.push(FluidBlob {
+                visual: blob,
+                scale: transform,
+            });
+        }
+        Ok((visual, Self { scale, blobs }))
+    }
+    unsafe fn present(&self, width: f32, height: f32, now: f32) -> Result<()> {
+        self.scale
+            .SetScaleX2(width.max(1.) / GRADIENT_SIZE as f32)?;
+        self.scale
+            .SetScaleY2(height.max(1.) / GRADIENT_SIZE as f32)?;
+        for (index, blob) in self.blobs.iter().enumerate() {
+            let [x, y, sx, sy] = fluid_pose(index, now);
+            blob.scale.SetScaleX2(sx)?;
+            blob.scale.SetScaleY2(sy)?;
+            blob.visual.SetOffsetX2(x * GRADIENT_SIZE as f32)?;
+            blob.visual.SetOffsetY2(y * GRADIENT_SIZE as f32)?;
+        }
+        Ok(())
+    }
+}
 fn gradient(appearance: Appearance) -> Vec<u8> {
     let from = appearance.start.map(f32::from);
     let to = appearance.end.map(f32::from);
@@ -435,13 +521,11 @@ impl Frame {
         let built = (|| -> Result<_> {
             let target = device.CreateTargetForHwnd(preview, true)?;
             let root_visual = device.CreateVisual()?;
-            let background = device.CreateVisual()?;
+            let (background_visual, background) = FluidBackground::new(&device, appearance)?;
             let card = device.CreateVisual()?;
             let content = device.CreateVisual()?;
             let card_background = device.CreateVisual()?;
             let background_scale = device.CreateScaleTransform()?;
-            let gradient_scale = device.CreateScaleTransform()?;
-            background.SetTransform(&gradient_scale)?;
             card_background.SetTransform(&background_scale)?;
             let color = if appearance.dark {
                 D2D1_COLOR_F {
@@ -459,14 +543,6 @@ impl Frame {
                 }
             };
             let fill = bitmap(&device, 1, 1, None, Some(color))?;
-            let gradient = bitmap(
-                &device,
-                GRADIENT_SIZE,
-                GRADIENT_SIZE,
-                Some(&gradient(appearance)),
-                None,
-            )?;
-            background.SetContent(&gradient)?;
             card_background.SetContent(&fill)?;
             let card_clip = device.CreateRectangleClip()?;
             let viewport_clip = device.CreateRectangleClip()?;
@@ -483,8 +559,8 @@ impl Frame {
             let old = Layer::new(&device, size)?;
             let new = Layer::new(&device, size)?;
             new.effect.SetOpacity2(1.)?;
-            root_visual.AddVisual(&background, false, None::<&IDCompositionVisual>)?;
-            root_visual.AddVisual(&card, true, &background)?;
+            root_visual.AddVisual(&background_visual, false, None::<&IDCompositionVisual>)?;
+            root_visual.AddVisual(&card, true, &background_visual)?;
             card.AddVisual(&content, false, None::<&IDCompositionVisual>)?;
             content.AddVisual(&card_background, false, None::<&IDCompositionVisual>)?;
             content.AddVisual(&new.visual, true, &card_background)?;
@@ -497,7 +573,7 @@ impl Frame {
                 card_clip,
                 viewport_clip,
                 background_scale,
-                gradient_scale,
+                background,
                 old,
                 new,
             ))
@@ -509,7 +585,7 @@ impl Frame {
             card_clip,
             viewport_clip,
             background_scale,
-            gradient_scale,
+            background,
             old,
             new,
         ) = match built {
@@ -544,7 +620,7 @@ impl Frame {
             card_clip,
             viewport_clip,
             background_scale,
-            gradient_scale,
+            background,
             corners,
             scale_factor,
             old,
@@ -619,17 +695,19 @@ impl Frame {
         }
         self.background_scale.SetScaleX2(width.max(1) as f32)?;
         self.background_scale.SetScaleY2(height.max(1) as f32)?;
-        self.gradient_scale
-            .SetScaleX2(width.max(1) as f32 / GRADIENT_SIZE as f32)?;
-        self.gradient_scale
-            .SetScaleY2(height.max(1) as f32 / GRADIENT_SIZE as f32)?;
+        let time = if self.motion.borrow().reduced {
+            0.
+        } else {
+            self.now()
+        };
+        self.background.present(width as f32, height as f32, time)?;
         rounded(
             &self.viewport_clip,
             width as f32,
             height as f32,
             self.corners,
         )?;
-        // 32 CSS px while lifted. Morph back to each pane's real corners as
+        // 18 CSS px while lifted. Morph back to each pane's real corners as
         // the final scale reaches 1:1, so the handoff never changes its outline.
         let lift = ((1. - sample.pose.scale) / 0.032).clamp(0., 1.);
         rounded(
@@ -637,7 +715,7 @@ impl Frame {
             width as f32,
             height as f32,
             self.corners
-                .map(|r| r + (32. * self.scale_factor - r) * lift),
+                .map(|r| r + (LIFTED_RADIUS * self.scale_factor - r) * lift),
         )?;
         self.old.fit(size)?;
         self.new.fit(size)?;
@@ -858,6 +936,15 @@ mod tests {
             &pixels[..GRADIENT_SIZE as usize * 4],
             &pixels[(GRADIENT_SIZE as usize - 1) * GRADIENT_SIZE as usize * 4..]
         );
+        // Transparent field edges must stay premultiplied, otherwise scaled
+        // blobs introduce dark/coloured fringes where they overlap.
+        let field = radial(appearance.start);
+        assert_eq!(&field[..4], &[0, 0, 0, 0]);
+        assert!(field
+            .chunks_exact(4)
+            .all(|p| p[..3].iter().all(|&c| c <= p[3])));
+        let centre = ((GRADIENT_SIZE / 2 * GRADIENT_SIZE + GRADIENT_SIZE / 2) * 4) as usize;
+        assert!(field[centre + 3] > 230);
     }
     #[test]
     fn compositor_keeps_renderer_geometry_and_always_restores_styles() -> Result<()> {

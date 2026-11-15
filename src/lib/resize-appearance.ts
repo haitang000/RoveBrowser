@@ -10,11 +10,13 @@ export function resizeAppearance(space: LookFields, theme: "light" | "dark", red
   // frame without flashing almost white or sinking to almost black.
   const depth = (shade: number | undefined, second: boolean) => {
     const variation = (clamp01(shade ?? 0.5) - 0.5) * 0.06;
-    return dark ? 0.40 + (second ? -0.12 : 0) + variation : 0.46 + (second ? 0.12 : 0) + variation;
+    return dark ? 0.40 + (second ? -0.12 : 0) + variation : 0.44 + (second ? 0.16 : 0) + variation;
   };
   return {
     start: rgb(paint(baseHue(space), depth(space.brightness, false), tintAmount(space))),
-    end: rgb(paint(space.hue2 ?? baseHue(space), depth(space.brightness2 ?? space.brightness, true),
+    // A neighbouring hue gives single-colour Spaces a visible colour flow;
+    // custom two-colour Spaces keep exactly the user's two hues.
+    end: rgb(paint(space.hue2 ?? baseHue(space) + 0.18, depth(space.brightness2 ?? space.brightness, true),
       space.hue2 == null ? tintAmount(space) : tintAmount2(space))),
     angle: ((space.angle ?? 45) + 90) % 360,
     dark,
