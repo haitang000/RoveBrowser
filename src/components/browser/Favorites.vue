@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { liveTab } from "../../lib/bookmarks";
 import { sameOrigin } from "../../lib/favicon";
 import type { Favorite } from "../../lib/types";
 import Favicon from "../common/Favicon.vue";
@@ -9,7 +8,7 @@ import FavoriteMenu from "./FavoriteMenu.vue";
 import Icon from "../common/Icon.vue";
 const b = useBrowser();
 const tiles = computed(() => b.state.favorites.filter((f, i, all) => !f.splitWith || !all.slice(0, i).some((p) => p.id === f.splitWith)));
-const live = (f: Favorite) => liveTab(b.state, f.id);
+const live = (f: Favorite) => b.liveBookmarks.get(f.id);
 const favicon = (f: Favorite) => {
   const tab = live(f);
   return f.favicon || (tab && sameOrigin(tab.url, f.url) ? tab.favicon : undefined);

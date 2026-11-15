@@ -14,6 +14,7 @@ declare global {
       layoutCount: number;
       popupUpdates: number;
       observer?: ResizeObserver;
+      paletteReads?: number;
     };
   }
 }
@@ -63,6 +64,30 @@ test("first render restores the native theme and collapsed sidebar before showin
     .toBe((await page.locator(".page-pane > .webview-slot").first().boundingBox())!.x);
   await expect(page.getByRole("navigation", { name: "网页导航" })).toBeVisible();
   await expect(page.getByRole("button", { name: "搜索或输入地址", exact: true })).toBeVisible();
+});
+
+test("tab state updates reuse caption colors while theme changes refresh them", async ({ page }) => {
+  const state = initialState();
+  await page.addInitScript(() => {
+    const read = CanvasRenderingContext2D.prototype.getImageData;
+    CanvasRenderingContext2D.prototype.getImageData = function (...args: Parameters<typeof read>) {
+      window.__windowTest.paletteReads = (window.__windowTest.paletteReads || 0) + 1;
+      return read.apply(this, args);
+    };
+  });
+  await nativeShell(page, state);
+  const reads = await page.evaluate(() => window.__windowTest.paletteReads);
+  expect(reads).toBeGreaterThan(0);
+  for (const id of ["github", "wiki", "start", "github"]) {
+    state.activeTab = id;
+    state.spaces[0]!.activeTab = id;
+    await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+    await expect(page.locator('.tab-row.selected')).toHaveAttribute('data-tab-id', id);
+  }
+  expect(await page.evaluate(() => window.__windowTest.paletteReads)).toBe(reads);
+  state.theme = "dark";
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+  await expect.poll(() => page.evaluate(() => window.__windowTest.paletteReads)).toBeGreaterThan(reads!);
 });
 
 test("legacy frosted spaces use the single clear appearance and caption alpha", async ({ page }) => {

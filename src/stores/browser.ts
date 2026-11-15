@@ -1,4 +1,4 @@
-import { computed, ref, watch } from "vue";
+import { computed, onScopeDispose, ref, watch } from "vue";
 import { defineStore } from "pinia";
 import { initialState, reduce } from "../lib/preview";
 import type {
@@ -16,11 +16,12 @@ import { normalizeFindQuery } from "../lib/find";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
-import { liveTab, savedPage, upgradeLibrary } from "../lib/bookmarks";
+import { upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
 import type { LookFields } from "../lib/space-look";
 import type { ImportRequest, ImportSource } from "../lib/import";
 import { NEW_TAB_STORAGE_KEY, newTabSettings, type NewTabSettings } from "../lib/new-tab";
+import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from "../lib/state-snapshot";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const popupWindow = Boolean(window.__ERA_POPUP__);
@@ -32,7 +33,7 @@ export const useBrowser = defineStore("browser", () => {
   const sidebarResizing = ref(false);
   const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
   const previewAnimationDone = ref(0);
-  const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__) || onboardingPreview(initialState()))),
+  const state = ref(upgradeLibrary((native && window.__ERA_INITIAL_STATE__ && structuredClone(window.__ERA_INITIAL_STATE__)) || onboardingPreview(initialState()))),
     history = ref<HistoryEntry[]>([]),
     suggestions = ref<string[]>([]),
     recent = ref<string[]>([]),
@@ -110,10 +111,16 @@ export const useBrowser = defineStore("browser", () => {
   const tabs = computed(() =>
     state.value.tabs.filter((t) => t.spaceId === state.value.activeSpace && !state.value.favorites.some((f) => f.id === t.bookmarkId)),
   );
-  const pinnedTabs = computed<Tab[]>(() => (state.value.pins || [])
+  const liveBookmarks = computed(() => new Map(state.value.tabs
+    .filter(tab => tab.bookmarkId).map(tab => [tab.bookmarkId!, tab])));
+  const pinnedTabs = computed<Tab[]>((previous) => shareSnapshot(previous, (state.value.pins || [])
     .filter((f) => f.spaceId === state.value.activeSpace)
-    .map((f) => ({ ...(liveTab(state.value, f.id) || { id: f.id, spaceId: f.spaceId!, url: f.url, unloaded: true }), title: f.title, favicon: liveTab(state.value, f.id)?.favicon || f.favicon, pinned: true, bookmarkId: f.id })));
-  const activeBookmark = computed(() => active.value?.bookmarkId ? savedPage(state.value, active.value.bookmarkId) : undefined);
+    .map((f) => {
+      const live = liveBookmarks.value.get(f.id);
+      return { ...(live || { id: f.id, spaceId: f.spaceId!, url: f.url, unloaded: true }), title: f.title, favicon: live?.favicon || f.favicon, pinned: true, bookmarkId: f.id };
+    })));
+  const savedBookmarks = computed(() => new Map([...(state.value.pins || []), ...state.value.favorites].map(mark => [mark.id, mark])));
+  const activeBookmark = computed(() => active.value?.bookmarkId ? savedBookmarks.value.get(active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
   const importSources = ref<ImportSource[]>([]);
@@ -332,7 +339,7 @@ export const useBrowser = defineStore("browser", () => {
   }
   function cycle(reverse = false) {
     const list = [
-      ...state.value.favorites.flatMap((f) => liveTab(state.value, f.id) || []),
+      ...state.value.favorites.flatMap((f) => liveBookmarks.value.get(f.id) || []),
       ...pinnedTabs.value.filter((t) => !t.unloaded),
       ...tabs.value.filter((t) => !t.pinned),
     ];
@@ -547,14 +554,14 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "state" && e.state) {
       const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
       const previous = sources(state.value);
-      const incoming = upgradeLibrary(e.state);
+      const incoming = upgradeLibrary({ ...e.state });
       // A blur save and a subsequent resize/name change can be in flight at
       // once. Keep the newest local draft until Rust acknowledges its value.
       const acknowledged = JSON.stringify(newTabSettings(incoming.newTab));
       const index = pendingNewTab.findIndex((value) => JSON.stringify(value) === acknowledged);
       if (index >= 0) pendingNewTab.splice(0, index + 1);
       if (pendingNewTab.length) incoming.newTab = pendingNewTab.at(-1);
-      state.value = incoming;
+      applySnapshot(state.value, incoming);
       const current = sources(state.value);
       thumbnails.value = Object.fromEntries(
         Object.entries(thumbnails.value).filter(([id]) => current.has(id) && current.get(id) === previous.get(id)),
@@ -659,6 +666,23 @@ export const useBrowser = defineStore("browser", () => {
       send({ type: "popupState", popup: { [key]: patch } });
     }, { deep: true, flush: "sync" });
   }
+  if (native) {
+    // Keep the transport base separate from reactive drafts and UI migrations.
+    let snapshot = structuredClone(window.__ERA_INITIAL_STATE__!);
+    const message = (event: MessageEvent<unknown>) => {
+      if (!event.data || typeof event.data !== "object" || !("type" in event.data)) return;
+      if (event.data.type === "statePatch") {
+        snapshot = expandSnapshot(snapshot, event.data as StatePatch);
+        window.__ERA_RECEIVE__?.({ type: "state", state: snapshot });
+        return;
+      }
+      if (event.data.type === "state" && "state" in event.data) snapshot = event.data.state as typeof snapshot;
+      // The sidebar's direct input listener owns its synchronous width feedback.
+      if (event.data.type !== "sidebarResize") window.__ERA_RECEIVE__?.(event.data as Parameters<NonNullable<Window["__ERA_RECEIVE__"]>>[0]);
+    };
+    window.chrome?.webview?.addEventListener("message", message);
+    onScopeDispose(() => window.chrome?.webview?.removeEventListener("message", message));
+  }
   send({ type: popupWindow ? "popupReady" : "ready" });
   return {
     importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser,
@@ -731,6 +755,8 @@ export const useBrowser = defineStore("browser", () => {
     space,
     tabs,
     pinnedTabs,
+    liveBookmarks,
+    savedBookmarks,
     activeBookmark,
     commandOpen,
     commandMode,

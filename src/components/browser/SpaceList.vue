@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { liveTab } from "../../lib/bookmarks";
+import { shareSnapshot } from "../../lib/state-snapshot";
 import type { Tab } from "../../lib/types";
 import Icon from "../common/Icon.vue";
 import PinnedTabs from "./PinnedTabs.vue";
@@ -13,8 +13,11 @@ const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab]; scroll: [id: str
 const b = useBrowser(), list = ref<HTMLElement>();
 const space = computed(() => b.state.spaces.find((s) => s.id === props.spaceId));
 const tabs = computed(() => b.state.tabs.filter((t) => t.spaceId === props.spaceId && !t.pinned && !b.state.favorites.some((f) => f.id === t.bookmarkId)));
-const pins = computed<Tab[]>(() => (b.state.pins || []).filter((f) => f.spaceId === props.spaceId)
-  .map((f) => ({ ...(liveTab(b.state, f.id) || { id: f.id, spaceId: props.spaceId, url: f.url, unloaded: true }), title: f.title, favicon: liveTab(b.state, f.id)?.favicon || f.favicon, pinned: true, bookmarkId: f.id })));
+const pins = computed<Tab[]>((previous) => shareSnapshot(previous, (b.state.pins || []).filter((f) => f.spaceId === props.spaceId)
+  .map((f) => {
+    const live = b.liveBookmarks.get(f.id);
+    return { ...(live || { id: f.id, spaceId: props.spaceId, url: f.url, unloaded: true }), title: f.title, favicon: live?.favicon || f.favicon, pinned: true, bookmarkId: f.id };
+  })));
 // The scrollbar is ambient: it only paints while the list is actually moving.
 // Restoring a pane's scroll position on mount is not a scroll the user made, so
 // it must not flash the bar.

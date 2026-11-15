@@ -8,35 +8,44 @@ const b = useBrowser();
 const maximize = ref<HTMLButtonElement>();
 let observer: ResizeObserver;
 let paletteObserver: MutationObserver;
+let paletteKey = "";
+let palette: { background: number[]; hover: number[]; foreground: number[] };
+let context: CanvasRenderingContext2D | null;
 function report() {
   if (!b.native || !maximize.value) return;
   const shell = maximize.value.closest('.browser-shell')!;
   const r = maximize.value.getBoundingClientRect(), style = getComputedStyle(shell);
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 1;
-  const context = canvas.getContext("2d")!;
   const frame = style.backgroundImage === "none"
     ? style.backgroundColor
     : style.getPropertyValue("--frame-gradient-start").trim();
-  const color = (...fills: string[]) => {
-    context.clearRect(0, 0, 1, 1);
-    for (const fill of fills) {
-      context.fillStyle = fill;
-      context.fillRect(0, 0, 1, 1);
+  const hover = style.getPropertyValue("--hover").trim();
+  const foreground = style.getPropertyValue("--icon").trim();
+  const nextPalette = JSON.stringify([frame, hover, foreground]);
+  if (nextPalette !== paletteKey) {
+    if (!context) {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      context = canvas.getContext("2d", { willReadFrequently: true });
     }
-    return [...context.getImageData(0, 0, 1, 1).data];
-  };
+    if (!context) return;
+    const color = (fill: string) => {
+      context!.clearRect(0, 0, 1, 1);
+      context!.fillStyle = fill;
+      context!.fillRect(0, 0, 1, 1);
+      return [...context!.getImageData(0, 0, 1, 1).data];
+    };
+    palette = { background: color(frame), hover: color(hover), foreground: color(foreground) };
+    paletteKey = nextPalette;
+  }
   b.send({
     type: "windowChrome",
     maximize: { x: r.x, y: r.y, width: r.width, height: r.height },
     viewportWidth: innerWidth,
-    background: color(frame),
-    hover: color(style.getPropertyValue("--hover").trim()),
-    foreground: color(style.getPropertyValue("--icon").trim()),
+    ...palette,
   });
 }
 watch(
-    () => [b.state.theme, b.space.color, b.space.translucency, b.onboardingOpen],
+  [() => b.state.theme, () => b.space.color, () => b.space.translucency, () => b.onboardingOpen],
   async () => {
     await nextTick();
     report();

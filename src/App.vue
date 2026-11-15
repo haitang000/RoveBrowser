@@ -22,6 +22,7 @@ import { frameOf, lookOf } from "./lib/space-look";
 import { resizeAppearance } from "./lib/resize-appearance";
 import SpaceEditor from "./components/browser/SpaceEditor.vue";
 import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
+import { shareSnapshot } from "./lib/state-snapshot";
 const b = useBrowser();
 const shell = ref<HTMLElement>();
 const pageArea = ref<InstanceType<typeof PageArea>>();
@@ -32,11 +33,11 @@ const shownSpace = computed(() => {
   const preview = b.spacePreview;
   return preview && preview.id === b.space?.id ? { ...b.space, ...preview.look } : b.space;
 });
-const painted = computed(() => frameOf(shownSpace.value, b.state.theme, glassAllowed.value));
+const painted = computed<ReturnType<typeof frameOf>>((previous) => shareSnapshot(previous, frameOf(shownSpace.value, b.state.theme, glassAllowed.value)));
 const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(shownSpace.value?.translucency) && glassAllowed.value);
 watch(() => b.onboardingOpen, (open) => { document.documentElement.dataset.onboarding = String(open); }, { immediate: true, flush: "sync" });
 const gradient = "linear-gradient(var(--frame-gradient-angle), var(--frame-gradient-start), var(--frame-gradient-end))";
-const shellStyle = computed(() => ({
+const shellStyle = computed<Record<string, string>>((previous) => shareSnapshot(previous, {
   ...(glassActive.value
     ? { "--frame-coverage": String(coverage(shownSpace.value?.translucency)) }
     : {}),

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   computed,
+  defineAsyncComponent,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -12,10 +13,10 @@ import { pageClip } from "../../lib/page-clip";
 import type { Rect } from "../../lib/types";
 import Icon from "../common/Icon.vue";
 import Peek from "./Peek.vue";
-import SettingsPage from "./SettingsPage.vue";
 import NewTabPage from "./NewTabPage.vue";
 import { isSettingsUrl } from "../../lib/settings";
 import { pageDirection, type PageDirection } from "../../lib/page-motion";
+const SettingsPage = defineAsyncComponent(() => import("./SettingsPage.vue"));
 const b = useBrowser(),
   primary = ref<HTMLElement>(),
   secondary = ref<HTMLElement>(),

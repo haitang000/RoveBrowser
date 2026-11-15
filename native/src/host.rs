@@ -142,6 +142,7 @@ enum Event {
     SleepTick,
     /// A background page's `TrySuspend` finished; `true` when it slept.
     SleepDone(String, bool),
+    SessionSaveError(String),
 }
 struct Page {
     view: WebView,
@@ -320,6 +321,10 @@ struct App {
     context: WebContext,
     state: State,
     storage: Storage,
+    session_writer: crate::session_writer::SessionWriter,
+    next_session_save: Option<Instant>,
+    pending_publish: Cell<bool>,
+    state_publisher: crate::state_snapshot::Publisher,
     proxy: EventLoopProxy<Event>,
     primary: Rect,
     secondary: Option<Rect>,
@@ -386,6 +391,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
+    let save_proxy = proxy.clone();
+    let session_writer = crate::session_writer::SessionWriter::new(&data, move |error| {
+        let _ = save_proxy.send_event(Event::SessionSaveError(error));
+    })?;
     let external_proxy = proxy.clone();
     instance.listen(move |urls| { let _ = external_proxy.send_event(Event::ExternalUrls(urls)); });
     // Zigzag `TabManager.sleepIdleTabs` runs on a timer; the same tick asks the
@@ -440,6 +449,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         context: WebContext::new(Some(data.join("WebView2"))),
         state,
         storage,
+        session_writer,
+        next_session_save: None,
+        pending_publish: Cell::new(false),
+        state_publisher: crate::state_snapshot::Publisher::default(),
         proxy,
         primary: Rect::default(),
         secondary: None,
@@ -527,13 +540,14 @@ impl App {
     }
 
     fn emit(&self, value: serde_json::Value) {
+        let message = HSTRING::from(value.to_string());
         if value["type"] != "shortcut" {
             if let Some(popup) = &self.popup {
-                let _ = popup.evaluate_script(&format!("window.__ERA_RECEIVE__?.({value})"));
+                let _ = unsafe { popup.webview().PostWebMessageAsJson(&message) };
             }
         }
         if let Some(ui) = &self.ui {
-            let _ = ui.evaluate_script(&format!("window.__ERA_RECEIVE__?.({value})"));
+            let _ = unsafe { ui.webview().PostWebMessageAsJson(&message) };
         }
     }
     fn error(&mut self, message: impl ToString) {
@@ -544,17 +558,20 @@ impl App {
     }
     fn publish(&self) {
         if self.ready {
-            self.emit(json!({"type":"state","state":self.state}));
+            self.pending_publish.set(true);
         }
     }
     fn save(&mut self) {
-        if let Err(e) = self.storage.save(&self.state) {
-            self.error(format!("保存会话失败：{e}"))
+        // Bound the delay from the first edit; continuous activity cannot defer
+        // a save indefinitely. Only clone/serialize once per batch.
+        self.next_session_save.get_or_insert_with(|| Instant::now() + Duration::from_millis(150));
+    }
+    fn flush_session(&mut self) {
+        self.next_session_save = None;
+        self.session_writer.save(self.state.clone());
+        if let Err(error) = self.session_writer.flush() {
+            self.error(format!("保存会话失败：{error}"));
         }
-        // The downloads list is small; writing it on every state change already,
-        // and once more on exit keeps the final byte count of a quit download.
-        let items = self.downloads.borrow().items.clone();
-        let _ = self.storage.save_downloads(&items);
     }
     /// One-time: replace icons an older build enlarged to 64 pixels. Each saved
     /// site is asked for its own icon in the background and the replacements
@@ -2924,6 +2941,9 @@ impl ApplicationHandler<Event> for App {
                 self.emit(json!({"type":"importState","importBusy":false,"importSources":self.import_sources}));
             }
             Event::ImportRead(batches) => {
+                // Imports commit their own session in the same transaction.
+                // Complete older background snapshots before that transaction.
+                self.flush_session();
                 for batch in batches {
                     if let Err(e) = self.storage.import_batch(&mut self.state, batch) { self.error(e); }
                 }
@@ -3039,6 +3059,7 @@ impl ApplicationHandler<Event> for App {
                 self.emit(json!({"type":"audio","id":id,"playing":playing}));
             }
             Event::SleepTick => self.sleep_pass(),
+            Event::SessionSaveError(error) => self.error(format!("保存会话失败：{error}")),
             Event::SleepDone(id, slept) => self.sleep_done(&id, slept),
             Event::DownloadsChanged { persist } => {
                 if persist {
@@ -3340,6 +3361,15 @@ impl ApplicationHandler<Event> for App {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Publish the latest state once after draining this turn's events.
+        if self.pending_publish.replace(false) {
+            let message = self.state_publisher.message(&self.state);
+            self.emit(message);
+        }
+        if self.next_session_save.is_some_and(|due| Instant::now() >= due) {
+            self.next_session_save = None;
+            self.session_writer.save(self.state.clone());
+        }
         if !self.download_ops.borrow().is_empty() {
             let now = Instant::now();
             if self.next_download_poll.is_none_or(|due| now >= due) {
@@ -3351,14 +3381,14 @@ impl ApplicationHandler<Event> for App {
         }
         if self.download_ops.borrow().is_empty() {
             self.next_download_poll = None;
-            event_loop.set_control_flow(ControlFlow::Wait);
-        } else if let Some(due) = self.next_download_poll {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(due));
         }
+        let due = self.next_download_poll.into_iter().chain(self.next_session_save).min();
+        event_loop.set_control_flow(due.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
         self.glass_backdrop = None;
-        self.save();
+        self.flush_session();
+        self.save_downloads();
     }
 }
 fn register_page_events(

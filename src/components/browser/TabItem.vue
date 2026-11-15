@@ -4,12 +4,14 @@ import type { Tab } from "../../lib/types";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
 import { computed } from "vue";
-import { savedPage, samePinnedUrl } from "../../lib/bookmarks";
+import { samePinnedUrl } from "../../lib/bookmarks";
 import { isSettingsUrl } from "../../lib/settings";
 import { tabDisplayTitle, tabFreshness } from "../../lib/tab-meta";
 const props = defineProps<{ tab: Tab; doomed?: boolean }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser();
+const selected = computed(() => b.state.activeTab === props.tab.id);
+const previewed = computed(() => b.previewTarget === (props.tab.bookmarkId || props.tab.id));
 const playing = computed(() => Boolean(b.audio[props.tab.id]));
 const asleep = computed(() => Boolean(b.asleep[props.tab.id]));
 const muted = computed(() => Boolean(props.tab.muted));
@@ -27,12 +29,13 @@ const fade = computed(() =>
 function toggleMute() {
   b.toggleMute(props.tab);
 }
-function away() {
-  const f = props.tab.bookmarkId && savedPage(b.state, props.tab.bookmarkId);
-  return f && !props.tab.unloaded && !samePinnedUrl(f.url, props.tab.url);
-}
+const away = computed(() => {
+  if (!props.tab.bookmarkId || props.tab.unloaded) return false;
+  const f = b.savedBookmarks.get(props.tab.bookmarkId);
+  return Boolean(f && !samePinnedUrl(f.url, props.tab.url));
+});
 function close() {
-  b.send(away() ? { type: "bookmarkReset", id: props.tab.bookmarkId } : props.tab.bookmarkId ? { type: "bookmarkUnload", id: props.tab.bookmarkId } : { type: "close", id: props.tab.id });
+  b.send(away.value ? { type: "bookmarkReset", id: props.tab.bookmarkId } : props.tab.bookmarkId ? { type: "bookmarkUnload", id: props.tab.bookmarkId } : { type: "close", id: props.tab.id });
 }
 function activate() { b.send({ type: props.tab.bookmarkId ? "bookmarkOpen" : "activate", id: props.tab.bookmarkId || props.tab.id }); }
 function unload() { b.send(props.tab.bookmarkId ? { type: "bookmarkUnload", id: props.tab.bookmarkId } : { type: "close", id: props.tab.id }); }
@@ -43,13 +46,13 @@ function unload() { b.send(props.tab.bookmarkId ? { type: "bookmarkUnload", id: 
     :data-tab-id="tab.id"
     :data-bookmark-id="tab.bookmarkId"
     :data-sleeping="asleep || undefined"
-    :class="{ selected: b.state.activeTab === tab.id, loading: tab.loading, unloaded: tab.unloaded, doomed, sleeping: asleep }"
+    :class="{ selected, loading: tab.loading, unloaded: tab.unloaded, doomed, sleeping: asleep }"
     role="tab"
     :aria-label="title"
-    :aria-selected="b.state.activeTab === tab.id"
-    :tabindex="b.state.activeTab === tab.id ? 0 : -1"
-    :title="b.previewTarget === (tab.bookmarkId || tab.id) ? undefined : rowTitle"
-    :aria-describedby="b.previewTarget === (tab.bookmarkId || tab.id) ? 'tab-hover-preview' : undefined"
+    :aria-selected="selected"
+    :tabindex="selected ? 0 : -1"
+    :title="previewed ? undefined : rowTitle"
+    :aria-describedby="previewed ? 'tab-hover-preview' : undefined"
     :style="{ '--tab-freshness': fade }"
     draggable="true"
     @mousedown.middle.prevent
@@ -75,12 +78,12 @@ function unload() { b.send(props.tab.bookmarkId ? { type: "bookmarkUnload", id: 
       <Icon :name="muted ? 'speakerMuted' : 'speaker'" :size="12" />
     </button><button
       class="tab-close"
-      :aria-label="`${away() ? '返回固定网址' : tab.pinned ? '卸载' : '关闭'} ${title}`"
-      :title="away() ? '返回固定网址' : tab.pinned ? '卸载网页（保留固定项）' : '关闭标签页'"
+      :aria-label="`${away ? '返回固定网址' : tab.pinned ? '卸载' : '关闭'} ${title}`"
+      :title="away ? '返回固定网址' : tab.pinned ? '卸载网页（保留固定项）' : '关闭标签页'"
       :disabled="tab.unloaded"
       @click.stop="close"
     >
-      <Icon :name="away() ? 'back' : 'close'" :size="11" />
+      <Icon :name="away ? 'back' : 'close'" :size="11" />
     </button>
   </div>
 </template>

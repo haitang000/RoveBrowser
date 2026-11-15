@@ -27,6 +27,8 @@ mod shadow;
 mod sidebar;
 mod site;
 mod settings;
+mod session_writer;
+mod state_snapshot;
 mod sleep;
 mod storage;
 mod split;

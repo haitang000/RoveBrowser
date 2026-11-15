@@ -13,6 +13,8 @@ watch(
   <img
     v-if="!failed && url.startsWith('http')"
     class="favicon"
+    loading="lazy"
+    decoding="async"
     draggable="false"
     :src="favicon || `https://${host(url)}/favicon.ico`"
     alt=""

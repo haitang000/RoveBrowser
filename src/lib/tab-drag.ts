@@ -171,7 +171,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
     }
   }
   function visibilityChanged() { if (document.hidden) reset(); }
-  watch(() => b.state, () => { if (pending) reset(); });
+  watch(() => b.state.tabs, () => { if (pending) reset(); });
   watch([() => b.state.activeSpace, () => b.state.sidebarCollapsed], reset);
   onMounted(() => {
     document.addEventListener("dragover", leaveLists, true);
