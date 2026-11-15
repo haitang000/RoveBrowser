@@ -42,8 +42,11 @@ pub struct Motion {
     blur_only: bool,
     blur: Spring,
     released_blur: f32,
+    held: Option<Sample>,
+    exiting: Option<(f32, f32, Sample)>,
     pub reduced: bool,
 }
+#[derive(Clone, Copy)]
 pub struct Sample {
     pub pose: Pose,
     pub blend: f32,
@@ -86,6 +89,8 @@ impl Motion {
             blur_only: false,
             blur: Spring::default(),
             released_blur: 0.,
+            held: None,
+            exiting: None,
             reduced,
         }
     }
@@ -100,7 +105,22 @@ impl Motion {
         }
     }
     pub fn dragging(&self) -> bool {
-        self.released.is_none() && !self.staged
+        self.released.is_none() && !self.staged && self.exiting.is_none()
+    }
+    /// Freeze the actual presentation, including an interrupted paint handoff.
+    pub fn hold(&mut self, now: f32) {
+        let sample = self.sample(now, 0.);
+        self.released = None;
+        self.staged = false;
+        self.incoming = false;
+        self.held = Some(Sample { finished: false, ..sample });
+    }
+    pub fn exit(&mut self, now: f32, side: f32) {
+        let from = self.sample(now, 0.);
+        self.held = None;
+        self.released = None;
+        self.staged = false;
+        self.exiting = Some((now, side.signum(), from));
     }
     pub fn resume(&mut self, pose: Pose) {
         self.scale.value = pose.scale;
@@ -124,6 +144,7 @@ impl Motion {
         self.release(now);
     }
     pub fn point(&mut self, x: f32, y: f32) {
+        self.held = None;
         self.target = if self.reduced {
             Pose::default()
         } else {
@@ -135,6 +156,7 @@ impl Motion {
         };
     }
     pub fn release(&mut self, now: f32) {
+        self.held = None;
         self.released = Some((now, self.pose()));
         self.released_blur = self.blur.value;
         self.painted = None;
@@ -155,6 +177,23 @@ impl Motion {
         }
     }
     pub fn sample(&mut self, now: f32, dt: f32) -> Sample {
+        if let Some((start, side, from)) = self.exiting {
+            let t = ((now - start) / if self.reduced { 0.09 } else { 0.22 }).clamp(0., 1.);
+            let amount = smooth(t);
+            return Sample {
+                pose: if self.reduced { Pose::default() } else { Pose {
+                    scale: from.pose.scale + (0.952 - from.pose.scale) * amount,
+                    x: from.pose.x + (-side * 0.13 - from.pose.x) * amount,
+                    y: from.pose.y * (1. - amount),
+                } },
+                opacity: from.opacity * (1. - amount),
+                slide: if self.reduced { 0. } else { from.slide + side * 0.12 * amount },
+                blur: if self.reduced { 0. } else { from.blur + (1. - from.blur) * amount },
+                blend: from.blend,
+                finished: t >= 1.,
+            };
+        }
+        if let Some(sample) = self.held { return sample; }
         if self.staged {
             return Sample {
                 pose: self.pose(),
@@ -428,5 +467,47 @@ mod tests {
         }
         assert_eq!(move_bounds(from, to, 0.01), from);
         assert_eq!(move_bounds(from, to, 0.99), to);
+    }
+    #[test]
+    fn split_exit_mirrors_both_sides_and_preserves_interrupted_pixels() {
+        let mut left = Motion::new(false);
+        let mut right = Motion::new(false);
+        left.hold(0.);
+        right.hold(0.);
+        left.exit(1., -1.);
+        right.exit(1., 1.);
+        for t in [0., 0.05, 0.11, 0.20, 0.23] {
+            let a = left.sample(1. + t, 0.016);
+            let b = right.sample(1. + t, 0.016);
+            assert_eq!(a.slide, -b.slide);
+            assert_eq!(a.pose.x, -b.pose.x);
+            assert_eq!(a.opacity, b.opacity);
+            assert_eq!(a.blend, 0., "exit never substitutes a fresh layout");
+            assert_eq!(a.finished, t >= 0.22);
+        }
+        let mut entry = Motion::new(false);
+        entry.enter(-1.);
+        entry.paint_ready(0.04);
+        let visible = entry.sample(0.1, 0.016);
+        entry.hold(0.1);
+        assert!(entry.dragging());
+        let held = entry.sample(0.5, 0.4);
+        assert_eq!(held.opacity, visible.opacity);
+        assert_eq!(held.blend, visible.blend);
+        entry.exit(0.5, 1.);
+        let first = entry.sample(0.5, 0.);
+        assert_eq!(first.opacity, visible.opacity);
+        assert_eq!(first.pose.x, visible.pose.x);
+        assert_eq!(first.slide, visible.slide);
+        assert_eq!(first.blend, visible.blend);
+        let mut reduced = Motion::new(true);
+        reduced.exit(0., -1.);
+        let sample = reduced.sample(0.045, 0.016);
+        assert_eq!(sample.pose.scale, 1.);
+        assert_eq!(sample.pose.x, 0.);
+        assert_eq!(sample.slide, 0.);
+        assert_eq!(sample.blur, 0.);
+        assert!(sample.opacity > 0. && sample.opacity < 1.);
+        assert!(reduced.sample(0.10, 0.016).finished);
     }
 }

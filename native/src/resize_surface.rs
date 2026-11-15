@@ -171,6 +171,8 @@ struct Frame {
     previous_tick: Cell<f32>,
     motion: RefCell<Motion>,
     relocation: RefCell<Option<Relocation>>,
+    exit: RefCell<Option<Completion>>,
+    exit_effect: RefCell<Option<IDCompositionEffectGroup>>,
 }
 impl Surface {
     pub fn new(source: HWND, core: Option<ICoreWebView2>, appearance: Appearance) -> Self {
@@ -260,6 +262,34 @@ impl Surface {
             )?
         };
         self.frame.replace(Some(frame));
+        Ok(())
+    }
+    /// Keep the current composited pixels and rectangle when reversing entry.
+    pub fn hold(&self, bounds: [i32; 4], corners: [f64; 4], scale: f64) -> Result<[i32; 4]> {
+        if !self.active() { self.begin(bounds, corners, scale)?; }
+        let frame = self.frame.borrow();
+        let f = frame.as_ref().unwrap();
+        // Drop the old entry callbacks without revealing its staged partner or
+        // jumping the real renderer to the old destination.
+        f.relocation.take();
+        f.motion.borrow_mut().hold(f.now());
+        unsafe {
+            let cloak = BOOL(1);
+            DwmSetWindowAttribute(f.source, DWMWA_CLOAK, &cloak as *const _ as _, 4)?;
+        }
+        Ok(f.bounds.get())
+    }
+    pub fn exit(&self, side: f32, done: Completion) -> Result<()> {
+        if let Some(f) = self.frame.borrow().as_ref().filter(|f| !f.restored.get()) {
+            unsafe {
+                let effect = f.device.CreateEffectGroup()?;
+                f._root_visual.SetEffect(&effect)?;
+                f.exit_effect.replace(Some(effect));
+            }
+            f.exit.replace(Some(done));
+            f.motion.borrow_mut().exit(f.now(), side);
+            trace(serde_json::json!({"phase":"split-exit", "side":side, "bounds":f.bounds.get()}));
+        }
         Ok(())
     }
     /// Sidebar toggles soften content while keeping the page flat and full size.
@@ -796,6 +826,8 @@ impl Frame {
             previous_tick: Cell::new(0.),
             motion: RefCell::new(motion),
             relocation: RefCell::new(None),
+            exit: RefCell::new(None),
+            exit_effect: RefCell::new(None),
         });
         SetWindowLongPtrW(
             source,
@@ -891,6 +923,11 @@ impl Frame {
         self.old.fit(size)?;
         self.new.fit(size)?;
         self.card_effect.SetOpacity2(sample.opacity)?;
+        if let Some(effect) = self.exit_effect.borrow().as_ref() {
+            // Fade the flat background too, so it cannot disappear in one frame.
+            effect.SetOpacity2(sample.opacity)?;
+        }
+
         self.card.SetOffsetX2(width as f32 * sample.slide)?;
         for (row, values) in projection(sample.pose, width as f32, height as f32)
             .iter()
@@ -1027,6 +1064,17 @@ impl Frame {
         }
         let sample = self.motion.borrow_mut().sample(now, dt);
         if sample.finished {
+            if let Some(done) = self.exit.borrow_mut().take() {
+                let presented = self.present(sample);
+                let _ = KillTimer(Some(self.preview), TIMER);
+                trace(serde_json::json!({"phase":"split-exit-done", "bounds":self.bounds.get()}));
+                // Only enqueue an app event. The app hides/removes the source
+                // before restoring this frame, outside this timer callback.
+                done()?;
+                presented?;
+                return Ok(());
+            }
+            self.present(sample)?;
             self.restore();
             return Ok(());
         }
@@ -1036,6 +1084,7 @@ impl Frame {
         if self.restored.replace(true) {
             return;
         }
+        if let Some(done) = self.exit.borrow_mut().take() { let _ = done(); }
         // Cancellation must commit the cached destination too, without
         // revealing the incoming pane or retaining a controller in a closure.
         if let Some(mut moving) = self.relocation.borrow_mut().take() {
@@ -1406,6 +1455,28 @@ mod tests {
             assert_eq!(commits.get(), 2);
             assert_eq!(reveals.get(), 1);
             assert_eq!(cancels.get(), 1);
+            // Exit completion keeps the source cloaked until the app can hide
+            // or remove it. A failed capture must not block either direction.
+            for side in [-1., 1.] {
+                surface.hold([20, 20, 200, 150], [8.; 4], 1.)?;
+                let calls = std::rc::Rc::new(Cell::new(0));
+                let done = calls.clone();
+                surface.exit(side, Box::new(move || { done.set(done.get() + 1); Ok(()) }))?;
+                {
+                    let frame = surface.frame.borrow();
+                    let frame = frame.as_ref().unwrap();
+                    frame.motion.borrow_mut().exit(frame.now() - 0.3, side);
+                    frame.tick()?;
+                    assert_eq!(calls.get(), 1);
+                    let mut cloaked = 0u32;
+                    DwmGetWindowAttribute(source, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)?;
+                    assert_ne!(cloaked, 0, "do not flash the departing source");
+                    assert!(surface.active());
+                }
+                surface.end();
+                assert_eq!(calls.get(), 1, "completion cannot fire twice");
+                assert_eq!(GetWindowLongPtrW(source, GWL_EXSTYLE), style);
+            }
             drop(surface);
             DestroyWindow(source)?;
             DestroyWindow(root)?;

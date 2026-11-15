@@ -77,8 +77,13 @@ try {
   }
   const split = () => send({ type: 'split', id: leftId, other: rightId });
   const unsplit = async () => {
+    const mark = events.length;
     await send({ type: 'unsplit' });
     await ui.locator('.split-divider').waitFor({ state: 'detached' });
+    // The shell reflects state immediately; native exit/recovery is sequential.
+    await waitFor(() => since(mark, 'split-exit-done').length === 1
+      && since(mark, 'split-move-done').length === 1
+      && since(mark, 'restored').length >= 2, 'exit and full-width recovery');
   };
   const finished = mark => waitFor(() => since(mark, 'restored').length >= 2, 'both entry previews released');
   const geometry = async () => {

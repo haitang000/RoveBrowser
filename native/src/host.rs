@@ -101,6 +101,7 @@ enum Event {
     Layout,
     SplitResize,
     SidebarResize,
+    SplitExited(u64),
     DataCleared(String, bool),
     HistoryCleared(bool),
     Command(Command),
@@ -300,6 +301,8 @@ struct App {
     resize_appearance: crate::resize_surface::Appearance,
     presented_split: Option<(String, String)>,
     split_entry_pending: bool,
+    split_exit: Option<SplitExit>,
+    split_exit_ticket: u64,
     pages: HashMap<String, Page>,
     data_clear_view: Option<WebView>,
     live_settings: Rc<RefCell<crate::settings::Settings>>,
@@ -361,6 +364,13 @@ struct App {
     /// first, and the thresholds this build runs with.
     sleep_queue: VecDeque<String>,
     sleep_thresholds: crate::sleep::Thresholds,
+}
+struct SplitExit {
+    keeper: String,
+    departing: String,
+    ticket: u64,
+    departed: bool,
+    layout_ready: bool,
 }
 struct PreviewRender {
     view: WebView,
@@ -432,6 +442,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         resize_appearance: crate::resize_surface::Appearance::default(),
         presented_split: None,
         split_entry_pending: false,
+        split_exit: None,
+        split_exit_ticket: 0,
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
         pages: HashMap::new(),
@@ -1748,6 +1760,9 @@ impl App {
             return Ok(());
         }
         if !self.state.onboarding.completed { return self.sync_layout(); }
+        // State is already saved/published, but both controllers must outlive
+        // the departing snapshot. Its completion event performs the cleanup.
+        if self.split_exit.is_some() { return self.sync_layout(); }
         // Release native mouse capture and controller references before a tab
         // switch or close can destroy the pages the handle was resizing.
         self.finish_split_resize();
@@ -1825,6 +1840,7 @@ impl App {
     // Layout messages arrive every frame during sidebar motion. They must not
     // create/navigate pages, touch profile settings, or repeat ShowWindow calls.
     fn sync_page_bounds(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.split_exit.is_some() { return Ok(false); }
         if self.split_entry_pending && self.overlay { return Ok(false); }
         if self.split_handle.as_ref().is_some_and(|handle| handle.dragging())
             || self.sidebar_handle.as_ref().is_some_and(|handle| handle.dragging()) {
@@ -2029,7 +2045,88 @@ impl App {
             self.error(error);
         }
     }
+    fn begin_split_exit(&mut self, command: &Command) -> Result<bool, Box<dyn std::error::Error>> {
+        let Some(active) = self.state.active() else { return Ok(false); };
+        let Some(other) = active.split_with.as_ref() else { return Ok(false); };
+        let left = active.id.clone();
+        let right = other.clone();
+        let (keeper, departing, side) = match command {
+            Command::Unsplit => (left, right, 1.),
+            Command::Close { id } if id.as_ref().unwrap_or(&left) == &left => (right, left, -1.),
+            Command::Close { id: Some(id) } if id == &right => (left, right, 1.),
+            _ => return Ok(false),
+        };
+        let Some(window) = &self.window else { return Ok(false); };
+        let scale = window.scale_factor();
+        if self.peek.is_some() || self.secondary.is_none()
+            || [&keeper, &departing].iter().any(|id| self.pages.get(*id)
+                .is_none_or(|page| !page.visible.get() || page.bounds.get().is_none())) {
+            return Ok(false);
+        }
+        if let Some(handle) = &self.split_handle { handle.cancel(); handle.configure(None)?; }
+        if let Some(handle) = &self.sidebar_handle { handle.cancel(); handle.configure(None)?; }
+        self.receive_split_resize();
+        self.receive_sidebar_resize();
+        self.pending_layout.take();
+        self.sidebar_motion = false;
+        self.live_resize = false;
+        self.split_entry_pending = false;
+        for id in [&keeper, &departing] {
+            let page = &self.pages[id];
+            let corners = if id == &self.state.active_tab { self.primary.corners }
+                else { self.secondary.unwrap().corners };
+            let bounds = page.resize_surface.hold(page.bounds.get().unwrap(), corners, scale)?;
+            page.bounds.set(Some(bounds));
+        }
+        self.split_exit_ticket = self.split_exit_ticket.wrapping_add(1);
+        let ticket = self.split_exit_ticket;
+        let proxy = self.proxy.clone();
+        self.pages[&departing].resize_surface.exit(side, Box::new(move || {
+            let _ = proxy.send_event(Event::SplitExited(ticket));
+            Ok(())
+        }))?;
+        self.split_exit = Some(SplitExit { keeper, departing, ticket, departed: false, layout_ready: false });
+        Ok(true)
+    }
+    fn recover_split_exit(&mut self) {
+        if !self.split_exit.as_ref().is_some_and(|exit| exit.departed && exit.layout_ready) { return; }
+        let exit = self.split_exit.take().unwrap();
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let Some(page) = self.pages.get(&exit.keeper) else { return Ok(()); };
+            let Some(window) = &self.window else { return Ok(()); };
+            let scale = window.scale_factor();
+            let rect = self.bounds(self.primary);
+            let position = rect.position.to_physical::<i32>(scale);
+            let size = rect.size.to_physical::<i32>(scale);
+            let to = [position.x, position.y, size.width, size.height];
+            let hwnd = page.view.hwnd();
+            let controller = page.view.controller();
+            let viewport = page.viewport.clone();
+            let clip = page.clip.clone();
+            let corners = self.primary.corners;
+            page.resize_surface.relocate(to, Box::new(move || {
+                unsafe {
+                    SetWindowPos(hwnd, None, to[0], to[1], to[2], to[3], SWP_NOACTIVATE | SWP_NOZORDER)?;
+                    controller.SetBounds(RECT { left: 0, top: 0, right: to[2], bottom: to[3] })?;
+                }
+                clip.apply(hwnd, corners, scale)?;
+                viewport.set(Some([to[2], to[3]]));
+                Ok(())
+            }), Box::new(|| Ok(())), Box::new(|| Ok(())));
+            self.presented_split = None;
+            self.pages.retain(|id, _| self.state.tabs.iter().any(|tab| &tab.id == id));
+            self.sync_layout()?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.finish_split_resize();
+            self.error(error);
+            if let Err(error) = self.sync() { self.error(error); }
+        }
+    }
     fn finish_split_resize(&mut self) {
+        // Invalidate any queued completion before dropping its frame/controller.
+        self.split_exit = None;
         if let Some(handle) = &self.split_handle { handle.cancel(); }
         if let Some(handle) = &self.sidebar_handle { handle.cancel(); }
         // Consume the final dimensions before any ordinary layout can reapply
@@ -2577,6 +2674,12 @@ impl App {
                 } else {
                     return;
                 }
+                if let Some(exit) = &mut self.split_exit {
+                    // Ignore a stale two-pane report sent before state changed.
+                    exit.layout_ready = secondary.is_none();
+                    self.recover_split_exit();
+                    return;
+                }
                 // Capture the original full-size page BEFORE committing the
                 // split slots. Its frozen presentation moves first.
                 let pair = self.secondary.filter(|r| r.width > 0. && r.height > 0.)
@@ -2861,6 +2964,7 @@ impl App {
                 return;
             }
             _ => {
+                if self.split_exit.is_some() { self.finish_split_resize(); }
                 self.dismiss_tab_preview();
                 if matches!(
                     c,
@@ -2886,7 +2990,12 @@ impl App {
                 ) {
                     self.close_peek();
                 }
+                if let Err(error) = self.begin_split_exit(&c) {
+                    self.finish_split_resize();
+                    self.error(error);
+                }
                 if let Err(e) = self.state.apply(&c) {
+                    self.finish_split_resize();
                     self.error(e);
                     return;
                 }
@@ -3082,6 +3191,16 @@ impl ApplicationHandler<Event> for App {
                 self.receive_split_resize();
             }
             Event::SidebarResize => self.receive_sidebar_resize(),
+            Event::SplitExited(ticket) => {
+                if let Some(exit) = self.split_exit.as_mut().filter(|exit| exit.ticket == ticket) {
+                    exit.departed = true;
+                    if let Some(page) = self.pages.get(&exit.departing) {
+                        if let Err(error) = page.set_visible(false) { eprintln!("Rove split exit: {error}"); }
+                        page.resize_surface.end();
+                    }
+                    self.recover_split_exit();
+                }
+            }
             Event::Layout => {
                 if let Some(layout) = self.pending_layout.take() {
                     self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, sidebar: layout.sidebar, viewport: layout.viewport, live_resize: layout.live_resize, sidebar_motion: layout.sidebar_motion }, Some(event_loop));
