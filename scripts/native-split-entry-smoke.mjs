@@ -95,15 +95,26 @@ try {
   let mark = events.length;
   await split(); await finished(mark);
   const entry = since(mark, 'split-entry');
-  assert.equal(entry.length, 2);
-  assert.deepEqual(entry.map(e => e.edge).sort(), [-1, 1]);
+  assert.equal(entry.length, 1);
+  assert.equal(entry[0].edge, -1);
+  const move = since(mark, 'split-move');
+  assert.equal(move.length, 1);
+  assert.ok(move[0].from[2] > move[0].to[2], 'original must move from its unsplit width');
+  const frames = since(mark, 'split-move-frame');
+  assert.ok(frames.some(e => e.bounds[2] < move[0].from[2] && e.bounds[2] > move[0].to[2]), 'original width must animate continuously');
+  const sequence = events.slice(mark);
+  const arrived = sequence.findIndex(e => e.phase === 'split-move-done');
+  const appeared = sequence.findIndex(e => e.phase === 'split-entry');
+  assert.ok(arrived >= 0 && appeared > arrived, 'incoming starts only after original arrives');
+  assert.ok(sequence.slice(0, arrived).filter(e => e.phase === 'settling').every(e => e.opacity === 0), 'incoming card remains hidden throughout original movement');
   const samples = since(mark, 'settling');
   assert.ok(samples.some(e => e.scale < 0.99 && Math.abs(e.depth[0]) > 0.01), 'entry must visibly start lifted and tilted');
   assert.ok(samples.some(e => e.blend > 0 && e.blend < 1), 'paint must crossfade');
   assert.ok(samples.some(e => e.scale > 0.97 && e.scale < 1), 'entry must scale back nonlinearly');
   const viewports = await geometry();
   assert.ok(viewports.every(page => page.resizes.length <= 1), 'animation must not repeatedly reflow either webpage');
-  checks.push('mirrored perspective, crossfade, nonlinear scale, one final viewport per page');
+  assert.ok(samples.some(e => e.opacity > 0 && e.opacity < 1 && e.slide > 0), 'incoming must slide and fade into place');
+  checks.push('original moves continuously first; incoming then slides and fades; each viewport commits once');
 
   mark = events.length;
   const layout = await ui.evaluate(() => {
@@ -122,16 +133,18 @@ try {
   mark = events.length;
   await split(); await ui.locator('.split-divider').waitFor(); await pause(100);
   assert.equal(since(mark, 'split-entry').length, 0, 'wait for overlay dismissal');
+  assert.equal(since(mark, 'split-move').length, 0, 'original also waits for overlay dismissal');
   await send({ type: 'overlay', visible: false }); await finished(mark);
-  assert.equal(since(mark, 'split-entry').length, 2);
+  assert.equal(since(mark, 'split-entry').length, 1);
   await geometry();
   checks.push('entry deferred until command overlay closes');
 
   await unsplit(); mark = events.length;
   await split();
-  await waitFor(() => since(mark, 'split-entry').length === 2, 'interruptible entry starts');
+  await waitFor(() => since(mark, 'split-move').length === 1, 'original starts moving');
   await unsplit();
   await finished(mark);
+  assert.equal(since(mark, 'split-entry').length, 0, 'cancellation cannot reveal the staged pane');
   assert.equal(await ui.locator('.webview-slot').count(), 1);
   const width = await ui.locator('.webview-slot').evaluate(node => node.getBoundingClientRect().width);
   await waitFor(async () => Math.abs(await left.evaluate(() => innerWidth) - width) <= 1, 'unsplit viewport restored');
@@ -140,7 +153,7 @@ try {
   await send({ type: 'resizeAppearance', start: [80, 120, 170], end: [110, 90, 160], angle: 135, dark: false, reduceMotion: true });
   mark = events.length;
   await split(); await finished(mark);
-  assert.equal(since(mark, 'split-entry').length, 2);
+  assert.equal(since(mark, 'split-entry').length, 1);
   assert.ok(since(mark, 'settling').every(e => e.scale === 1 && e.depth.every(value => value === 0)), 'reduced motion uses no perspective or scale');
   await geometry();
   checks.push('reduced motion only fades and reaches final layout');
@@ -148,6 +161,10 @@ try {
   await writeFile(join(output, 'result.json'), JSON.stringify({ passed: true, checks, profile, viewports, events }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } finally {
-  await writeFile(join(output, 'trace.log'), stderr);
-  await pageBrowser?.close(); await uiBrowser?.close(); child?.kill(); server.close();
+  try {
+    await mkdir(output, { recursive: true });
+    await writeFile(join(output, 'trace.log'), stderr);
+  } finally {
+    await pageBrowser?.close(); await uiBrowser?.close(); child?.kill(); server.close();
+  }
 }

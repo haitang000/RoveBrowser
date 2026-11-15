@@ -181,6 +181,11 @@ impl Page {
         let size = bounds.size.to_physical::<i32>(scale);
         let next = [position.x, position.y, size.width, size.height];
         if self.bounds.get() != Some(next) {
+            if self.resize_surface.relocating() {
+                // Keep the original renderer frozen until its snapshot arrives.
+                self.bounds.set(Some(next));
+                return Ok(());
+            }
             self.resize_surface.end();
             // Move the HWND before asking Chromium to reflow. Wry does these in
             // the opposite order, making visible edges wait on renderer work.
@@ -1811,6 +1816,7 @@ impl App {
     // Layout messages arrive every frame during sidebar motion. They must not
     // create/navigate pages, touch profile settings, or repeat ShowWindow calls.
     fn sync_page_bounds(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.split_entry_pending && self.overlay { return Ok(false); }
         if self.split_handle.as_ref().is_some_and(|handle| handle.dragging())
             || self.sidebar_handle.as_ref().is_some_and(|handle| handle.dragging()) {
             return Ok(false);
@@ -1947,16 +1953,63 @@ impl App {
         let current = self.state.active().and_then(|tab| tab.split_with.as_ref())
             .map(|other| (self.state.active_tab.clone(), other.clone()));
         if current != self.presented_split { return; }
-        let Some(window) = &self.window else { return; };
-        let Some((left, right)) = self.presented_split.as_ref() else { return; };
-        for (id, rect, edge) in [(left, Some(self.primary), 1.), (right, self.secondary, -1.)] {
-            let Some((page, rect)) = self.pages.get(id).zip(rect).filter(|(page, _)| page.visible.get()) else { continue; };
-            let Some(bounds) = page.bounds.get() else { continue; };
-            if let Err(error) = page.resize_surface.enter(bounds, rect.corners, window.scale_factor(), edge) {
-                // Failure leaves the live, final-sized page usable.
-                page.resize_surface.end();
-                eprintln!("Rove split entry unavailable: {error}");
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let Some(window) = &self.window else { return Ok(()); };
+            let Some((left, right)) = self.presented_split.as_ref() else { return Ok(()); };
+            let scale = window.scale_factor();
+            let incoming = self.pages.get(right).map(|page| page.resize_surface.clone());
+            let mut outgoing = None;
+            if let Some(page) = self.pages.get(left).filter(|page| page.visible.get()) {
+                if let Some(from) = page.bounds.get() {
+                    let rect = self.bounds(self.primary);
+                    let position = rect.position.to_physical::<i32>(scale);
+                    let size = rect.size.to_physical::<i32>(scale);
+                    let to = [position.x, position.y, size.width, size.height];
+                    if from != to {
+                        page.resize_surface.begin(from, self.primary.corners, scale)?;
+                        let hwnd = page.view.hwnd();
+                        let controller = page.view.controller();
+                        let viewport = page.viewport.clone();
+                        let clip = page.clip.clone();
+                        let corners = self.primary.corners;
+                        let incoming = incoming.clone();
+                        let cancelled = incoming.clone();
+                        page.resize_surface.relocate(to, Box::new(move || {
+                            unsafe {
+                                SetWindowPos(hwnd, None, to[0], to[1], to[2], to[3], SWP_NOACTIVATE | SWP_NOZORDER)?;
+                                controller.SetBounds(RECT { left: 0, top: 0, right: to[2], bottom: to[3] })?;
+                            }
+                            clip.apply(hwnd, corners, scale)?;
+                            viewport.set(Some([to[2], to[3]]));
+                            Ok(())
+                        }), Box::new(move || {
+                            if let Some(surface) = incoming { surface.reveal_entry()?; }
+                            Ok(())
+                        }), Box::new(move || {
+                            if let Some(surface) = cancelled { surface.end(); }
+                            Ok(())
+                        }));
+                        outgoing = Some(page.resize_surface.clone());
+                    }
+                }
             }
+            self.sync_layout()?;
+            if let Some((page, rect)) = self.pages.get(right).zip(self.secondary) {
+                if let Some(bounds) = page.bounds.get() {
+                    if outgoing.is_some() {
+                        page.resize_surface.stage_entry(bounds, rect.corners, scale)?;
+                    } else {
+                        page.resize_surface.enter(bounds, rect.corners, scale, -1.)?;
+                    }
+                }
+            }
+            if let Some(surface) = outgoing { surface.raise()?; }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            for page in self.pages.values() { page.resize_surface.end(); }
+            if let Err(error) = self.sync_layout() { self.error(error); }
+            self.error(error);
         }
     }
     fn finish_split_resize(&mut self) {
@@ -2487,23 +2540,25 @@ impl App {
                 } else {
                     return;
                 }
+                // Capture the original full-size page BEFORE committing the
+                // split slots. Its frozen presentation moves first.
+                let pair = self.secondary.filter(|r| r.width > 0. && r.height > 0.)
+                    .and_then(|_| self.state.active()?.split_with.as_ref())
+                    .map(|other| (self.state.active_tab.clone(), other.clone()));
+                if pair != self.presented_split {
+                    self.split_entry_pending = pair.is_some();
+                    self.presented_split = pair;
+                }
+                if self.split_entry_pending {
+                    self.animate_split_entry();
+                    return;
+                }
                 let result = self.sync_page_bounds().and_then(|changed| {
                     // Showing a newly created controller can change its z-order.
                     if changed { self.sync_layout() } else { Ok(()) }
                 });
                 if let Err(e) = result {
                     self.error(e);
-                } else {
-                    // Wait for the shell's two final slots. sync() immediately
-                    // after Split still has the old single-page rectangle.
-                    let pair = self.secondary.filter(|r| r.width > 0. && r.height > 0.)
-                        .and_then(|_| self.state.active()?.split_with.as_ref())
-                        .map(|other| (self.state.active_tab.clone(), other.clone()));
-                    if pair != self.presented_split {
-                        self.split_entry_pending = pair.is_some();
-                        self.presented_split = pair;
-                    }
-                    self.animate_split_entry();
                 }
                 return;
             }
@@ -2514,8 +2569,9 @@ impl App {
                 }
                 if visible && !self.overlay && !command { self.refresh_visible_thumbnails(); }
                 self.overlay = visible;
-                if let Err(e) = self.sync_layout() { self.error(e); }
-                if !visible { self.animate_split_entry(); }
+                if !visible && self.split_entry_pending {
+                    self.animate_split_entry();
+                } else if let Err(e) = self.sync_layout() { self.error(e); }
                 // PopupLayer requests focus once its input region is installed.
                 // Tab dragging also uses Overlay and keeps shell capture.
                 if !visible {

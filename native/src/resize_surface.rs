@@ -1,6 +1,8 @@
 //! Frozen WebView snapshots, projected and blended by DirectComposition.
 //! Chromium only receives the final size; no layout/paint runs on our drag clock.
-use crate::resize_motion::{projection, Motion, PAINT_DELAY, PAINT_LIMIT};
+use crate::resize_motion::{
+    move_bounds, projection, Motion, MOVE_DURATION, PAINT_DELAY, PAINT_LIMIT,
+};
 use std::{
     cell::{Cell, RefCell},
     sync::mpsc,
@@ -119,6 +121,16 @@ enum Capture {
 enum Start {
     Drag(Option<crate::resize_motion::Pose>),
     Enter(f32),
+    Staged(f32),
+}
+type Completion = Box<dyn FnOnce() -> Result<()>>;
+struct Relocation {
+    from: [i32; 4],
+    to: [i32; 4],
+    started: Option<f32>,
+    commit: Option<Completion>,
+    reveal: Option<Completion>,
+    cancel: Option<Completion>,
 }
 struct Layer {
     visual: IDCompositionVisual,
@@ -135,6 +147,8 @@ struct Frame {
     _target: IDCompositionTarget,
     _root_visual: IDCompositionVisual,
     projection: IDCompositionMatrixTransform3D,
+    card_effect: IDCompositionEffectGroup,
+    card: IDCompositionVisual,
     blur: IDCompositionGaussianBlurEffect,
     card_clip: IDCompositionRectangleClip,
     viewport_clip: IDCompositionRectangleClip,
@@ -155,6 +169,7 @@ struct Frame {
     started: Instant,
     previous_tick: Cell<f32>,
     motion: RefCell<Motion>,
+    relocation: RefCell<Option<Relocation>>,
 }
 impl Surface {
     pub fn new(source: HWND, core: Option<ICoreWebView2>, appearance: Appearance) -> Self {
@@ -182,6 +197,48 @@ impl Surface {
             .as_ref()
             .is_some_and(|f| !f.restored.get() && f.motion.borrow().dragging())
     }
+    pub fn relocating(&self) -> bool {
+        self.frame
+            .borrow()
+            .as_ref()
+            .is_some_and(|f| !f.restored.get() && f.relocation.borrow().is_some())
+    }
+    pub fn relocate(
+        &self,
+        to: [i32; 4],
+        commit: Completion,
+        reveal: Completion,
+        cancel: Completion,
+    ) {
+        if let Some(f) = self.frame.borrow().as_ref() {
+            f.motion.borrow_mut().point(1., 0.);
+            f.relocation.replace(Some(Relocation {
+                from: f.bounds.get(),
+                to,
+                started: None,
+                commit: Some(commit),
+                reveal: Some(reveal),
+                cancel: Some(cancel),
+            }));
+            trace(serde_json::json!({"phase":"split-move", "from":f.bounds.get(), "to":to}));
+        }
+    }
+    pub fn raise(&self) -> Result<()> {
+        if let Some(f) = self.frame.borrow().as_ref().filter(|f| !f.restored.get()) {
+            unsafe {
+                SetWindowPos(
+                    f.preview,
+                    Some(HWND_TOP),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                )?;
+            }
+        }
+        Ok(())
+    }
     pub fn begin(&self, bounds: [i32; 4], corners: [f64; 4], scale: f64) -> Result<()> {
         let pose = self
             .frame
@@ -207,6 +264,29 @@ impl Surface {
     /// Start on the final viewport, already lifted and tilted away from the
     /// divider. Only presentation changes while the fresh pixels arrive.
     pub fn enter(&self, bounds: [i32; 4], corners: [f64; 4], scale: f64, edge: f32) -> Result<()> {
+        self.enter_with(bounds, corners, scale, Start::Enter(edge))
+    }
+    pub fn stage_entry(&self, bounds: [i32; 4], corners: [f64; 4], scale: f64) -> Result<()> {
+        self.enter_with(bounds, corners, scale, Start::Staged(-1.))
+    }
+    pub fn reveal_entry(&self) -> Result<()> {
+        if let Some(f) = self.frame.borrow().as_ref().filter(|f| !f.restored.get()) {
+            f.motion.borrow_mut().reveal(f.now());
+            trace(serde_json::json!({"phase":"split-entry", "bounds":f.bounds.get(), "edge":-1.}));
+        }
+        Ok(())
+    }
+    fn enter_with(
+        &self,
+        bounds: [i32; 4],
+        corners: [f64; 4],
+        scale: f64,
+        start: Start,
+    ) -> Result<()> {
+        let edge = match start {
+            Start::Enter(edge) => Some(edge),
+            _ => None,
+        };
         self.end();
         let frame = unsafe {
             Frame::new(
@@ -214,13 +294,15 @@ impl Surface {
                 self.core.clone(),
                 bounds,
                 self.appearance.get(),
-                Start::Enter(edge),
+                start,
                 corners.map(|r| (r * scale) as f32),
                 scale as f32,
             )?
         };
         self.frame.replace(Some(frame));
-        trace(serde_json::json!({"phase":"split-entry", "bounds":bounds, "edge":edge}));
+        if let Some(edge) = edge {
+            trace(serde_json::json!({"phase":"split-entry", "bounds":bounds, "edge":edge}));
+        }
         Ok(())
     }
     pub fn resize(&self, bounds: [i32; 4]) -> Result<()> {
@@ -622,6 +704,8 @@ impl Frame {
                 target,
                 root_visual,
                 projection,
+                effect,
+                card,
                 blur,
                 card_clip,
                 viewport_clip,
@@ -635,6 +719,8 @@ impl Frame {
             target,
             root_visual,
             projection,
+            card_effect,
+            card,
             blur,
             card_clip,
             viewport_clip,
@@ -666,6 +752,7 @@ impl Frame {
                 motion.point(-1., 0.);
             }
             Start::Enter(edge) => motion.enter(edge),
+            Start::Staged(edge) => motion.stage(edge),
         }
         let frame = Box::new(Self {
             source,
@@ -676,6 +763,8 @@ impl Frame {
             _target: target,
             _root_visual: root_visual,
             projection,
+            card_effect,
+            card,
             blur,
             card_clip,
             viewport_clip,
@@ -696,6 +785,7 @@ impl Frame {
             started: Instant::now(),
             previous_tick: Cell::new(0.),
             motion: RefCell::new(motion),
+            relocation: RefCell::new(None),
         });
         SetWindowLongPtrW(
             source,
@@ -729,6 +819,10 @@ impl Frame {
         Ok(frame)
     }
     unsafe fn resize(&self, bounds: [i32; 4]) -> Result<()> {
+        self.position(bounds)?;
+        self.tick()
+    }
+    unsafe fn position(&self, bounds: [i32; 4]) -> Result<()> {
         self.bounds.set(bounds);
         let mut origin = POINT {
             x: bounds[0],
@@ -744,7 +838,7 @@ impl Frame {
             bounds[3],
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         )?;
-        self.tick()
+        Ok(())
     }
     unsafe fn present(&self, sample: crate::resize_motion::Sample) -> Result<()> {
         let [_, _, width, height] = self.bounds.get();
@@ -752,7 +846,8 @@ impl Frame {
         if trace_enabled() && !self.motion.borrow().dragging() {
             trace(
                 serde_json::json!({"phase":"settling", "time":self.now(), "scale":sample.pose.scale,
-                "depth":[sample.pose.x,sample.pose.y], "blend":sample.blend}),
+                "depth":[sample.pose.x,sample.pose.y], "blend":sample.blend,
+                "opacity":sample.opacity, "slide":sample.slide, "bounds":self.bounds.get()}),
             );
         }
         self.background_scale.SetScaleX2(width.max(1) as f32)?;
@@ -786,6 +881,8 @@ impl Frame {
         )?;
         self.old.fit(size)?;
         self.new.fit(size)?;
+        self.card_effect.SetOpacity2(sample.opacity)?;
+        self.card.SetOffsetX2(width as f32 * sample.slide)?;
         for (row, values) in projection(sample.pose, width as f32, height as f32)
             .iter()
             .enumerate()
@@ -864,6 +961,50 @@ impl Frame {
                 _ => {}
             }
         }
+        let mut completed = None;
+        {
+            let mut relocation = self.relocation.borrow_mut();
+            if let Some(moving) = relocation.as_mut() {
+                if moving.started.is_none() && (self.frozen.get() || now >= 0.120) {
+                    moving.started = Some(now);
+                }
+                if let Some(start) = moving.started {
+                    let progress = if self.motion.borrow().reduced {
+                        1.
+                    } else {
+                        (now - start) / MOVE_DURATION
+                    };
+                    self.position(move_bounds(moving.from, moving.to, progress))?;
+                    trace(
+                        serde_json::json!({"phase":"split-move-frame", "bounds":self.bounds.get(), "progress":progress}),
+                    );
+                    if progress >= 1. {
+                        completed = relocation.take();
+                    }
+                }
+            }
+        }
+        if let Some(mut moving) = completed {
+            let result = (|| -> Result<()> {
+                if let Some(commit) = moving.commit.take() {
+                    commit()?;
+                }
+                self.motion.borrow_mut().release(now);
+                let cloak = BOOL(0);
+                DwmSetWindowAttribute(self.source, DWMWA_CLOAK, &cloak as *const _ as _, 4)?;
+                trace(serde_json::json!({"phase":"split-move-done", "bounds":self.bounds.get()}));
+                if let Some(reveal) = moving.reveal.take() {
+                    reveal()?;
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                if let Some(cancel) = moving.cancel.take() {
+                    let _ = cancel();
+                }
+                return Err(error);
+            }
+        }
         let elapsed = self.motion.borrow().elapsed(now);
         if elapsed.is_some_and(|t| t >= PAINT_DELAY) && !self.paint_requested.replace(true) {
             self.capture(Capture::After);
@@ -885,6 +1026,20 @@ impl Frame {
     unsafe fn restore(&self) {
         if self.restored.replace(true) {
             return;
+        }
+        // Cancellation must commit the cached destination too, without
+        // revealing the incoming pane or retaining a controller in a closure.
+        if let Some(mut moving) = self.relocation.borrow_mut().take() {
+            if let Some(commit) = moving.commit.take() {
+                if let Err(error) = commit() {
+                    eprintln!("Rove split cancellation: {error}");
+                }
+            }
+            if let Some(cancel) = moving.cancel.take() {
+                if let Err(error) = cancel() {
+                    eprintln!("Rove split cancellation: {error}");
+                }
+            }
         }
         trace(serde_json::json!({"phase":"restored", "bounds":self.bounds.get()}));
         let _ = KillTimer(Some(self.preview), TIMER);
@@ -1196,6 +1351,52 @@ mod tests {
             }
             assert!(!surface.active(), "entry must finish without capture");
             assert_eq!(GetWindowLongPtrW(source, GWL_EXSTYLE), style);
+            // Moving a split snapshot must not move/reflow the source until
+            // arrival. Cancellation still commits once and cancels its peer.
+            let commits = std::rc::Rc::new(Cell::new(0));
+            let reveals = std::rc::Rc::new(Cell::new(0));
+            let cancels = std::rc::Rc::new(Cell::new(0));
+            for cancelled in [false, true] {
+                surface.begin([20, 20, 200, 150], [8.; 4], 1.)?;
+                let count = commits.clone();
+                let shown = reveals.clone();
+                let ended = cancels.clone();
+                surface.relocate(
+                    [20, 20, 100, 150],
+                    Box::new(move || {
+                        count.set(count.get() + 1);
+                        Ok(())
+                    }),
+                    Box::new(move || {
+                        shown.set(shown.get() + 1);
+                        Ok(())
+                    }),
+                    Box::new(move || {
+                        ended.set(ended.get() + 1);
+                        Ok(())
+                    }),
+                );
+                {
+                    let frame = surface.frame.borrow();
+                    let frame = frame.as_ref().unwrap();
+                    frame.relocation.borrow_mut().as_mut().unwrap().started =
+                        Some(frame.now() - MOVE_DURATION / 2.);
+                    frame.tick()?;
+                    assert!(frame.bounds.get()[2] > 100 && frame.bounds.get()[2] < 200);
+                    let mut rect = RECT::default();
+                    GetClientRect(source, &mut rect)?;
+                    assert_eq!(rect.right, 200, "the source stays at its original width");
+                    if !cancelled {
+                        frame.relocation.borrow_mut().as_mut().unwrap().started =
+                            Some(frame.now() - MOVE_DURATION - 0.01);
+                        frame.tick()?;
+                    }
+                }
+                surface.end();
+            }
+            assert_eq!(commits.get(), 2);
+            assert_eq!(reveals.get(), 1);
+            assert_eq!(cancels.get(), 1);
             drop(surface);
             DestroyWindow(source)?;
             DestroyWindow(root)?;

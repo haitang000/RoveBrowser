@@ -37,12 +37,23 @@ pub struct Motion {
     target: Pose,
     released: Option<(f32, Pose)>,
     painted: Option<f32>,
+    staged: bool,
+    incoming: bool,
     pub reduced: bool,
 }
 pub struct Sample {
     pub pose: Pose,
     pub blend: f32,
     pub finished: bool,
+    pub opacity: f32,
+    pub slide: f32,
+}
+pub const MOVE_DURATION: f32 = 0.280;
+/// Zero velocity and acceleration at both ends, with exact integer endpoints.
+pub fn move_bounds(from: [i32; 4], to: [i32; 4], progress: f32) -> [i32; 4] {
+    let t = progress.clamp(0., 1.) as f64;
+    let t = t * t * t * (t * (t * 6. - 15.) + 10.);
+    std::array::from_fn(|i| (from[i] as f64 + (to[i] as f64 - from[i] as f64) * t).round() as i32)
 }
 pub const PAINT_DELAY: f32 = 0.032;
 pub const PAINT_LIMIT: f32 = 0.240;
@@ -65,11 +76,13 @@ impl Motion {
             target: Pose::default(),
             released: None,
             painted: None,
+            staged: false,
+            incoming: false,
             reduced,
         }
     }
     pub fn dragging(&self) -> bool {
-        self.released.is_none()
+        self.released.is_none() && !self.staged
     }
     pub fn resume(&mut self, pose: Pose) {
         self.scale.value = pose.scale;
@@ -79,9 +92,18 @@ impl Motion {
     /// A newly shown split pane starts lifted beside the divider, then uses
     /// the same paint handoff and nonlinear settle as a released resize.
     pub fn enter(&mut self, edge: f32) {
+        self.stage(edge);
+        self.reveal(0.);
+    }
+    pub fn stage(&mut self, edge: f32) {
         self.point(edge, 0.);
         self.resume(self.target);
-        self.release(0.);
+        self.staged = true;
+        self.incoming = true;
+    }
+    pub fn reveal(&mut self, now: f32) {
+        self.staged = false;
+        self.release(now);
     }
     pub fn point(&mut self, x: f32, y: f32) {
         self.target = if self.reduced {
@@ -114,6 +136,15 @@ impl Motion {
         }
     }
     pub fn sample(&mut self, now: f32, dt: f32) -> Sample {
+        if self.staged {
+            return Sample {
+                pose: self.pose(),
+                blend: 0.,
+                finished: false,
+                opacity: 0.,
+                slide: 0.08,
+            };
+        }
         let Some((start, from)) = self.released else {
             self.scale.step(self.target.scale, dt);
             self.x.step(self.target.x, dt);
@@ -122,6 +153,8 @@ impl Motion {
                 pose: self.pose(),
                 blend: 0.,
                 finished: false,
+                opacity: 1.,
+                slide: 0.,
             };
         };
         let elapsed = (now - start).max(0.);
@@ -152,6 +185,16 @@ impl Motion {
             pose,
             blend,
             finished: blend >= 1. && settle >= 1.,
+            opacity: if self.incoming {
+                smooth(elapsed / if self.reduced { 0.08 } else { 0.14 })
+            } else {
+                1.
+            },
+            slide: if self.incoming && !self.reduced {
+                0.08 * (1. - ease_out(elapsed / 0.24))
+            } else {
+                0.
+            },
         }
     }
 }
@@ -276,5 +319,44 @@ mod tests {
         assert_eq!(first.pose.x, 0.);
         m.paint_ready(0.04);
         assert!(m.sample(0.13, 0.016).finished);
+    }
+    #[test]
+    fn incoming_page_stays_hidden_until_outgoing_page_has_arrived() {
+        let mut incoming = Motion::new(false);
+        incoming.stage(-1.);
+        assert!(!incoming.dragging());
+        for now in [0., 0.2, 0.5] {
+            let sample = incoming.sample(now, 0.016);
+            assert_eq!(sample.opacity, 0.);
+            assert!(!sample.finished);
+        }
+        incoming.reveal(0.5);
+        let first = incoming.sample(0.5, 0.);
+        assert_eq!(first.opacity, 0.);
+        assert_eq!(first.slide, 0.08);
+        let middle = incoming.sample(0.57, 0.016);
+        assert!(middle.opacity > 0. && middle.opacity < 1.);
+        assert!(middle.slide > 0. && middle.slide < first.slide);
+        incoming.paint_ready(0.55);
+        let last = incoming.sample(0.9, 0.016);
+        assert_eq!(last.opacity, 1.);
+        assert_eq!(last.slide, 0.);
+        assert!(last.finished);
+    }
+    #[test]
+    fn original_rectangle_moves_continuously_between_exact_endpoints() {
+        let from = [240, 40, 1000, 760];
+        let to = [240, 70, 496, 730];
+        assert_eq!(move_bounds(from, to, 0.), from);
+        assert_eq!(move_bounds(from, to, 1.), to);
+        let mut previous = from;
+        for n in 1..=30 {
+            let bounds = move_bounds(from, to, n as f32 / 30.);
+            assert!(bounds[2] <= previous[2] && bounds[2] >= to[2]);
+            assert!(bounds[1] >= previous[1] && bounds[1] <= to[1]);
+            previous = bounds;
+        }
+        assert_eq!(move_bounds(from, to, 0.01), from);
+        assert_eq!(move_bounds(from, to, 0.99), to);
     }
 }
