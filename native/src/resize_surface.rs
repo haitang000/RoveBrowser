@@ -19,8 +19,8 @@ use windows::{
         Graphics::{
             Direct2D::{
                 Common::{
-                    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_RECT_F,
-                    D2D_SIZE_U,
+                    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_BORDER_MODE_HARD, D2D1_COLOR_F,
+                    D2D1_PIXEL_FORMAT, D2D_RECT_F, D2D_SIZE_U,
                 },
                 D2D1CreateDevice, ID2D1DeviceContext, D2D1_ANTIALIAS_MODE_ALIASED,
                 D2D1_BITMAP_PROPERTIES1, D2D1_INTERPOLATION_MODE_LINEAR,
@@ -31,7 +31,8 @@ use windows::{
                 D3D11_SDK_VERSION,
             },
             DirectComposition::{
-                DCompositionCreateDevice2, IDCompositionDevice, IDCompositionEffectGroup,
+                DCompositionCreateDevice3, IDCompositionDevice, IDCompositionDevice3,
+                IDCompositionEffectGroup, IDCompositionGaussianBlurEffect,
                 IDCompositionMatrixTransform3D, IDCompositionRectangleClip,
                 IDCompositionScaleTransform, IDCompositionSurface, IDCompositionTarget,
                 IDCompositionVisual,
@@ -130,6 +131,7 @@ struct Frame {
     _target: IDCompositionTarget,
     _root_visual: IDCompositionVisual,
     projection: IDCompositionMatrixTransform3D,
+    blur: IDCompositionGaussianBlurEffect,
     card_clip: IDCompositionRectangleClip,
     viewport_clip: IDCompositionRectangleClip,
     background_scale: IDCompositionScaleTransform,
@@ -429,7 +431,7 @@ unsafe fn composition_device() -> Result<IDCompositionDevice> {
     })?;
     let dxgi: IDXGIDevice = d3d.unwrap().cast()?;
     let d2d = D2D1CreateDevice(&dxgi, None)?;
-    let device: IDCompositionDevice = DCompositionCreateDevice2(&d2d)?;
+    let device: IDCompositionDevice = DCompositionCreateDevice3(&d2d)?;
     DEVICE.with(|cached| cached.replace(Some(device.clone())));
     Ok(device)
 }
@@ -541,6 +543,15 @@ impl Frame {
             let (background_visual, background) = FluidBackground::new(&device, appearance)?;
             let card = device.CreateVisual()?;
             let content = device.CreateVisual()?;
+            let blurred = device.CreateVisual()?;
+            let blur = device
+                .cast::<IDCompositionDevice3>()?
+                .CreateGaussianBlurEffect()?;
+            blur.SetStandardDeviation2(0.)?;
+            // Extend the page's edge colours into the filter so blur never
+            // makes a translucent fringe. Its parent clips AFTER filtering.
+            blur.SetBorderMode(D2D1_BORDER_MODE_HARD)?;
+            blurred.SetEffect(&blur)?;
             let card_background = device.CreateVisual()?;
             let background_scale = device.CreateScaleTransform()?;
             card_background.SetTransform(&background_scale)?;
@@ -579,14 +590,16 @@ impl Frame {
             root_visual.AddVisual(&background_visual, false, None::<&IDCompositionVisual>)?;
             root_visual.AddVisual(&card, true, &background_visual)?;
             card.AddVisual(&content, false, None::<&IDCompositionVisual>)?;
-            content.AddVisual(&card_background, false, None::<&IDCompositionVisual>)?;
-            content.AddVisual(&new.visual, true, &card_background)?;
-            content.AddVisual(&old.visual, true, &new.visual)?;
+            content.AddVisual(&blurred, false, None::<&IDCompositionVisual>)?;
+            blurred.AddVisual(&card_background, false, None::<&IDCompositionVisual>)?;
+            blurred.AddVisual(&new.visual, true, &card_background)?;
+            blurred.AddVisual(&old.visual, true, &new.visual)?;
             target.SetRoot(&root_visual)?;
             Ok((
                 target,
                 root_visual,
                 projection,
+                blur,
                 card_clip,
                 viewport_clip,
                 background_scale,
@@ -599,6 +612,7 @@ impl Frame {
             target,
             root_visual,
             projection,
+            blur,
             card_clip,
             viewport_clip,
             background_scale,
@@ -634,6 +648,7 @@ impl Frame {
             _target: target,
             _root_visual: root_visual,
             projection,
+            blur,
             card_clip,
             viewport_clip,
             background_scale,
@@ -727,6 +742,11 @@ impl Frame {
         // 18 CSS px while lifted. Morph back to each pane's real corners as
         // the final scale reaches 1:1, so the handoff never changes its outline.
         let lift = ((1. - sample.pose.scale) / 0.032).clamp(0., 1.);
+        // Reuse the spring/ease-out lift: blur enters with the lifted snapshot,
+        // remains through the layout crossfade, and clears as it returns 1:1.
+        // Only this inner subtree is filtered; the outline and background stay sharp.
+        self.blur
+            .SetStandardDeviation2(3. * self.scale_factor * lift)?;
         rounded(
             &self.card_clip,
             width as f32,
