@@ -26,20 +26,38 @@ const keyOf = (tab: Tab) => tab.bookmarkId || tab.id;
 export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
   const b = useBrowser();
   const state = shallowRef<TabDrag>();
-  let image: HTMLElement | undefined;
-  let imageFrame = 0;
+  let item: HTMLElement | undefined;
+  let nativeImage: HTMLCanvasElement | undefined;
+  let itemFrame = 0;
+  let originX = 0, originY = 0, deltaX = 0, deltaY = 0;
   let pending = false;
   let resetTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function removeImage() {
-    cancelAnimationFrame(imageFrame);
-    image?.remove();
-    image = undefined;
+  function removeItem() {
+    cancelAnimationFrame(itemFrame);
+    itemFrame = 0;
+    item?.remove();
+    nativeImage?.remove();
+    item = nativeImage = undefined;
+  }
+
+  function follow(event: DragEvent) {
+    if (!item || !state.value?.dragging) return;
+    // Chromium's final source drag event can report (0, 0). The document's
+    // dragover coordinates stay in the UI viewport, including over drop zones.
+    if (event.type === "drag" && !event.clientX && !event.clientY) return;
+    item.hidden = false;
+    deltaX = event.clientX - originX;
+    deltaY = event.clientY - originY;
+    if (!itemFrame) itemFrame = requestAnimationFrame(() => {
+      itemFrame = 0;
+      if (item) item.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0)`;
+    });
   }
 
   function reset() {
     clearTimeout(resetTimer);
-    removeImage();
+    removeItem();
     pending = false;
     state.value = undefined;
     b.dragging = false;
@@ -59,22 +77,29 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
 
     if (!row.matches(".tab-row")) return;
     const rect = row.getBoundingClientRect();
-    image = row.cloneNode(true) as HTMLElement;
-    image.className = "tab-row tab-drag-image";
-    for (const attribute of [...image.attributes]) {
-      if (attribute.name !== "class") image.removeAttribute(attribute.name);
+    item = row.cloneNode(true) as HTMLElement;
+    item.className = "tab-row tab-drag-item";
+    for (const attribute of [...item.attributes]) {
+      if (attribute.name !== "class") item.removeAttribute(attribute.name);
     }
-    image.setAttribute("aria-hidden", "true");
-    image.inert = true;
-    Object.assign(image.style, {
+    item.setAttribute("aria-hidden", "true");
+    item.inert = true;
+    Object.assign(item.style, {
       width: `${rect.width}px`, height: `${rect.height}px`,
       left: `${rect.left}px`, top: `${rect.top}px`,
     });
-    // A body-level copy escapes both the scrolling list and the space swipe's
-    // clipping. Chromium snapshots the whole row, even if its source is clipped.
-    document.body.append(image);
-    event.dataTransfer.setDragImage(image, event.clientX - rect.left, event.clientY - rect.top);
-    imageFrame = requestAnimationFrame(() => { if (image) image.style.left = "-10000px"; });
+    originX = event.clientX;
+    originY = event.clientY;
+    deltaX = deltaY = 0;
+    // Draw the full, opaque row in the UI instead of handing it to the OS,
+    // which applies translucency to native drag images regardless of its CSS.
+    document.body.append(item);
+    nativeImage = document.createElement("canvas");
+    nativeImage.width = nativeImage.height = 1;
+    nativeImage.style.cssText = "position:fixed;left:0;top:0;pointer-events:none";
+    nativeImage.setAttribute("aria-hidden", "true");
+    document.body.append(nativeImage);
+    event.dataTransfer.setDragImage(nativeImage, 0, 0);
   }
 
   function over(event: DragEvent, tabs: Tab[]) {
@@ -111,7 +136,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
     const before = remaining[index] || remaining.at(-1);
     pending = true;
     if (drag) state.value = { ...drag, dragging: false };
-    removeImage();
+    removeItem();
     b.dragging = false;
     // The local order stays in place until the native host acknowledges it.
     resetTimer = setTimeout(reset, 600);
@@ -127,6 +152,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
   }
 
   function leaveLists(event: DragEvent) {
+    follow(event);
     const drag = state.value;
     if (!drag?.dragging || !(event.target instanceof Element)) return;
     const list = event.target.closest(".tab-list");
@@ -134,15 +160,22 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
   }
 
   function end() {
-    removeImage();
+    removeItem();
     if (!pending) reset();
   }
-  function leaveWindow(event: DragEvent) { if (!event.relatedTarget) leaveLists(event); }
+  function leaveWindow(event: DragEvent) {
+    if (!event.relatedTarget && event.target === document.documentElement) {
+      if (item) item.hidden = true;
+      const drag = state.value;
+      if (drag?.dragging && drag.target) state.value = { ...drag, target: undefined };
+    }
+  }
   function visibilityChanged() { if (document.hidden) reset(); }
   watch(() => b.state, () => { if (pending) reset(); });
   watch([() => b.state.activeSpace, () => b.state.sidebarCollapsed], reset);
   onMounted(() => {
     document.addEventListener("dragover", leaveLists, true);
+    document.addEventListener("drag", follow, true);
     document.addEventListener("dragend", end, true);
     document.addEventListener("dragleave", leaveWindow);
     document.addEventListener("visibilitychange", visibilityChanged);
@@ -151,6 +184,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
   onBeforeUnmount(() => {
     reset();
     document.removeEventListener("dragover", leaveLists, true);
+    document.removeEventListener("drag", follow, true);
     document.removeEventListener("dragend", end, true);
     document.removeEventListener("dragleave", leaveWindow);
     document.removeEventListener("visibilitychange", visibilityChanged);
