@@ -44,7 +44,7 @@ function report() {
     maximize: { x: r.x, y: r.y, width: r.width, height: r.height },
     viewportWidth: innerWidth,
     dragRegions: titlebarDragRegions(header.getBoundingClientRect(),
-      [...header.querySelectorAll('.browser-navigation, .address-field, .window-controls')]
+      [...header.querySelectorAll('.browser-navigation, .address-field, .reader-toggle, .window-controls')]
         .map(element => element.getBoundingClientRect())),
     ...palette,
   });
@@ -116,6 +116,12 @@ onBeforeUnmount(() => {
         <span>{{ isSettingsUrl(b.active?.url) ? '设置' : host(b.active?.url || "") || "Search or enter address" }}</span>
         <Icon name="settings" :size="13" />
       </button>
+      <button v-if="b.reader.available.includes(b.state.activeTab) || b.reader.id === b.state.activeTab || b.reader.waiting === b.state.activeTab"
+        class="icon-button reader-toggle" :class="{ chosen: b.reader.id === b.state.activeTab }"
+        :aria-label="b.reader.id === b.state.activeTab ? '退出阅读模式' : b.reader.waiting === b.state.activeTab ? '取消阅读模式' : '进入阅读模式'"
+        :title="b.shortcutTitle(b.reader.id === b.state.activeTab ? '退出阅读模式' : '阅读模式', 'reader')"
+        :aria-pressed="b.reader.id === b.state.activeTab" :aria-busy="b.reader.waiting === b.state.activeTab || undefined"
+        @click="b.send({ type: 'reader' })"><Icon :name="b.reader.waiting === b.state.activeTab ? 'spinner' : 'reader'" :size="14" /></button>
     </div>
     <div class="window-controls">
       <button

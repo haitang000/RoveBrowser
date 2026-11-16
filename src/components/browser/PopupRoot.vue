@@ -10,6 +10,7 @@ import FavoriteMenu from "./FavoriteMenu.vue";
 import TabPreviewCard from "./TabPreviewCard.vue";
 import ErrorToast from "./ErrorToast.vue";
 import FindBar from "./FindBar.vue";
+import ReaderControls from "./ReaderControls.vue";
 import StatusToast from "./StatusToast.vue";
 import ActionToast from "./ActionToast.vue";
 import DownloadsPanel from "./DownloadsPanel.vue";
@@ -38,7 +39,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .downloads-layer");
+  const surfaces = document.querySelectorAll<HTMLElement>(".command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .downloads-layer, .reader-controls, .reader-options");
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -52,7 +53,7 @@ function report() {
     const bounds = rect(element);
     // The native opacity layer is clipped to these regions; a shadow must have
     // room or the clip cuts it into a square-cornered halo.
-    return surfaceRegion(bounds, shadowBleed(element.className));
+    return surfaceRegion(bounds, element.classList.contains("reader-options") ? 24 : shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout, downloads });
   const active = b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.creationMenu ? "creation" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
@@ -92,4 +93,5 @@ onBeforeUnmount(() => {
 <template>
   <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
   <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><CreationMenu v-if="b.creationMenu" /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
+  <ReaderControls />
 </template>

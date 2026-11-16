@@ -21,6 +21,7 @@ mod instance;
 mod layout;
 mod passwords;
 mod preview;
+mod reader;
 mod resize_motion;
 mod resize_surface;
 mod shadow;

@@ -24,6 +24,12 @@ The settings page, searchable form grouping, responsive navigation, internal set
 
 The split resize input, minimum pane sizes, shared split boundary and immediate page layout in `native/src/split.rs` and `src/components/browser/PageArea.vue` are adapted from `Zigzag/Window/BrowserRootView.swift`, `Zigzag/Window/PageCardView.swift` and `Zigzag/Window/BrowserWindowController.swift` at commit `0f99cac833a9f23e379f617ae99800b5d6e2f19c`. Copyright 2026 Zigao Wang; Apache-2.0. The Win32 input window, mouse capture, WebView2 bounds updates and temporary removal of GDI clipping are Windows adaptations. See `docs/SPLIT_RESIZE_PORT.md` for the mapping and validation limits.
 
+## Reader mode and Mozilla Readability
+
+The Reader mode in `native/src/reader.rs`, `native/src/reader/extract.js`, `native/src/reader/reader.css`, `src/lib/reader.ts` and `src/components/browser/ReaderControls.vue` adapts `Zigzag/Web/Reader.swift`, `Sidebar/SidebarView.swift` and the Reader lifecycle in `Window/BrowserWindowController.swift` at upstream commit `79437afc94a1104f4442d52415054532e694f082`. Copyright 2026 Zigao Wang; Apache-2.0. Windows adaptations include a WebView2 isolated script world, an independent script-disabled reading controller, HTML sanitization with ammonia, Windows system fonts, trusted Vue controls, and SQLite preferences. See `docs/READER_PORT.md`.
+
+Mozilla Readability's `Readability.js` and `Readability-readerable.js` are copied without modification from Zigzag's `Resources/Reader` at the same commit into `native/src/reader/`. Copyright (c) 2010 Arc90 Inc, with additional Mozilla/contributor work; Apache-2.0. The scripts retain their upstream headers; the bundled upstream license is preserved in [licenses/readability-APACHE-2.0.txt](licenses/readability-APACHE-2.0.txt). Upstream project: https://github.com/mozilla/readability.
+
 ## Direct implementation dependencies
 
 Versions are fixed in package-lock.json and native/Cargo.lock. This list distinguishes direct dependencies from upstream features that Rove does not use.
@@ -36,13 +42,14 @@ Versions are fixed in package-lock.json and native/Cargo.lock. This list disting
 | webview2-com, include_dir | MIT |
 | windows-rs, serde, serde_json, uuid, url, rusqlite, base64, image | MIT OR Apache-2.0 |
 | directories | MIT OR Apache-2.0 |
+| ammonia (HTML sanitization) | MIT OR Apache-2.0 |
 | SQLite (bundled via libsqlite3-sys) | Public domain |
 | Inter Variable via @fontsource-variable/inter | SIL Open Font License 1.1 |
 | Microsoft Edge WebView2 Runtime | Microsoft proprietary runtime; installed separately; the installer includes Microsoft's signed Evergreen bootstrapper |
 
 Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter). Unmodified Latin and Latin Extended variable WOFF2 files are bundled locally. The font copyright and full OFL are preserved in `licenses/dependencies/npm/@fontsource-variable_inter-*/LICENSE`.
 
-Transitive dependencies retain their own licenses. Locked Windows Rust dependencies and npm production dependencies are recorded in `licenses/DEPENDENCIES.json`; available license/notice texts are preserved under `licenses/dependencies`. Regenerate with `node scripts/collect-licenses.mjs`. No upstream Zigzag Reader/Readability, Sparkle, ad-block rules, font files, logo assets or extensions have been imported.
+Transitive dependencies retain their own licenses. Locked Windows Rust dependencies and npm production dependencies are recorded in `licenses/DEPENDENCIES.json`; available license/notice texts are preserved under `licenses/dependencies`. Regenerate with `node scripts/collect-licenses.mjs`. No upstream Zigzag Sparkle, ad-block rules, font files, logo assets or extensions have been imported.
 
 ## Windows installer
 

@@ -1,5 +1,15 @@
 # 实际验证记录
 
+## Reader Mode 移植（2026-11-16）
+
+阅读模式参考 Zigzag `79437afc` 的 Swift 实现迁移，默认快捷键为 `Ctrl+Alt+R`。功能映射和平台边界见 [READER_PORT.md](READER_PORT.md)。
+
+- TypeScript／Vite 生产构建、107 项前端单元测试、132 项串行 Rust 测试、生产目标 Clippy（`-D warnings`）和 Debug 构建通过。
+- 查找、设置、站点控制相关的 20 项界面 E2E 通过；原生查找专项的 16 项检查通过。
+- `npm run test:native:reader` 的 11 项真实 WebView2 检查通过：文章识别与隔离解析、正文及相对图片／链接、HTML 清理、偏好即时更新、正文查找、原 DOM／表单／滚动恢复、空正文、加载等待、分屏与切换、SQLite 重启恢复；其中实际 Windows 键盘事件验证 `Esc` 退出和 `Ctrl+Alt+R` 重新进入。
+
+阅读专项使用本地 fixture 与独立临时资料，报告为 `test-results/native-reader/native-reader-smoke.json`，另保留阅读正文及控件截图。键盘脚本使用物理屏幕坐标，并在发键前检查目标窗口已获得前台焦点；关闭阅读内的查找条时宿主显式把焦点交回正文。未将任意网站、登录保护图片、付费墙或所有 DPI／硬件组合计为已验证。
+
 ## 0.1.2 正式版发布验证（2026-11-15）
 
 统一 npm、Cargo、锁文件和界面版本为 `0.1.2`，发布内容为下述普通浏览偶发卡死修复。

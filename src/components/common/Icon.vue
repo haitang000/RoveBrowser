@@ -4,6 +4,7 @@ const paths: Record<string, string> = {
   back: "m10 3-5 5 5 5",
   forward: "m6 3 5 5-5 5",
   reload: "M13 6a5 5 0 1 0 .3 3M13 2v4H9",
+  reader: "M3 1.5h7l3 3v10H3zM10 1.5v3h3M5.5 7h5M5.5 9.5h5M5.5 12h3",
   spinner: "M13 8a5 5 0 1 1-5-5",
   plus: "M8 2v12M2 8h12",
   close: "m4 4 8 8M12 4l-8 8",

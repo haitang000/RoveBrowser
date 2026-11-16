@@ -1,0 +1,109 @@
+/* Adapted from Zigzag Web/Reader.swift (Zigao Wang, Apache-2.0). Windows system fonts. */
+
+:root { --paper:#FBFAF8;--ink:#1F1E1C;--soft:#6D6A64;--link:#2F5E98;--rule:rgba(31,30,28,.12);--code:rgba(31,30,28,.05);--select:rgba(47,94,152,.18);color-scheme:light;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Helvetica Neue", sans-serif;
+        --mono: ui-monospace, Consolas, "Cascadia Code", monospace;
+        --face: var(--serif); --leading: 1.6; }
+:root[data-theme="sepia"] { --paper:#F4ECDE;--ink:#3B2F24;--soft:#806B57;--link:#8A5326;--rule:rgba(80,55,25,.16);--code:rgba(80,55,25,.07);--select:rgba(138,83,38,.2);color-scheme:light; }
+:root[data-theme="dark"] { --paper:#1E1E20;--ink:#E6E4DF;--soft:#9A9893;--link:#9DBDEB;--rule:rgba(255,255,255,.12);--code:rgba(255,255,255,.06);--select:rgba(157,189,235,.25);color-scheme:dark; }
+@media (prefers-color-scheme: dark) { :root[data-theme="auto"] { --paper:#1E1E20;--ink:#E6E4DF;--soft:#9A9893;--link:#9DBDEB;--rule:rgba(255,255,255,.12);--code:rgba(255,255,255,.06);--select:rgba(157,189,235,.25);color-scheme:dark; } }
+:root[data-face="sans"] { --face: var(--sans); --leading: 1.58; }
+/* Their own faces (there are no italics to fake), and more air between lines. */
+:root:lang(zh) { --serif: "Microsoft YaHei", ui-serif, serif; --sans: "Microsoft YaHei", system-ui, sans-serif; }
+:root:is(:lang(zh-Hant), :lang(zh-TW), :lang(zh-HK)) { --serif: "Microsoft JhengHei", ui-serif, serif; --sans: "Microsoft JhengHei", system-ui, sans-serif; }
+:root:lang(ja) { --serif: "Yu Gothic", ui-serif, serif; --sans: "Yu Gothic", system-ui, sans-serif; }
+:root:lang(ko) { --serif: "Malgun Gothic", ui-serif, serif; --sans: "Malgun Gothic", system-ui, sans-serif; }
+:root:is(:lang(zh), :lang(ja), :lang(ko)) { --leading: 1.8; }
+:is(:lang(zh), :lang(ja), :lang(ko)) :is(em, i, cite, dfn) { font-style: normal; font-weight: 600; }
+
+html { background: var(--paper); }
+::selection { background: var(--select); }
+body { margin: 0; padding: 80px 40px 120px; color: var(--ink); font-family: var(--face); font-size: var(--size, 20px);
+       line-height: var(--leading); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+       font-kerning: normal; hanging-punctuation: first allow-end last; overflow-wrap: break-word;
+       -webkit-hyphens: auto; hyphens: auto; }
+main { max-width: var(--measure, 34em); margin: 0 auto; }
+
+/* The header: where it's from, the title, who and when. Space below it, no rule. */
+header { margin: 0 0 2.2em; }
+.site { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font: 500 14px/1.4 var(--sans); color: var(--soft); }
+.site img { display: block; width: 16px; height: 16px; margin: 0; border-radius: 3px; flex: none; }
+h1.title { margin: 0; font-size: 2.1em; line-height: 1.12; font-weight: 700; letter-spacing: -0.016em; text-wrap: balance; -webkit-hyphens: manual; hyphens: manual; }
+:root:is(:lang(zh), :lang(ja), :lang(ko)) h1.title { line-height: 1.3; letter-spacing: 0; }
+.byline { display: flex; flex-wrap: wrap; column-gap: 14px; margin: 14px 0 0; font: 14px/1.45 var(--sans); color: var(--soft); }
+.byline .author { color: var(--ink); font-weight: 500; }
+
+/* The text's rhythm: a line of space between paragraphs, headings closer to what follows than to what came before. */
+article > :first-child { margin-top: 0; }
+p, ul, ol, dl, blockquote, pre, table, figure, details { margin: 0 0 1em; }
+p { text-wrap: pretty; }
+h2, h3, h4, h5, h6 { margin: 1.8em 0 .5em; line-height: 1.25; font-weight: 700; letter-spacing: -0.008em; text-wrap: balance;
+                     -webkit-hyphens: manual; hyphens: manual; }
+h2 { font-size: 1.4em; } h3 { font-size: 1.15em; } h4, h5, h6 { font-size: 1em; }
+:is(h2, h3, h4) + :is(h3, h4, h5) { margin-top: .9em; }
+article h1 { font-size: 1.4em; margin: 1.8em 0 .5em; line-height: 1.25; }
+
+/* Links read as part of the sentence: the text's own color, a quiet underline, the link color when pointed at. */
+a { color: inherit; text-decoration: underline 1px; text-underline-offset: .2em;
+    text-decoration-color: color-mix(in srgb, currentColor 24%, transparent); }
+a:hover { color: var(--link); text-decoration-color: currentColor; }
+:is(h1, h2, h3, h4, h5, h6) a, figure a { text-decoration: none; }
+
+/* Pictures at their own size, never bigger, on the column's edge; a caption small and quiet under each. */
+img, video, picture, svg, canvas { max-width: 100%; height: auto; }
+img, video { display: block; margin: 1.6em 0; border-radius: 3px; }
+img.inline { display: inline; margin: 0; vertical-align: middle; border-radius: 0; }
+figure { margin: 1.8em 0; }
+figure img, figure video, figure picture { margin: 0; }
+figure > a, picture { display: block; }
+figcaption { max-width: 36em; margin: .6em 0 0; font: 14px/1.45 var(--sans); color: var(--soft); text-wrap: pretty; -webkit-hyphens: manual; hyphens: manual; }
+:root:is(:lang(zh), :lang(ja), :lang(ko)) figcaption { line-height: 1.6; }
+figcaption p { margin: 0; }
+/* Picture galleries come as lists: no bullets, just the pictures. */
+:is(ul, ol):has(> li img) { list-style: none; padding: 0; }
+li:has(> img, > figure, > a > img) { margin: 0; }
+
+blockquote { margin: 1.4em 0; padding: 0 0 0 1.1em; border-left: 2px solid var(--rule); color: var(--soft); }
+blockquote > :last-child { margin-bottom: 0; }
+
+code, kbd, samp, pre { font-family: var(--mono); font-size: .84em; -webkit-hyphens: none; hyphens: none; }
+code, kbd { padding: .1em .32em; border-radius: 4px; background: var(--code); }
+pre { padding: 14px 16px; border-radius: 8px; background: var(--code); line-height: 1.55; overflow-x: auto; white-space: pre; tab-size: 4; }
+pre code { padding: 0; background: none; font-size: inherit; }
+
+table { display: block; width: max-content; max-width: 100%; overflow-x: auto; margin: 1.6em 0; border-collapse: collapse;
+        font: 15px/1.5 var(--sans); }
+th, td { padding: 7px 16px 7px 0; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+th { font-weight: 600; }
+caption { caption-side: bottom; margin-top: .6em; text-align: left; font-size: 14px; color: var(--soft); }
+
+ul, ol { padding-left: 1.4em; }
+li { margin: .3em 0; } li > :is(p, ul, ol) { margin: .3em 0; }
+li::marker { color: var(--soft); }
+dt { font-weight: 600; } dd { margin: 0 0 .6em 1.4em; }
+hr { height: 1px; margin: 2em 0; border: 0; background: var(--rule); }
+sup, sub { line-height: 0; font-size: .7em; }
+abbr[title] { text-decoration: none; }
+
+.end { margin-top: 3em; padding-top: 1.2em; border-top: 1px solid var(--rule); font: 14px/1.45 var(--sans); color: var(--soft); }
+.end a { color: inherit; }
+
+/* Leftovers from the page that don't belong in reading. */
+button, input, select, textarea, form, iframe, nav, aside, [role="button"], [aria-hidden="true"] { display: none !important; }
+
+/* On paper: black on white whatever the theme, the page's margins, nothing split across a page break. */
+@page { margin: 18mm 20mm; }
+@media print {
+  :root, :root[data-theme] { --paper:#FBFAF8;--ink:#1F1E1C;--soft:#6D6A64;--link:#2F5E98;--rule:rgba(31,30,28,.12);--code:rgba(31,30,28,.05);--select:rgba(47,94,152,.18);color-scheme:light; --ink: #000; }
+  html, body { background: #fff; }
+  body { padding: 0; font-size: 11.5pt; }
+  main { max-width: none; }
+  a { text-decoration: none; }
+  pre { white-space: pre-wrap; overflow: visible; }
+  table { overflow: visible; }
+  img, figure, pre, blockquote, tr { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+}
+
+@media(max-width:600px){body{padding:64px 22px 80px}h1.title{font-size:1.7em}}

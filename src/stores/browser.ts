@@ -13,6 +13,7 @@ import type {
 } from "../lib/types";
 import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
+import type { ReaderState } from "../lib/reader";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
@@ -79,6 +80,7 @@ export const useBrowser = defineStore("browser", () => {
     findTicket = ref(0),
     findFocusTicket = ref(0),
     pageZoom = ref(1),
+    reader = ref<ReaderState>({ id: null, waiting: null, available: [], rect: null }),
     audio = ref<Record<string, boolean>>({}),
     /** Zigzag TabSleep: loaded pages the host put to sleep, by tab id. */
     asleep = ref<Record<string, boolean>>({}),
@@ -521,6 +523,7 @@ export const useBrowser = defineStore("browser", () => {
     if (native && !popupWindow) send({ type: "downloadsPanel", open });
   });
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "readerState" && e.reader) reader.value = e.reader;
     if (e.type === "sidebarResize" && typeof e.width === "number" && Number.isFinite(e.width))
       sidebarResize.value = { width: e.width, resizing: Boolean(e.resizing), reset: Boolean(e.reset) };
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
@@ -765,6 +768,7 @@ export const useBrowser = defineStore("browser", () => {
     setFindQuery,
     findStep,
     pageZoom,
+    reader,
     audio,
     asleep,
     zoomNotice,

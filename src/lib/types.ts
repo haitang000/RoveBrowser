@@ -92,6 +92,7 @@ export interface BrowserState {
   newTab?: import("./new-tab").NewTabSettings;
   /** Per-site zoom by normalized host; 100% is stored as absence. */
   siteZoom?: Record<string, number>;
+  readerPreferences?: import("./reader").ReaderPreferences;
   /** Legacy session preference; the restored framed layout ignores this flag. */
   borderless?: boolean;
 }
@@ -131,6 +132,7 @@ declare global {
     __ERA_INITIAL_STATE__?: BrowserState;
     __ERA_RECEIVE__?: (event: {
       type: string;
+      reader?: import("./reader").ReaderState;
       importSources?: import("./import").ImportSource[];
       importBusy?: boolean;
       defaultBrowser?: { http: boolean; https: boolean };

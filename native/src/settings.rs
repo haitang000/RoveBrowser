@@ -27,6 +27,7 @@ pub fn default_shortcuts() -> Vec<(&'static str, Shortcut)> {
         ("back", 37, false, true, false),
         ("forward", 39, false, true, false),
         ("find", 70, true, false, false),
+        ("reader", 82, true, true, false),
     ]
     .into_iter()
     .map(|(id, key, ctrl, alt, shift)| {

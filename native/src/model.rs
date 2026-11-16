@@ -151,6 +151,8 @@ pub struct State {
     /// Per-site page zoom, keyed by `site_key`. Absent in an older session.
     #[serde(default)]
     pub site_zoom: HashMap<String, f64>,
+    #[serde(default)]
+    pub reader_preferences: crate::reader::Preferences,
 }
 fn default_borderless() -> bool {
     true
@@ -457,6 +459,12 @@ pub enum Command {
     DownloadsPanel { open: bool },
     #[serde(rename = "findOpen")]
     FindOpen,
+    #[serde(rename = "reader")]
+    Reader,
+    #[serde(rename = "readerClose")]
+    ReaderClose,
+    #[serde(rename = "readerPreferences")]
+    ReaderPreferences { preferences: crate::reader::Preferences },
     #[serde(rename = "findClose")]
     FindClose,
     #[serde(rename = "findStart")]
@@ -647,6 +655,7 @@ impl Default for State {
             new_tab: crate::new_tab::NewTab::default(),
             borderless: true,
             site_zoom: HashMap::new(),
+            reader_preferences: crate::reader::Preferences::default(),
         };
         for (title, url) in [
             ("GitHub", "https://github.com"),
@@ -901,6 +910,7 @@ impl State {
         // A missing removable download folder must not reset unrelated preferences.
         self.settings.repair();
         if self.new_tab.validate().is_err() { self.new_tab = crate::new_tab::NewTab::default(); }
+        if !self.reader_preferences.valid() { self.reader_preferences = crate::reader::Preferences::default(); }
         self.sidebar_width = self.sidebar_width.filter(|width| width.is_finite())
             .map(|width| width.clamp(192., 480.).round());
         // Zoom is only meaningful inside WebView2's range; a session written by

@@ -13,6 +13,11 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
     b.closeFind();
     return;
   }
+  if (e.key === "Escape" && b.reader.id && !b.peek && !b.overlay) {
+    e.preventDefault();
+    b.send({ type: "readerClose" });
+    return;
+  }
   // Ctrl+J opens/downloads panel, like Chrome. Fixed rather than a settings
   // binding, alongside page zoom, since it is a browser convention.
   if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "j") {

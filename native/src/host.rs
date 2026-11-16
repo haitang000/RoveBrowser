@@ -126,6 +126,10 @@ enum Event {
     PreviewThumbnail(String, u64, u64, Option<String>),
     PreviewCapture,
     FindMatches(i32, i32),
+    ReaderAvailable(String, String, bool),
+    ReaderArticle(String, String, u64, Option<crate::reader::Article>),
+    ReaderLink(String, String),
+    ReaderDeadline(u64),
     /// A page's controller reported a new zoom factor.
     Zoom(String, f64),
     /// A page started or stopped playing sound.
@@ -304,6 +308,10 @@ struct App {
     split_exit: Option<SplitExit>,
     split_exit_ticket: u64,
     pages: HashMap<String, Page>,
+    reader: Option<ReaderSession>,
+    reader_available: HashMap<String, bool>,
+    reader_request: Option<(String, String, u64)>,
+    reader_epoch: u64,
     data_clear_view: Option<WebView>,
     live_settings: Rc<RefCell<crate::settings::Settings>>,
     peek: Option<Peek>,
@@ -371,6 +379,11 @@ struct SplitExit {
     ticket: u64,
     departed: bool,
     layout_ready: bool,
+}
+struct ReaderSession {
+    id: String,
+    url: String,
+    original: Page,
 }
 struct PreviewRender {
     view: WebView,
@@ -447,6 +460,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
         pages: HashMap::new(),
+        reader: None,
+        reader_available: HashMap::new(),
+        reader_request: None,
+        reader_epoch: 0,
         peek: None,
         peek_visible: Rc::new(Cell::new(false)),
         caption: None,
@@ -676,6 +693,139 @@ impl App {
             .as_ref()
             .map(|p| &p.page.view)
             .or_else(|| self.pages.get(&self.state.active_tab).map(|p| &p.view))
+    }
+    fn publish_reader(&self) {
+        let id = self.reader.as_ref().map(|r| r.id.as_str());
+        let rect = id.and_then(|id| if id == self.state.active_tab { Some(self.primary) }
+            else if self.state.active().and_then(|t| t.split_with.as_deref()) == Some(id) { self.secondary } else { None });
+        self.emit(json!({"type":"readerState", "reader": {
+            "id":id, "waiting":self.reader_request.as_ref().map(|r| &r.0),
+            "available":self.reader_available.iter().filter(|(_, available)| **available).map(|(id, _)| id).collect::<Vec<_>>(),
+            "rect":rect.map(|r| json!({"x":r.x,"y":r.y,"width":r.width,"height":r.height}))
+        }}));
+    }
+    fn probe_reader(&self, id: &str, url: &str) {
+        if self.reader.as_ref().is_some_and(|r| r.id == id) { return; }
+        let Some(page) = self.pages.get(id).filter(|p| p.url == url) else { return; };
+        let proxy = self.proxy.clone();
+        let (id, url) = (id.to_string(), url.to_string());
+        crate::reader::probe(&page.view.webview(), &url.clone(), move |available| {
+            let _ = proxy.send_event(Event::ReaderAvailable(id.clone(), url.clone(), available));
+        });
+    }
+    fn start_reader_extract(&self, id: &str, url: &str, epoch: u64) {
+        let Some(page) = self.pages.get(id).filter(|p| p.url == url) else { return; };
+        let proxy = self.proxy.clone();
+        let (id, url) = (id.to_string(), url.to_string());
+        crate::reader::extract(&page.view.webview(), &url.clone(), move |article| {
+            let _ = proxy.send_event(Event::ReaderArticle(id.clone(), url.clone(), epoch, article));
+        });
+    }
+    fn toggle_reader(&mut self) {
+        if self.reader.is_some() || self.reader_request.is_some() {
+            self.close_reader();
+            if let Err(e) = self.sync() { self.error(e); }
+            self.focus_page_or_ui();
+            return;
+        }
+        if self.peek.is_some() { return; }
+        let Some(tab) = self.state.active().filter(|t| model::is_web(&t.url)).cloned() else { return; };
+        self.reader_epoch += 1;
+        self.reader_request = Some((tab.id.clone(), tab.url.clone(), self.reader_epoch));
+        let proxy = self.proxy.clone();
+        let epoch = self.reader_epoch;
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(10));
+            let _ = proxy.send_event(Event::ReaderDeadline(epoch));
+        });
+        self.publish_reader();
+        if tab.loading { self.toast("网页加载完成后打开阅读模式", None); }
+        else { self.start_reader_extract(&tab.id, &tab.url, self.reader_epoch); }
+    }
+    /// Swap only the displayed controller. The original DOM, form and scroll
+    /// remain alive; all existing layout, split, find and capture paths use Reader.
+    fn close_reader(&mut self) {
+        self.reader_request = None;
+        self.reader_epoch += 1;
+        if let Some(mut reader) = self.reader.take() {
+            self.close_find(true);
+            self.finish_split_resize();
+            if let Some(handle) = &self.split_handle { let _ = handle.configure(None); }
+            if let Some(handle) = &self.sidebar_handle { let _ = handle.configure(None); }
+            if let Some(page) = self.pages.remove(&reader.id) {
+                let _ = page.set_visible(false);
+                reader.original.thumbnail_version = page.thumbnail_version + 1;
+            }
+            self.pages.insert(reader.id.clone(), reader.original);
+            self.invalidate_thumbnail(&reader.id);
+        }
+        self.publish_reader();
+        if let Err(e) = self.sync_layout() { self.error(e); }
+    }
+    fn apply_reader_preferences(&mut self, preferences: crate::reader::Preferences) {
+        if !preferences.valid() { self.error("阅读偏好无效"); return; }
+        if let Some(reader) = &self.reader {
+            if let Some(page) = self.pages.get(&reader.id) { let _ = page.view.evaluate_script(&preferences.script()); }
+        }
+        self.state.reader_preferences = preferences;
+        self.save();
+        self.publish();
+    }
+    fn show_reader(&mut self, id: String, url: String, article: crate::reader::Article) -> Result<(), Box<dyn std::error::Error>> {
+        if article.url != url || !model::is_web(&url) { return Err("阅读内容的地址已变化".into()); }
+        self.close_find(true);
+        self.dismiss_tab_preview();
+        self.finish_split_resize();
+        if let Some(handle) = &self.split_handle { handle.configure(None)?; }
+        if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
+        let proxy = self.proxy.clone();
+        let reader_id = id.clone();
+        let initial_document = Cell::new(true);
+        let view = WebViewBuilder::new_with_web_context(&mut self.context)
+            .with_visible(false).with_focused(false).with_javascript_disabled()
+            .with_background_color(surface_color(self.state.theme == "dark"))
+            .with_additional_browser_args(browser_args(false))
+            .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
+            .with_navigation_handler(move |target| {
+                // wry turns with_html into one data: document on Windows. Only
+                // that initial load is allowed; article links never load data.
+                if initial_document.get() && (target == "about:blank" || target.starts_with("data:text/html")) {
+                    initial_document.set(false);
+                    return true;
+                }
+                if model::is_web(&target) { let _ = proxy.send_event(Event::ReaderLink(reader_id.clone(), target)); }
+                false
+            })
+            .with_new_window_req_handler({
+                let proxy = self.proxy.clone();
+                move |target, _| {
+                    if model::is_web(&target) { let _ = proxy.send_event(Event::Open(target)); }
+                    wry::NewWindowResponse::Deny
+                }
+            })
+            .with_html(crate::reader::html(&article, &self.state.reader_preferences))
+            .build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+        register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.live_settings.clone(), true)?;
+        let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
+        let page = Page {
+            resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
+            view, url: url.clone(), clip: Rc::new(WindowClip::default()),
+            thumbnail_version: 0, thumbnail_attempt: None, thumbnail_pending: false,
+            visible: Cell::new(false), bounds: Rc::new(Cell::new(None)), viewport: Rc::new(Cell::new(None)),
+            dark: Cell::new(self.state.theme == "dark"),
+            navigation: Rc::new(NavigationPolicy { bookmarked: Cell::new(false), current: RefCell::new(url.clone()), host_navigation: Cell::new(false) }),
+            error_page, sleeping: Rc::new(Cell::new(false)), sleep_pending: Rc::new(Cell::new(false)), sleep_failed_at: Cell::new(None),
+        };
+        if let Some(original) = self.pages.insert(id.clone(), page) {
+            original.set_visible(false)?;
+            if let Some(page) = self.pages.get_mut(&id) { page.thumbnail_version = original.thumbnail_version + 1; }
+            self.reader = Some(ReaderSession { id: id.clone(), url, original });
+        }
+        self.invalidate_thumbnail(&id);
+        self.sync()?;
+        self.publish_reader();
+        self.focus_page_or_ui();
+        Ok(())
     }
     /// Closes the find session and (unless another page takes over silently)
     /// tells the trusted UI, so both the shell and the floating layer hide the
@@ -1760,6 +1910,14 @@ impl App {
             return Ok(());
         }
         if !self.state.onboarding.completed { return self.sync_layout(); }
+        let visible_reader = |id: &str| self.state.active().is_some_and(|t| t.id == id || t.split_with.as_deref() == Some(id));
+        if self.reader.as_ref().is_some_and(|r| !visible_reader(&r.id) || !self.state.tabs.iter().any(|t| t.id == r.id && t.url == r.url)) {
+            self.close_reader();
+        }
+        if self.reader_request.as_ref().is_some_and(|(id, url, _)| self.state.active_tab != *id || !self.state.tabs.iter().any(|t| t.id == *id && t.url == *url)) {
+            self.reader_request = None; self.reader_epoch += 1; self.publish_reader();
+        }
+        self.reader_available.retain(|id, _| self.state.tabs.iter().any(|t| &t.id == id));
         // State is already saved/published, but both controllers must outlive
         // the departing snapshot. Its completion event performs the cleanup.
         if self.split_exit.is_some() { return self.sync_layout(); }
@@ -2171,6 +2329,7 @@ impl App {
         if let Some(error) = update.error { self.error(error); }
     }
     fn sync_layout(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.reader.is_some() { self.publish_reader(); }
         self.sync_page_bounds()?;
         // Stacking changes on page/overlay transitions, not on every drag frame.
         let watched = self.tab_preview.as_ref()
@@ -2271,6 +2430,8 @@ impl App {
             "zoomIn" => self.command(Command::Zoom { action: "in".into() }, None),
             "zoomOut" => self.command(Command::Zoom { action: "out".into() }, None),
             "zoomReset" => self.command(Command::Zoom { action: "reset".into() }, None),
+            "reader" => self.command(Command::Reader, None),
+            "readerEscape" => self.command(Command::ReaderClose, None),
             "find" => self.command(Command::FindOpen, None),
             "findEscape" => self.command(Command::FindClose, None),
             "escape" => self.request_peek_close(),
@@ -2629,6 +2790,7 @@ impl App {
                 self.publish_downloads();
                 self.publish_default_browser();
                 self.publish_sleep_state();
+                self.publish_reader();
                 if let Err(e) = self.sync() {
                     self.error(e);
                 }
@@ -2731,6 +2893,7 @@ impl App {
                 return;
             }
             Command::PopupReady => {
+                self.publish_reader();
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
                 self.publish_downloads();
@@ -2811,12 +2974,20 @@ impl App {
                 }
                 return;
             }
+            Command::Reader => { self.toggle_reader(); return; }
+            Command::ReaderClose => {
+                self.close_reader();
+                if let Err(e) = self.sync() { self.error(e); }
+                self.focus_page_or_ui(); return;
+            }
+            Command::ReaderPreferences { preferences } => { self.apply_reader_preferences(preferences); return; }
             Command::FindOpen => {
                 self.open_find();
                 return;
             }
             Command::FindClose => {
                 self.close_find(true);
+                self.focus_page_or_ui();
                 return;
             }
             Command::FindStart { query } => {
@@ -2834,6 +3005,14 @@ impl App {
                 return;
             }
             Command::Zoom { action } => {
+                if self.peek.is_none() && self.reader.as_ref().is_some_and(|r| r.id == self.state.active_tab) {
+                    let mut preferences = self.state.reader_preferences.clone();
+                    preferences.step(&action);
+                    let percent = preferences.size as u32 * 5;
+                    self.apply_reader_preferences(preferences);
+                    self.toast(&format!("文字 {percent}%"), None);
+                    return;
+                }
                 let Some(url) = self
                     .peek
                     .as_ref()
@@ -2938,6 +3117,10 @@ impl App {
                 return;
             }
             Command::Back | Command::Forward | Command::Reload => {
+                if self.peek.is_none() && (self.reader.is_some() || self.reader_request.is_some()) {
+                    self.close_reader();
+                    if let Err(e) = self.sync() { self.error(e); }
+                }
                 if let Some(p) = self.page() {
                     let r = match c {
                         Command::Back => p.go_back(),
@@ -3261,6 +3444,41 @@ impl ApplicationHandler<Event> for App {
             Event::Suggestions(ticket, items) => {
                 self.emit(json!({"type":"suggestions","ticket":ticket,"suggestions":items}));
             }
+            Event::ReaderAvailable(id, url, available) => {
+                if self.state.tabs.iter().any(|t| t.id == id && t.url == url && !t.loading) {
+                    self.reader_available.insert(id, available); self.publish_reader();
+                }
+            }
+            Event::ReaderArticle(id, url, epoch, article) => {
+                if self.reader_request.as_ref() != Some(&(id.clone(), url.clone(), epoch)) { return; }
+                self.reader_request = None;
+                if self.state.active_tab != id || !self.state.tabs.iter().any(|t| t.id == id && t.url == url) {
+                    self.publish_reader(); return;
+                }
+                match article {
+                    Some(article) => if let Err(e) = self.show_reader(id, url, article) { self.error(e); },
+                    None => self.toast("此页面没有可提取的正文", None),
+                }
+                self.publish_reader();
+            }
+            Event::ReaderDeadline(epoch) => {
+                if let Some((id, _, current)) = self.reader_request.clone() {
+                    if current == epoch && id == self.state.active_tab {
+                        if let Some(page) = self.pages.get(&id) {
+                            let url = page.url.clone();
+                            self.reader_request = Some((id.clone(), url.clone(), epoch));
+                            self.start_reader_extract(&id, &url, epoch);
+                        }
+                    }
+                }
+            }
+            Event::ReaderLink(id, url) => {
+                if self.reader.as_ref().is_some_and(|r| r.id == id) {
+                    self.close_reader();
+                    self.command(Command::Activate { id }, Some(event_loop));
+                    self.command(Command::Navigate { url }, Some(event_loop));
+                }
+            }
             Event::FindMatches(count, active) => {
                 if self.find_open.get() {
                     self.emit(json!({"type":"findMatches","count":count,"active":active}));
@@ -3396,6 +3614,14 @@ impl ApplicationHandler<Event> for App {
                 self.save();
             }
             Event::Load(id, url, loading) => {
+                if loading {
+                    if let Some((pending_id, pending_url, _)) = self.reader_request.as_mut() {
+                        if pending_id == &id { *pending_url = url.clone(); }
+                    }
+                    if self.reader.as_ref().is_some_and(|r| r.id == id) { self.close_reader(); }
+                    self.reader_available.remove(&id);
+                    self.publish_reader();
+                }
                 let failed = self.pages.get(&id).is_some_and(|p| p.error_page.is_failed());
                 // A different document in the page the bar searched ends the
                 // session. The same page's own first load does not: the bar may
@@ -3437,7 +3663,7 @@ impl ApplicationHandler<Event> for App {
                         }
                         t.url = url.clone();
                         if let Some(p) = self.pages.get_mut(&id) {
-                            p.url = url;
+                            p.url = url.clone();
                             if loading {
                                 crate::site::ensure_zoom(&p.view, desired_zoom);
                             }
@@ -3464,6 +3690,10 @@ impl ApplicationHandler<Event> for App {
                             self.emit(json!({"type":"audio","id":id,"playing":playing}));
                         }
                     }
+                    self.probe_reader(&id, &url);
+                    if let Some((pending_id, pending_url, epoch)) = self.reader_request.clone() {
+                        if pending_id == id && pending_url == url { self.start_reader_extract(&id, &url, epoch); }
+                    }
                     self.save();
                     let proxy = self.proxy.clone();
                     std::thread::spawn(move || {
@@ -3473,6 +3703,9 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::Source(id, url) => {
+                if self.reader.as_ref().is_some_and(|r| r.id == id && r.url != url) { self.close_reader(); }
+                let source_changed = self.pages.get(&id).is_some_and(|p| p.url != url);
+                if source_changed { self.reader_available.remove(&id); self.publish_reader(); }
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
                     if model::is_web(&url) {
                         if !crate::favicon::same_origin(&p.tab.url, &url) {
@@ -3495,8 +3728,9 @@ impl ApplicationHandler<Event> for App {
                         t.url = url.clone();
                     }
                     if let Some(p) = self.pages.get_mut(&id) {
-                        p.url = url;
+                        p.url = url.clone();
                     }
+                    if source_changed { self.probe_reader(&id, &url); }
                     self.publish();
                 }
             }
@@ -3650,56 +3884,8 @@ fn register_page_events(
     navigation: Rc<NavigationPolicy>,
     settings: Rc<RefCell<crate::settings::Settings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let p = proxy.clone();
-    let shortcut_settings = settings.clone();
-    let find_open = shared.find_open.clone();
-    let peek_visible = shared.peek_visible.clone();
-    let downloads_open = shared.downloads_open.clone();
-    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
-        if let Some(args) = args {
-            unsafe {
-                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN;
-                args.KeyEventKind(&mut kind)?;
-                if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
-                    && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
-                {
-                    return Ok(());
-                }
-                let mut key = 0;
-                args.VirtualKey(&mut key)?;
-                let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
-                let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
-                let alt = GetKeyState(VK_MENU.0 as i32) < 0;
-                let action = if key == 27 && !ctrl && !alt && !shift {
-                    // Esc closes the downloads panel first, then the find bar,
-                    // then Peek.
-                    if downloads_open.get() { Some("downloadsEscape".into()) }
-                    else if find_open.get() { Some("findEscape".into()) }
-                    else if peek_visible.get() { Some("escape".into()) }
-                    else { None }
-                }
-                    // Ctrl+J opens the downloads panel, like Chrome.
-                    else if ctrl && !alt && !shift && key == 74 { Some("downloads".into()) }
-                    // Browser-standard page zoom: Ctrl+plus/minus/0, also from
-                    // the OEM keys, the numpad and Ctrl+Shift+plus.
-                    else if ctrl && !alt && (key == 187 || key == 107) { Some("zoomIn".into()) }
-                    else if ctrl && !alt && (key == 189 || key == 109) { Some("zoomOut".into()) }
-                    else if ctrl && !alt && !shift && (key == 48 || key == 96) { Some("zoomReset".into()) }
-                    else if ctrl && !alt && !shift && (49..=57).contains(&key) { Some(format!("space:{}", key - 49)) }
-                    else { shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift}) };
-                if let Some(action) = action {
-                    args.SetHandled(true)?;
-                    let _ = p.send_event(Event::Shortcut(action, false));
-                }
-            }
-        }
-        Ok(())
-    }));
+    register_accelerators(view, proxy.clone(), shared.find_open.clone(), shared.peek_visible.clone(), shared.downloads_open.clone(), settings.clone(), false)?;
     let mut token = 0;
-    unsafe {
-        view.controller()
-            .add_AcceleratorKeyPressed(&handler, &mut token)?;
-    }
     let download_downloads = shared.downloads.clone();
     let download_ops = shared.download_ops.clone();
     let download_sources = shared.download_sources.clone();
@@ -4107,4 +4293,61 @@ mod motion_tests {
         }
         assert!(peek_target("_blank").is_none());
     }
+}
+
+fn register_accelerators(
+    view: &WebView, proxy: EventLoopProxy<Event>, find_open: Rc<Cell<bool>>,
+    peek_visible: Rc<Cell<bool>>, downloads_open: Rc<Cell<bool>>,
+    settings: Rc<RefCell<crate::settings::Settings>>, reader: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let p = proxy.clone();
+    let shortcut_settings = settings;
+    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+        if let Some(args) = args {
+            unsafe {
+                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN;
+                args.KeyEventKind(&mut kind)?;
+                if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                    && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                {
+                    return Ok(());
+                }
+                let mut key = 0;
+                args.VirtualKey(&mut key)?;
+                let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
+                let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
+                let alt = GetKeyState(VK_MENU.0 as i32) < 0;
+                let action = if key == 27 && !ctrl && !alt && !shift {
+                    // Esc closes the downloads panel first, then the find bar,
+                    // then Peek.
+                    if downloads_open.get() { Some("downloadsEscape".into()) }
+                    else if find_open.get() { Some("findEscape".into()) }
+                    else if peek_visible.get() { Some("escape".into()) }
+                    else if reader { Some("readerEscape".into()) }
+                    else { None }
+                }
+                    // Ctrl+J opens the downloads panel, like Chrome.
+                    else if ctrl && !alt && !shift && key == 74 { Some("downloads".into()) }
+                    else if reader && !ctrl && !alt && !shift && key == 116 { Some("reload".into()) }
+                    // Browser-standard page zoom: Ctrl+plus/minus/0, also from
+                    // the OEM keys, the numpad and Ctrl+Shift+plus.
+                    else if ctrl && !alt && (key == 187 || key == 107) { Some("zoomIn".into()) }
+                    else if ctrl && !alt && (key == 189 || key == 109) { Some("zoomOut".into()) }
+                    else if ctrl && !alt && !shift && (key == 48 || key == 96) { Some("zoomReset".into()) }
+                    else if ctrl && !alt && !shift && (49..=57).contains(&key) { Some(format!("space:{}", key - 49)) }
+                    else { shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift}) };
+                if let Some(action) = action {
+                    args.SetHandled(true)?;
+                    let _ = p.send_event(Event::Shortcut(action, false));
+                }
+            }
+        }
+        Ok(())
+    }));
+    let mut token = 0;
+    unsafe {
+        view.controller()
+            .add_AcceleratorKeyPressed(&handler, &mut token)?;
+    }
+    Ok(())
 }

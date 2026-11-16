@@ -381,6 +381,8 @@ kbd {
 .address-field:hover {
   background: var(--field-hover);
 }
+.reader-toggle { app-region:no-drag; flex-shrink:0; }
+.reader-toggle.chosen { background:var(--field-hover); }
 .favorites {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

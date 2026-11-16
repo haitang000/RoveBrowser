@@ -26,7 +26,7 @@
 | 5 | 历史页 + 40 分钟会话聚类 + 撤销清除 | `Web/HistoryPage.swift`、`Web/HistoryClusters.swift` | 高 | M | 需 `history` 表迁移 |
 | 6 | 站点权限对话框 + 权限存储（最小闭环） | `Web/SitePermissions.swift` | 高 | M | 原生 `PermissionRequested` + deferral |
 | **P1** | | | | | |
-| 7 | 阅读器 Reader | `Web/Reader.swift` + Readability | 高 | M | Apache-2.0 |
+| 7 | 阅读器 Reader | `Web/Reader.swift` + Readability | 高 | M | Apache-2.0；**已实现，见 [阅读模式移植](READER_PORT.md)** |
 | 8 | 深色页面（先滤镜，后 Dark Reader） | `Web/DarkPages.swift`、`DarkReaderFixes`、`DarkSeen` | 高 | M–L | 跨域 CSS/图片需宿主代理 |
 | 9 | 标签归档（Tidy） | `Tabs/TabArchive.swift` | 中高 | M | 默认关闭 |
 | 10 | 页面对话框 + HTTP 认证 | `Web/PageDialogs.swift` | 中 | S | 低 |
