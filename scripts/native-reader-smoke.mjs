@@ -54,6 +54,14 @@ async function waitFor(fn, label) {
 const send = command => ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
 const pages = () => pageBrowser.contexts().flatMap(c => c.pages());
 const readerState = () => ui.evaluate(() => window.__readerState);
+async function sampleFrames(page, read, count = 22) {
+  const frames = [];
+  for (let i = 0; i < count; i++) {
+    frames.push(await page.evaluate(read));
+    await new Promise(resolve => setTimeout(resolve, 16));
+  }
+  return frames;
+}
 const keys = async action => {
   for (const page of [ui, popup, ...pages()]) await page.evaluate(() => {
     window.__keyLog = [];
@@ -132,12 +140,71 @@ try {
   assert.equal(await reader.locator('article img').getAttribute('src'), base + '/image.svg');
   checks.push('独立阅读 WebView 提取标题、正文、图片；移除导航、脚本、事件与危险链接，无宿主 IPC');
   await popup.getByRole('button', { name: '阅读外观', exact: true }).click();
+  const menuEntry = await sampleFrames(popup, () => ({
+    opacity: Number(getComputedStyle(document.querySelector('.reader-options-layer')).opacity),
+    transform: getComputedStyle(document.querySelector('.reader-options')).transform,
+  }));
+  assert.ok(menuEntry.some(frame => frame.opacity > 0 && frame.opacity < 1), 'appearance bubble fades in');
+  assert.ok(menuEntry.some(frame => frame.transform !== 'none'), 'appearance bubble scales from Aa');
+  assert.equal(menuEntry.at(-1).opacity, 1);
+  const oldPaper = await reader.evaluate(() => getComputedStyle(document.documentElement, '::before').backgroundColor);
   await popup.getByRole('button', { name: '纸色', exact: true }).click();
+  const [paperFrames, selectionFrames] = await Promise.all([
+    sampleFrames(reader, () => getComputedStyle(document.documentElement, '::before').backgroundColor),
+    sampleFrames(popup, () => document.querySelectorAll('.reader-choice-highlight')[1].getBoundingClientRect().x),
+  ]);
+  assert.ok(paperFrames.some(color => color !== oldPaper && color !== paperFrames.at(-1)), 'paper transitions through intermediate colors');
+  assert.ok(new Set(selectionFrames.map(x => Math.round(x * 10))).size > 2, 'selected option highlight slides to the new choice');
+  const choice = popup.locator('.reader-choices').nth(1);
+  await waitFor(() => choice.evaluate(group => {
+    const target = group.querySelector('[aria-pressed=true]').getBoundingClientRect();
+    const highlight = group.querySelector('.reader-choice-highlight').getBoundingClientRect();
+    return Math.abs(target.x - highlight.x) < 1 && Math.abs(target.width - highlight.width) < 1;
+  }), 'selection highlight reaches chosen theme');
   await popup.getByRole('button', { name: '无衬线', exact: true }).click();
+  const typefaceFrames = await sampleFrames(reader, () => ({
+    filter: getComputedStyle(document.querySelector('main')).filter,
+    opacity: Number(getComputedStyle(document.querySelector('main')).opacity),
+  }));
+  assert.ok(typefaceFrames.some(frame => frame.opacity < 1 && frame.filter !== 'none'), 'typeface change has a soft reveal');
+  assert.equal(typefaceFrames.at(-1).opacity, 1);
+  const oldWidth = await reader.evaluate(() => document.querySelector('main').getBoundingClientRect().width);
   await popup.getByRole('button', { name: '宽', exact: true }).click();
+  const widthFrames = await sampleFrames(reader, () => document.querySelector('main').getBoundingClientRect().width);
+  assert.ok(widthFrames.some(width => width > oldWidth + .1 && width < widthFrames.at(-1) - .1), 'column width animates');
   await popup.getByRole('button', { name: '放大阅读字号', exact: true }).click();
+  const sizeFrames = await sampleFrames(reader, () => ({
+    size: parseFloat(getComputedStyle(document.body).fontSize),
+    line: parseFloat(getComputedStyle(document.body).lineHeight),
+    spacing: parseFloat(getComputedStyle(document.querySelector('article p')).marginBottom),
+  }));
+  assert.ok(sizeFrames.some(frame => frame.size > 20 && frame.size < 22), 'text size has intermediate frames');
+  assert.ok(sizeFrames.some(frame => frame.spacing > sizeFrames[0].spacing && frame.spacing < sizeFrames.at(-1).spacing), 'paragraph spacing follows text size');
+  assert.equal(sizeFrames.at(-1).size, 22);
   await waitFor(() => reader.evaluate(() => document.documentElement.dataset.theme === 'sepia' && document.documentElement.dataset.face === 'sans' && document.documentElement.style.getPropertyValue('--size') === '22px' && document.documentElement.style.getPropertyValue('--measure') === '40em'), 'live preferences');
+  await popup.locator('.reader-options-layer').screenshot({ path: join(output, 'reader-options.png') });
   await popup.getByRole('button', { name: '阅读外观', exact: true }).click();
+  const menuExit = await sampleFrames(popup, () => {
+    const layer = document.querySelector('.reader-options-layer');
+    return layer ? Number(getComputedStyle(layer).opacity) : null;
+  }, 16);
+  assert.ok(menuExit.some(opacity => opacity !== null && opacity > 0 && opacity < 1), 'closing keeps the bubble mounted for its fade');
+  assert.equal(menuExit.at(-1), null);
+  await popup.getByRole('button', { name: '阅读外观', exact: true }).click();
+  await popup.evaluate(() => {
+    const toggle = document.querySelector('[aria-label="阅读外观"]');
+    toggle.click();
+    requestAnimationFrame(() => toggle.click());
+  });
+  await waitFor(() => popup.evaluate(() => {
+    const layer = document.querySelector('.reader-options-layer');
+    return layer && getComputedStyle(layer).opacity === '1' && !layer.classList.contains('bubble-leave-active');
+  }), 'appearance close reverses on reopen');
+  await popup.locator('.reader-options button[aria-pressed=true]').first().focus();
+  await popup.keyboard.press('Escape');
+  await popup.locator('.reader-options-layer').waitFor({ state: 'detached' });
+  assert.equal(await popup.getByRole('button', { name: '阅读外观', exact: true }).evaluate(button => document.activeElement === button), true);
+  checks.push('Aa 菜单按下载面板曲线弹入退场，选中底块对齐；字号、段落间距、栏宽、字体和纸张颜色均有过渡中间帧');
   await send({ type: 'zoom', action: 'in' });
   await waitFor(() => reader.evaluate(() => document.documentElement.style.getPropertyValue('--size') === '24px'), 'reader text zoom');
   checks.push('文字、颜色、字体和栏宽即时生效，Ctrl 缩放命令调整阅读字号');
@@ -235,6 +302,19 @@ try {
   assert.equal(reduced.reveal, 0);
   await popup.locator('.reader-controls').waitFor();
   assert.equal(await popup.locator('.reader-controls').evaluate(element => getComputedStyle(element).transitionDuration), '0.08s');
+  assert.equal(await reader.evaluate(() => getComputedStyle(document.body).transitionDuration.split(',')[0].trim()), '0s');
+  await popup.getByRole('button', { name: '阅读外观', exact: true }).click();
+  const reducedMenu = await popup.locator('.reader-options').evaluate(panel => ({
+    transform: getComputedStyle(panel).transform,
+    duration: getComputedStyle(panel.parentElement).transitionDuration,
+  }));
+  assert.equal(reducedMenu.transform, 'none');
+  assert.equal(reducedMenu.duration, '0.08s');
+  await popup.getByRole('button', { name: '衬线', exact: true }).click();
+  assert.equal(await reader.evaluate(() => document.querySelector('main').getAnimations().some(animation => animation.id === 'reader-typeface')), false);
+  await popup.getByRole('button', { name: '无衬线', exact: true }).click();
+  await popup.getByRole('button', { name: '阅读外观', exact: true }).click();
+  await popup.locator('.reader-options-layer').waitFor({ state: 'detached' });
   await send({ type: 'readerClose' });
   await waitFor(async () => !(await readerState())?.id, 'reduced exit');
   await send({ type: 'settingsUpdate', settings: originalSettings });

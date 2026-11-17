@@ -41,8 +41,8 @@ impl Preferences {
         }
     }
     pub fn script(&self) -> String {
-        format!("document.documentElement.dataset.theme={};document.documentElement.dataset.face={};document.documentElement.style.setProperty('--size','{}px');document.documentElement.style.setProperty('--measure','{}');",
-            json!(self.theme), json!(self.face), self.size, self.measure())
+        format!("(()=>{{const theme={};const face={};const size={};const measure={};{}\n}})()",
+            json!(self.theme), json!(self.face), json!(format!("{}px", self.size)), json!(self.measure()), include_str!("reader/preferences.js"))
     }
     pub fn step(&mut self, action: &str) {
         self.size = match action {

@@ -80,10 +80,10 @@ watch(() => b.downloadsFocus, async () => {
 });
 </script>
 <template>
-  <Transition name="downloads">
+  <Transition name="bubble">
     <div v-if="b.downloadsOpen" class="downloads-layer" @pointerdown.self="close">
       <section
-        id="downloads-panel" ref="panel" class="downloads-panel" :style="position"
+        id="downloads-panel" ref="panel" class="downloads-panel bubble-surface" :style="position"
         role="dialog" aria-label="下载" tabindex="-1"
         @wheel.stop @keydown.esc.stop.prevent="close"
         @pointerdown="panelPointerDown"

@@ -1,3 +1,18 @@
+/* Shared anchored bubble motion: downloads and Reader appearance settings. */
+.bubble-enter-active { transition: opacity 260ms ease; }
+.bubble-leave-active { transition: opacity 180ms ease; pointer-events: none; }
+.bubble-enter-active .bubble-surface { transition: transform 260ms cubic-bezier(.16, 1.6, .3, 1); }
+.bubble-leave-active .bubble-surface { transition: transform 180ms cubic-bezier(.25, -.35, .45, 1); }
+.bubble-enter-from, .bubble-leave-to { opacity: 0; }
+.bubble-enter-from .bubble-surface { transform: translateY(var(--bubble-enter-y, 7px)) scale(.94); }
+.bubble-leave-to .bubble-surface { transform: translateY(var(--bubble-exit-y, 5px)) scale(.96); }
+html[data-reduce-motion="true"] :is(.bubble-enter-active, .bubble-leave-active) { transition-duration: 80ms !important; }
+html[data-reduce-motion="true"] :is(.bubble-enter-active, .bubble-leave-active) .bubble-surface { transition: none !important; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .bubble-enter-active, .bubble-leave-active { transition-duration: 80ms !important; }
+  :is(.bubble-enter-active, .bubble-leave-active) .bubble-surface { transition: none !important; transform: none; }
+}
+
 .panel-enter-active,
 .panel-leave-active {
   transition: opacity var(--motion-standard) var(--ease-out);

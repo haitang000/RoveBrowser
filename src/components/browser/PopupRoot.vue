@@ -40,7 +40,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const surfaces = document.querySelectorAll<HTMLElement>(".quit-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .downloads-layer, .reader-controls, .reader-options");
+  const surfaces = document.querySelectorAll<HTMLElement>(".quit-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .downloads-layer, .reader-controls, .reader-options-layer");
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -54,7 +54,7 @@ function report() {
     const bounds = rect(element);
     // The native opacity layer is clipped to these regions; a shadow must have
     // room or the clip cuts it into a square-cornered halo.
-    return surfaceRegion(bounds, element.classList.contains("reader-options") ? 24 : shadowBleed(element.className));
+    return surfaceRegion(bounds, element.classList.contains("reader-options-layer") ? 24 : shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout, downloads });
   const active = b.quitOpen ? "quit" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.creationMenu ? "creation" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";

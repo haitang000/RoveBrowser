@@ -137,21 +137,7 @@
 .download-action:hover { background: var(--separator); color: var(--ink); }
 .download-action:active { transform: scale(.94); }
 .downloads-panel button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Transition the existing surface so rapid close/reopen can reverse smoothly. */
-.downloads-enter-active { transition: opacity 260ms ease; }
-.downloads-leave-active { transition: opacity 180ms ease; }
-.downloads-enter-active .downloads-panel { transition: transform 260ms cubic-bezier(.16, 1.6, .3, 1); }
-.downloads-leave-active .downloads-panel { transition: transform 180ms cubic-bezier(.25, -.35, .45, 1); }
-.downloads-enter-from, .downloads-leave-to { opacity: 0; }
-.downloads-enter-from .downloads-panel { transform: translateY(7px) scale(.94); }
-.downloads-leave-to .downloads-panel { transform: translateY(5px) scale(.96); }
 @media (prefers-reduced-motion: reduce) {
-  .downloads-enter-active, .downloads-leave-active { transition-duration: 80ms; }
-  .downloads-enter-active .downloads-panel, .downloads-leave-active .downloads-panel { transition: none; transform: none; }
   .download-bar.indeterminate > span { animation: none; }
 }
-html[data-reduce-motion="true"] .downloads-enter-active,
-html[data-reduce-motion="true"] .downloads-leave-active { transition-duration: 80ms; }
-html[data-reduce-motion="true"] .downloads-enter-active .downloads-panel,
-html[data-reduce-motion="true"] .downloads-leave-active .downloads-panel { transition: none; transform: none; }
 html[data-reduce-motion="true"] .download-bar.indeterminate > span { animation: none; }
