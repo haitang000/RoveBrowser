@@ -9,6 +9,7 @@ export interface ReaderPreferences {
 export interface ReaderState {
   id: string | null;
   waiting: string | null;
+  closing: boolean;
   available: string[];
   rect: Rect | null;
 }

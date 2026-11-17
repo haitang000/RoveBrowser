@@ -16,15 +16,25 @@ const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-read
 await mkdir(output, { recursive: true });
 const port = Number(process.env.ERA_SMOKE_PORT || 19846);
 let requests = 0;
+let imageRequests = 0;
+const pendingImages = [];
 const execFileAsync = promisify(execFile);
 const text = '阅读模式保留文章的段落与图片，并去除导航与广告。This is a substantive article paragraph about reading, software and the web. A reader can focus on the words and follow the story without distraction. ';
 const server = createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   if (req.url === '/empty') { res.end('<!doctype html><title>Empty page</title><nav>Menu only</nav>'); return; }
   if (req.url === '/image.svg') { res.setHeader('Content-Type', 'image/svg+xml'); res.end('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="100"><rect width="600" height="100" fill="#ccc"/></svg>'); return; }
+  if (req.url === '/late.svg') {
+    res.setHeader('Content-Type', 'image/svg+xml'); res.setHeader('Cache-Control', 'no-store');
+    const finish = () => res.end('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="100"><rect width="600" height="100" fill="#7296b5"/></svg>');
+    if (++imageRequests > 1) pendingImages.push(finish); else finish();
+    return;
+  }
   requests++;
   const html = `<!doctype html><html lang="en"><head><title>Reader fixture - Fixture</title><meta property="og:site_name" content="Fixture"><meta name="author" content="Alice"><meta property="article:published_time" content="2024-03-03T10:00:00-05:00"></head><body><nav>Navigation poison-nav</nav><input id="draft" value="original"><article><h1>Reader fixture</h1><p>By Alice</p>${Array.from({ length: 20 }, (_, i) => `<p>${text.repeat(3)} ${i === 3 ? 'article-only-needle' : ''}</p>`).join('')}<figure><img src="/image.svg" width="600" height="100" onerror="window.__readerAttack=true"><figcaption>图片说明</figcaption></figure><p><a href="/second">Read next</a> <a href="javascript:alert('unsafe')">Unsafe link</a></p></article><aside>Advertisement poison-ad</aside><script>window.__originalMarker=crypto.randomUUID();window.Readability=function(){throw Error('page parser interference')};window.__roveReader={take:()=>null};</script></body></html>`;
-  if (req.url === '/slow') {
+  if (req.url === '/late-image') {
+    res.end(html.replace('<p>By Alice</p>', '<p>By Alice</p><figure><img src="/late.svg" width="600" height="100"><figcaption>延迟图片</figcaption></figure>'));
+  } else if (req.url === '/slow') {
     res.write(html.replace('</body></html>', '<img src="/stalled.png">'));
     setTimeout(() => res.end('</body></html>'), 1800);
   } else res.end(html);
@@ -79,8 +89,10 @@ async function connectUI() {
   popup = await waitFor(() => ui.context().pages().find(p => p.url().endsWith('?popup')), 'popup');
   await ui.evaluate(() => {
     const receive = window.__ERA_RECEIVE__;
+    window.__readerSettings = window.__ERA_INITIAL_STATE__.settings;
     window.__ERA_RECEIVE__ = event => {
       if (event.type === 'readerState') window.__readerState = event.reader;
+      if (event.type === 'state') window.__readerSettings = event.state.settings;
       receive?.(event);
     };
   });
@@ -94,8 +106,23 @@ try {
   const marker = await original.evaluate(() => { document.querySelector('#draft').value = 'unsaved draft'; scrollTo(0, 500); return window.__originalMarker; });
   await ui.getByRole('button', { name: '进入阅读模式', exact: true }).waitFor();
   checks.push('正文识别后地址栏显示阅读入口；站点伪造的解析器不影响隔离世界');
+  await keys('click-page');
   const initialRequests = requests;
   let reader = await openReader();
+  const entrance = [];
+  for (let i = 0; i < 30; i++) {
+    entrance.push(await reader.evaluate(() => {
+      const root = document.documentElement;
+      const title = document.querySelector('h1.title');
+      return { phase: root.dataset.readerPhase, opacity: Number(getComputedStyle(root).opacity), blur: getComputedStyle(title).filter };
+    }));
+    await new Promise(resolve => setTimeout(resolve, 16));
+  }
+  assert.ok(entrance.some(frame => frame.opacity > 0 && frame.opacity < 1), 'entry paints intermediate opacity');
+  assert.ok(entrance.some(frame => frame.blur !== 'none' && frame.blur !== 'blur(0px)'), 'title progressively resolves from blur');
+  assert.equal(entrance.at(-1).opacity, 1);
+  assert.ok(['none', 'blur(0px)'].includes(entrance.at(-1).blur));
+  checks.push('真实阅读入场呈现透明度中间帧，标题由模糊变清晰，最终完全可见');
   assert.equal(await reader.locator('h1.title').innerText(), 'Reader fixture');
   assert.ok(await reader.locator('main > article').innerText().then(t => t.includes('article-only-needle')));
   assert.ok(!(await reader.locator('main > article').innerText()).includes('poison-nav'));
@@ -123,16 +150,45 @@ try {
   checks.push('原生 Find API 搜索当前阅读正文');
   await popup.screenshot({ path: join(output, 'reader-controls.png') });
   await reader.screenshot({ path: join(output, 'reader-article.png') });
-  await keys('escape');
+  const exitFrame = (async () => {
+    for (let i = 0; i < 600; i++) {
+      const frame = await reader.evaluate(() => {
+        const root = document.documentElement;
+        const opacity = Number(getComputedStyle(root).opacity);
+        if (root.dataset.readerPhase === 'closing' && opacity > 0 && opacity < .98) {
+          return { opacity, inert: document.querySelector('main').inert, blur: getComputedStyle(document.querySelector('h1.title')).filter };
+        }
+      });
+      if (frame) return frame;
+      await new Promise(resolve => setTimeout(resolve, 16));
+    }
+    throw Error('No exit animation frame');
+  })();
+  // Observe while real input is sent; the reader target is destroyed only after
+  // the fade, so capture its intermediate state before that destruction.
+  const exitObserved = Promise.all([exitFrame, keys('escape')]);
+  const [departing] = await exitObserved;
+  assert.ok(departing.inert);
+  assert.ok(['none', 'blur(0px)'].includes(departing.blur), 'exit adds no blur');
   await waitFor(async () => !(await readerState())?.id, 'reader closed');
   assert.equal(await original.evaluate(() => window.__originalMarker), marker);
   assert.equal(await original.locator('#draft').inputValue(), 'unsaved draft');
   assert.equal(await original.evaluate(() => scrollY), 500);
   assert.equal(requests, initialRequests);
   checks.push('退出后保留原网页 DOM、未提交表单、滚动位置，未重新请求原文');
+  checks.push('Esc 退场保留可绘制的渐隐中间帧，整页同时淡出且不再增加模糊');
   await keys('ctrl-alt-r');
   reader = await shownReader();
   checks.push('真实 Windows 键盘事件：Esc 退出，Ctrl+Alt+R 从网页重新进入');
+  await send({ type: 'readerClose' });
+  await waitFor(async () => (await readerState())?.closing, 'exit started');
+  await send({ type: 'reader' });
+  await waitFor(async () => (await readerState())?.id && !(await readerState())?.closing, 'exit reversed');
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.ok((await readerState()).id, 'stale exit completion cannot close reopened reader');
+  assert.equal(await reader.evaluate(() => document.documentElement.dataset.readerPhase), 'open');
+  assert.equal(await reader.evaluate(() => Number(getComputedStyle(document.documentElement).opacity)), 1);
+  checks.push('退场中重新切换会平滑反向，旧完成回调不会关闭已恢复的阅读视图');
   await reader.getByRole('link', { name: 'Read next', exact: true }).click();
   await waitFor(() => original.url() === base + '/second', 'reader link navigation');
   await waitFor(async () => !(await readerState())?.id, 'link closes reader');
@@ -152,6 +208,38 @@ try {
   await send({ type: 'readerClose' });
   await waitFor(async () => !(await readerState())?.id, 'close loaded reader');
   checks.push('页面加载中请求阅读模式，加载完成后显示正文');
+  await send({ type: 'navigate', url: base + '/late-image' });
+  await waitFor(() => original.url() === base + '/late-image', 'late image page');
+  await ui.getByRole('button', { name: '进入阅读模式', exact: true }).waitFor();
+  reader = await openReader();
+  const lateImage = reader.locator('img[src$="/late.svg"]');
+  assert.equal(await lateImage.evaluate(image => image.complete), false, 'entry does not wait for slow images');
+  for (const finish of pendingImages.splice(0)) finish();
+  await waitFor(() => lateImage.evaluate(image => image.complete && image.getAnimations().some(a => a.playState === 'running')), 'loaded image reveal');
+  assert.equal(await lateImage.evaluate(image => image.naturalWidth), 600);
+  await waitFor(() => reader.evaluate(() => document.querySelectorAll('[data-reader-reveal]').length === 0), 'release entry blur layers');
+  checks.push('阅读入场不等待慢图片；图片到达后单独去模糊，正文入场图层会清理');
+  await send({ type: 'readerClose' });
+  await waitFor(async () => !(await readerState())?.id, 'close image reader');
+  const originalSettings = await ui.evaluate(() => window.__readerSettings);
+  await send({ type: 'settingsUpdate', settings: { ...originalSettings, reduceMotion: true } });
+  await waitFor(() => ui.evaluate(() => document.documentElement.dataset.reduceMotion === 'true'), 'reduced motion setting');
+  reader = await openReader();
+  const reduced = await reader.evaluate(() => ({
+    setting: document.documentElement.dataset.reduceMotion,
+    duration: getComputedStyle(document.documentElement).transitionDuration,
+    reveal: document.querySelectorAll('[data-reader-reveal]').length,
+  }));
+  assert.equal(reduced.setting, 'true');
+  assert.equal(reduced.duration, '0.08s');
+  assert.equal(reduced.reveal, 0);
+  await popup.locator('.reader-controls').waitFor();
+  assert.equal(await popup.locator('.reader-controls').evaluate(element => getComputedStyle(element).transitionDuration), '0.08s');
+  await send({ type: 'readerClose' });
+  await waitFor(async () => !(await readerState())?.id, 'reduced exit');
+  await send({ type: 'settingsUpdate', settings: originalSettings });
+  await waitFor(() => ui.evaluate(() => document.documentElement.dataset.reduceMotion === 'false'), 'normal motion restored');
+  checks.push('减少动态效果时禁用模糊和错峰，只保留 80ms 淡入淡出');
   await send({ type: 'navigate', url: base + '/article' });
   await waitFor(() => original.url() === base + '/article', 'article again');
   await ui.getByRole('button', { name: '进入阅读模式', exact: true }).waitFor();
@@ -188,6 +276,7 @@ try {
   await writeFile(join(output, 'failure.json'), JSON.stringify({ checks, keyboard, error: String(error), state: await readerState().catch(() => null), documents }, null, 2));
   throw error;
 } finally {
+  for (const finish of pendingImages.splice(0)) finish();
   await pageBrowser?.close(); await uiBrowser?.close();
   if (child && !child.killed) child.kill();
   server.close();

@@ -80,7 +80,7 @@ export const useBrowser = defineStore("browser", () => {
     findTicket = ref(0),
     findFocusTicket = ref(0),
     pageZoom = ref(1),
-    reader = ref<ReaderState>({ id: null, waiting: null, available: [], rect: null }),
+    reader = ref<ReaderState>({ id: null, waiting: null, closing: false, available: [], rect: null }),
     audio = ref<Record<string, boolean>>({}),
     /** Zigzag TabSleep: loaded pages the host put to sleep, by tab id. */
     asleep = ref<Record<string, boolean>>({}),

@@ -287,7 +287,7 @@ pub fn html(article: &Article, preferences: &Preferences) -> String {
         )
     };
     format!(
-        r#"<!doctype html><html lang="{lang}" data-theme="{}" data-face="{}" style="--size:{}px;--measure:{}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src http: https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer"><title>{title}</title><style>{}</style></head><body><main><header><p class="site">{}</p><h1 class="title">{title}</h1>{byline}</header><article>{content}</article><footer class="end"><a href="{}">在 {} 阅读原文</a></footer></main></body></html>"#,
+        r#"<!doctype html><html lang="{lang}" data-reader-phase="loading" data-theme="{}" data-face="{}" style="--size:{}px;--measure:{}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src http: https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer"><title>{title}</title><style>{}</style></head><body><main><header><p class="site">{}</p><h1 class="title">{title}</h1>{byline}</header><article>{content}</article><footer class="end"><a href="{}">在 {} 阅读原文</a></footer></main></body></html>"#,
         preferences.theme,
         preferences.face,
         preferences.size,
@@ -297,6 +297,14 @@ pub fn html(article: &Article, preferences: &Preferences) -> String {
         escape(&article.url),
         escape(&article.site)
     )
+}
+
+/// Trusted host code only: the document still has scripts disabled and no IPC.
+pub fn motion_script(opening: bool, reduce_motion: bool) -> String {
+    format!("(()=>{{const opening={opening};const reduceMotion={reduce_motion};{}\n}})()", include_str!("reader/motion.js"))
+}
+pub fn resources_script(cleanup: bool) -> String {
+    format!("(()=>{{const cleanup={cleanup};{}\n}})()", include_str!("reader/resources.js"))
 }
 
 #[cfg(test)]

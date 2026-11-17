@@ -15,13 +15,13 @@ use std::{
     time::{Duration, Instant},
 };
 use webview2_com::{
-    take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler, DOMContentLoadedEventHandler,
     DownloadStartingEventHandler, FaviconChangedEventHandler, IsDefaultDownloadDialogOpenChangedEventHandler,
     IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
-        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_3,
+        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
         ICoreWebView2_4, ICoreWebView2_9,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
@@ -130,6 +130,10 @@ enum Event {
     ReaderArticle(String, String, u64, Option<crate::reader::Article>),
     ReaderLink(String, String),
     ReaderDeadline(u64),
+    ReaderReady(u64),
+    ReaderMotionDone(u64, bool),
+    ReaderMotionFailed(u64),
+    ReaderResources(u64, u8),
     /// A page's controller reported a new zoom factor.
     Zoom(String, f64),
     /// A page started or stopped playing sound.
@@ -162,6 +166,7 @@ struct Page {
     bounds: Rc<Cell<Option<[i32; 4]>>>,
     viewport: Rc<Cell<Option<[i32; 2]>>>,
     dark: Cell<bool>,
+    transparent: bool,
     navigation: Rc<NavigationPolicy>,
     error_page: Rc<crate::error_page::ErrorPage>,
     /// The page is suspended (`ICoreWebView2_3::TrySuspend`). Runtime only.
@@ -234,7 +239,7 @@ impl Page {
             } else {
                 wry::Theme::Light
             })?;
-            self.view.set_background_color(surface_color(dark))?;
+            self.view.set_background_color(if self.transparent { (0, 0, 0, 0) } else { surface_color(dark) })?;
             self.dark.set(dark);
             self.error_page.set_theme(&self.view, dark);
         }
@@ -384,6 +389,10 @@ struct ReaderSession {
     id: String,
     url: String,
     original: Page,
+    ticket: u64,
+    ready: bool,
+    closing: bool,
+    transitioning: bool,
 }
 struct PreviewRender {
     view: WebView,
@@ -695,11 +704,11 @@ impl App {
             .or_else(|| self.pages.get(&self.state.active_tab).map(|p| &p.view))
     }
     fn publish_reader(&self) {
-        let id = self.reader.as_ref().map(|r| r.id.as_str());
+        let id = self.reader.as_ref().filter(|r| r.ready).map(|r| r.id.as_str());
         let rect = id.and_then(|id| if id == self.state.active_tab { Some(self.primary) }
             else if self.state.active().and_then(|t| t.split_with.as_deref()) == Some(id) { self.secondary } else { None });
         self.emit(json!({"type":"readerState", "reader": {
-            "id":id, "waiting":self.reader_request.as_ref().map(|r| &r.0),
+            "id":id, "closing":self.reader.as_ref().is_some_and(|r| r.closing), "waiting":self.reader_request.as_ref().map(|r| &r.0),
             "available":self.reader_available.iter().filter(|(_, available)| **available).map(|(id, _)| id).collect::<Vec<_>>(),
             "rect":rect.map(|r| json!({"x":r.x,"y":r.y,"width":r.width,"height":r.height}))
         }}));
@@ -722,10 +731,13 @@ impl App {
         });
     }
     fn toggle_reader(&mut self) {
-        if self.reader.is_some() || self.reader_request.is_some() {
-            self.close_reader();
-            if let Err(e) = self.sync() { self.error(e); }
+        if self.reader.as_ref().is_some_and(|r| r.closing) {
+            self.animate_reader(true);
             self.focus_page_or_ui();
+            return;
+        }
+        if self.reader.is_some() || self.reader_request.is_some() {
+            self.dismiss_reader();
             return;
         }
         if self.peek.is_some() { return; }
@@ -741,6 +753,55 @@ impl App {
         self.publish_reader();
         if tab.loading { self.toast("网页加载完成后打开阅读模式", None); }
         else { self.start_reader_extract(&tab.id, &tab.url, self.reader_epoch); }
+    }
+    fn dismiss_reader(&mut self) {
+        if self.reader.as_ref().is_some_and(|r| r.closing) { return; }
+        if self.reader.as_ref().is_some_and(|r| r.ready) {
+            self.close_find(true);
+            self.animate_reader(false);
+        } else {
+            self.close_reader();
+            if let Err(e) = self.sync() { self.error(e); }
+            self.focus_page_or_ui();
+        }
+    }
+    fn animate_reader(&mut self, opening: bool) {
+        let Some(reader) = self.reader.as_mut() else { return; };
+        self.reader_epoch += 1;
+        let ticket = self.reader_epoch;
+        reader.ticket = ticket;
+        reader.ready = true;
+        reader.closing = !opening;
+        reader.transitioning = true;
+        let script = crate::reader::motion_script(opening, self.resize_appearance.reduce_motion);
+        let proxy = self.proxy.clone();
+        let result = self.pages.get(&reader.id).map(|page| page.view.evaluate_script_with_callback(&script, move |value| {
+            let Ok(duration) = serde_json::from_str::<u64>(&value) else {
+                let _ = proxy.send_event(Event::ReaderMotionFailed(ticket));
+                return;
+            };
+            let delay = duration.min(300) + 32;
+            let proxy = proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(delay));
+                let _ = proxy.send_event(Event::ReaderMotionDone(ticket, opening));
+            });
+        }));
+        // A renderer failure must never strand a transparent/inert controller.
+        let proxy = self.proxy.clone();
+        let fallback = if matches!(result, Some(Ok(()))) { 1000 } else { 0 };
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(fallback));
+            let _ = proxy.send_event(Event::ReaderMotionFailed(ticket));
+        });
+        if opening {
+            let proxy = self.proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(450));
+                let _ = proxy.send_event(Event::ReaderResources(ticket, 0));
+            });
+        }
+        if let Err(e) = self.sync_layout() { self.error(e); }
     }
     /// Swap only the displayed controller. The original DOM, form and scroll
     /// remain alive; all existing layout, split, find and capture paths use Reader.
@@ -781,9 +842,10 @@ impl App {
         let proxy = self.proxy.clone();
         let reader_id = id.clone();
         let initial_document = Cell::new(true);
+        let ticket = self.reader_epoch;
         let view = WebViewBuilder::new_with_web_context(&mut self.context)
             .with_visible(false).with_focused(false).with_javascript_disabled()
-            .with_background_color(surface_color(self.state.theme == "dark"))
+            .with_transparent(true)
             .with_additional_browser_args(browser_args(false))
             .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
             .with_navigation_handler(move |target| {
@@ -803,8 +865,21 @@ impl App {
                     wry::NewWindowResponse::Deny
                 }
             })
+            .with_on_page_load_handler({
+                let proxy = self.proxy.clone();
+                move |event, _| {
+                    if matches!(event, PageLoadEvent::Finished) { let _ = proxy.send_event(Event::ReaderReady(ticket)); }
+                }
+            })
             .with_html(crate::reader::html(&article, &self.state.reader_preferences))
             .build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+        // Reveal at DOM readiness, without waiting for slow article images.
+        let proxy = self.proxy.clone();
+        let handler = DOMContentLoadedEventHandler::create(Box::new(move |_, _| {
+            let _ = proxy.send_event(Event::ReaderReady(ticket));
+            Ok(())
+        }));
+        unsafe { view.webview().cast::<ICoreWebView2_2>()?.add_DOMContentLoaded(&handler, &mut 0)?; }
         register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.live_settings.clone(), true)?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
@@ -812,14 +887,13 @@ impl App {
             view, url: url.clone(), clip: Rc::new(WindowClip::default()),
             thumbnail_version: 0, thumbnail_attempt: None, thumbnail_pending: false,
             visible: Cell::new(false), bounds: Rc::new(Cell::new(None)), viewport: Rc::new(Cell::new(None)),
-            dark: Cell::new(self.state.theme == "dark"),
+            dark: Cell::new(self.state.theme == "dark"), transparent: true,
             navigation: Rc::new(NavigationPolicy { bookmarked: Cell::new(false), current: RefCell::new(url.clone()), host_navigation: Cell::new(false) }),
             error_page, sleeping: Rc::new(Cell::new(false)), sleep_pending: Rc::new(Cell::new(false)), sleep_failed_at: Cell::new(None),
         };
         if let Some(original) = self.pages.insert(id.clone(), page) {
-            original.set_visible(false)?;
             if let Some(page) = self.pages.get_mut(&id) { page.thumbnail_version = original.thumbnail_version + 1; }
-            self.reader = Some(ReaderSession { id: id.clone(), url, original });
+            self.reader = Some(ReaderSession { id: id.clone(), url, original, ticket, ready: false, closing: false, transitioning: true });
         }
         self.invalidate_thumbnail(&id);
         self.sync()?;
@@ -1327,6 +1401,7 @@ impl App {
             bounds: Rc::new(Cell::new(None)),
             viewport: Rc::new(Cell::new(None)),
             dark: Cell::new(self.state.theme == "dark"),
+            transparent: false,
             navigation,
             error_page,
             sleeping: Rc::new(Cell::new(false)),
@@ -2010,6 +2085,7 @@ impl App {
         if !self.state.onboarding.completed || self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null()) {
             let changed = self.pages.values().chain(self.peek.iter().map(|peek| &peek.page)).any(|page| page.visible.get());
             for page in self.pages.values().chain(self.peek.iter().map(|peek| &peek.page)) { page.set_visible(false)?; }
+            if let Some(reader) = &self.reader { reader.original.set_visible(false)?; }
             if let Some(handle) = &self.split_handle { handle.configure(None)?; }
             if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
             return Ok(changed);
@@ -2072,6 +2148,25 @@ impl App {
                 peek.shown.set(false);
                 visibility.push((None, &peek.page, false));
             }
+        }
+        if let Some(reader) = &self.reader {
+            let rect = if reader.id == self.state.active_tab { Some(self.primary) }
+                else if second == Some(&reader.id) { self.secondary } else { None };
+            if let Some(rect) = rect.filter(|r| r.width > 0. && r.height > 0.) {
+                // Keep the preserved page behind the transparent paper through
+                // entry/exit, with matching split bounds and popup cutouts.
+                let original = &reader.original;
+                original.set_window_bounds(self.bounds(rect), window.scale_factor())?;
+                original.sync_viewport()?;
+                original.clip.apply(original.view.hwnd(), rect.corners, window.scale_factor())?;
+                original.set_visible(reader.transitioning)?;
+                if reader.transitioning {
+                    if let Some(page) = self.pages.get(&reader.id) {
+                        unsafe { SetWindowPos(original.view.hwnd(), Some(page.view.hwnd()), 0, 0, 0, 0,
+                            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
+                    }
+                }
+            } else { reader.original.set_visible(false)?; }
         }
         // Both live edges move together before either renderer reflows.
         for page in self.pages.values().chain(self.peek.iter().map(|p| &p.page)) {
@@ -2444,6 +2539,11 @@ impl App {
                 self.resize_appearance = *appearance;
                 for page in self.pages.values().chain(self.peek.iter().map(|p| &p.page)) {
                     page.resize_surface.set_appearance(*appearance);
+                }
+                if let Some(reader) = &self.reader {
+                    if let Some(page) = self.pages.get(&reader.id) {
+                        let _ = page.view.evaluate_script(&format!("document.documentElement.dataset.reduceMotion='{}'", appearance.reduce_motion));
+                    }
                 }
             }
             return;
@@ -2976,9 +3076,7 @@ impl App {
             }
             Command::Reader => { self.toggle_reader(); return; }
             Command::ReaderClose => {
-                self.close_reader();
-                if let Err(e) = self.sync() { self.error(e); }
-                self.focus_page_or_ui(); return;
+                self.dismiss_reader(); return;
             }
             Command::ReaderPreferences { preferences } => { self.apply_reader_preferences(preferences); return; }
             Command::FindOpen => {
@@ -3447,6 +3545,46 @@ impl ApplicationHandler<Event> for App {
             Event::ReaderAvailable(id, url, available) => {
                 if self.state.tabs.iter().any(|t| t.id == id && t.url == url && !t.loading) {
                     self.reader_available.insert(id, available); self.publish_reader();
+                }
+            }
+            Event::ReaderReady(ticket) => {
+                if self.reader.as_ref().is_some_and(|r| r.ticket == ticket && !r.ready) {
+                    self.animate_reader(true);
+                }
+            }
+            Event::ReaderMotionDone(ticket, opening) => {
+                if self.reader.as_ref().is_some_and(|r| r.ticket == ticket && r.transitioning && r.closing != opening) {
+                    if opening {
+                        if let Some(reader) = self.reader.as_mut() { reader.transitioning = false; }
+                        if let Err(e) = self.sync_layout() { self.error(e); }
+                    } else {
+                        self.close_reader();
+                        if let Err(e) = self.sync() { self.error(e); }
+                        self.focus_page_or_ui();
+                    }
+                }
+            }
+            Event::ReaderMotionFailed(ticket) => {
+                if self.reader.as_ref().is_some_and(|r| r.ticket == ticket && r.transitioning) {
+                    self.close_reader();
+                    if let Err(e) = self.sync() { self.error(e); }
+                    self.focus_page_or_ui();
+                }
+            }
+            Event::ReaderResources(ticket, attempt) => {
+                if let Some(reader) = self.reader.as_ref().filter(|r| r.ticket == ticket && !r.closing) {
+                    if let Some(page) = self.pages.get(&reader.id) {
+                        let proxy = self.proxy.clone();
+                        let _ = page.view.evaluate_script_with_callback(&crate::reader::resources_script(attempt == 0), move |value| {
+                            if attempt < 95 && serde_json::from_str::<u64>(&value).unwrap_or(0) > 0 {
+                                let proxy = proxy.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(Duration::from_millis(100));
+                                    let _ = proxy.send_event(Event::ReaderResources(ticket, attempt + 1));
+                                });
+                            }
+                        });
+                    }
                 }
             }
             Event::ReaderArticle(id, url, epoch, article) => {

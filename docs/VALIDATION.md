@@ -1,5 +1,11 @@
 # 实际验证记录
 
+## Reader Mode 动画（2026-11-16）
+
+阅读视图加入 220ms 整体淡入、首屏资源的错峰去模糊，以及 160ms 整体淡出；减少动态效果时只保留 80ms 淡入淡出。真实 WebView2 专项的 16 项检查通过，新增透明度与模糊中间帧、Esc 纯淡出、退出中重新打开的过期回调保护、慢图片独立入场和减少动态效果检查；现有正文清理、原 DOM／表单／滚动恢复、原生查找、分屏与偏好恢复检查继续通过。
+
+TypeScript／Vite 生产构建、107 项前端单元测试、132 项串行 Rust 测试、Debug 原生构建和 Clippy（`-D warnings`）通过。阅读控制器保留禁用网页脚本与 CSP；动画计时、资源检查及销毁由原生宿主执行。专项报告见 `test-results/native-reader/native-reader-smoke.json`。
+
 ## Reader Mode 移植（2026-11-16）
 
 阅读模式参考 Zigzag `79437afc` 的 Swift 实现迁移，默认快捷键为 `Ctrl+Alt+R`。功能映射和平台边界见 [READER_PORT.md](READER_PORT.md)。

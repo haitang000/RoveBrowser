@@ -18,7 +18,8 @@ function step(delta: number) { update({ size: Math.max(14, Math.min(32, preferen
 watch(() => [b.reader.id, b.state.activeTab, b.peek], () => { open.value = false; });
 </script>
 <template>
-  <div v-if="b.reader.id && b.reader.rect && !b.peek && !b.overlay" class="reader-controls" :style="position" :data-reader-theme="theme">
+  <Transition name="reader-controls" appear>
+  <div v-if="b.reader.id && b.reader.rect && !b.peek && !b.overlay" :key="b.reader.id" class="reader-controls" :class="{ 'is-closing': b.reader.closing }" :inert="b.reader.closing" :style="position" :data-reader-theme="theme">
     <button class="reader-style-button" aria-label="阅读外观" title="文字和颜色" :aria-expanded="open" @click="open = !open">Aa</button>
     <button class="reader-style-button" aria-label="退出阅读模式" :title="b.shortcutTitle('退出阅读模式', 'reader')" @click="b.send({ type: 'readerClose' })"><Icon name="close" :size="14" /></button>
     <section v-if="open" class="reader-options" aria-label="阅读外观设置" @keydown.esc.stop.prevent="open = false">
@@ -28,9 +29,15 @@ watch(() => [b.reader.id, b.state.activeTab, b.peek], () => { open.value = false
       <fieldset><legend>栏宽</legend><div class="reader-choices"><button v-for="item in ([['narrow', '窄'], ['medium', '适中'], ['wide', '宽']] as const)" :key="item[0]" :aria-pressed="preferences.width === item[0]" @click="update({ width: item[0] })">{{ item[1] }}</button></div></fieldset>
     </section>
   </div>
+  </Transition>
 </template>
 <style scoped>
-.reader-controls { position:fixed; display:flex; gap:4px; z-index:20; --reader-paper:#fbfaf8; --reader-ink:#1f1e1c; --reader-rule:rgba(31,30,28,.12); color:var(--reader-ink); }
+.reader-controls { position:fixed; display:flex; gap:4px; z-index:20; --reader-paper:#fbfaf8; --reader-ink:#1f1e1c; --reader-rule:rgba(31,30,28,.12); color:var(--reader-ink); opacity:1; transition:opacity 160ms cubic-bezier(.23,1,.32,1); }
+.reader-controls-enter-active { transition-duration:220ms; }
+.reader-controls-enter-from,.reader-controls.is-closing { opacity:0; pointer-events:none; }
+.reader-controls-leave-active { transition:none; }
+:global(html[data-reduce-motion="true"] .reader-controls) { transition-duration:80ms !important; }
+@media (prefers-reduced-motion: reduce) { .reader-controls { transition-duration:80ms !important; } }
 .reader-controls[data-reader-theme=dark] { --reader-paper:#1e1e20; --reader-ink:#e6e4df; --reader-rule:rgba(255,255,255,.15); }
 .reader-controls[data-reader-theme=sepia] { --reader-paper:#f4ecde; --reader-ink:#3b2f24; --reader-rule:rgba(80,55,25,.16); }
 .reader-style-button { width:32px; height:32px; display:grid; place-items:center; border-radius:8px; background:var(--reader-paper); color:inherit; font:16px/1 Georgia,serif; }
