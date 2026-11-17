@@ -416,6 +416,8 @@ pub enum Command {
     },
     #[serde(rename = "window")]
     Window { action: String },
+    #[serde(rename = "quitResponse")]
+    QuitResponse { confirm: bool, #[serde(default)] always: bool },
     #[serde(rename = "history")]
     History { query: String },
     #[serde(rename = "suggest")]

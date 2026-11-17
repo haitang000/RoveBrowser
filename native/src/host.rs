@@ -363,6 +363,7 @@ struct App {
     live_resize: bool,
     sidebar_motion: bool,
     overlay: bool,
+    quit_pending: bool,
     ready: bool,
     last_error: Option<String>,
     ui_data: PathBuf,
@@ -514,6 +515,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         live_resize: false,
         sidebar_motion: false,
         overlay: false,
+        quit_pending: false,
         ready: false,
         last_error: None,
         ui_data: data.join("UI"),
@@ -535,13 +537,14 @@ impl App {
         if !self.state.onboarding.completed || !self.ready { return; }
         for url in std::mem::take(&mut self.external_urls) { self.command(Command::New { url }, event_loop); }
     }
-    fn confirm_quit(&self) -> bool {
+    fn confirm_quit(&mut self) -> bool {
+        if self.quit_pending { return false; }
         if !self.state.settings.ask_before_quit { return true; }
-        unsafe {
-            use windows::{core::w, Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_YESNO, MB_ICONQUESTION, MB_DEFBUTTON2, IDYES}};
-            let parent = self.window.as_ref().and_then(|w| w.window_handle().ok()).and_then(|handle| match handle.as_raw() { RawWindowHandle::Win32(h) => Some(HWND(h.hwnd.get() as *mut _)), _ => None });
-            MessageBoxW(parent, w!("关闭窗口并退出 Rove？标签页与工作区会在下次启动时恢复。"), w!("退出 Rove"), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES
-        }
+        self.finish_split_resize();
+        self.dismiss_tab_preview();
+        self.quit_pending = true;
+        self.emit(json!({"type":"quitConfirmation","visible":true}));
+        false
     }
     fn update_window_frame(&self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(window) = &self.window else {
@@ -2483,6 +2486,7 @@ impl App {
         Ok(())
     }
     fn shortcut(&mut self, key: String, shift: bool) {
+        if self.quit_pending { return; }
         if !self.state.onboarding.completed { return; }
         if let Some(index) = key.strip_prefix("space:").and_then(|i| i.parse::<usize>().ok()) {
             if let Some(space) = self.state.spaces.get(index) { self.command(Command::SwitchSpace { id: space.id.clone() }, None); }
@@ -2610,7 +2614,7 @@ impl App {
             _ => false,
         };
         if !self.state.onboarding.completed && !onboarding_edit && !matches!(c,
-            Command::Ready | Command::Presented | Command::Window { .. } | Command::WindowChrome { .. }
+            Command::Ready | Command::Presented | Command::Window { .. } | Command::QuitResponse { .. } | Command::WindowChrome { .. }
             | Command::Layout { .. } | Command::Glass { .. } | Command::PopupReady
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
         ) { return; }
@@ -2996,6 +3000,7 @@ impl App {
                 self.publish_reader();
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
+                self.emit(json!({"type":"quitConfirmation","visible":self.quit_pending}));
                 self.publish_downloads();
                 self.publish_peek();
                 self.publish_sleep_state();
@@ -3036,6 +3041,18 @@ impl App {
                     if let Some(id) = self.pending_download_review.take() {
                         self.download_action(Some(id), "review");
                     }
+                }
+                return;
+            }
+            Command::QuitResponse { confirm, always } => {
+                if !self.quit_pending { return; }
+                self.quit_pending = false;
+                if confirm {
+                    if always { self.state.settings.ask_before_quit = false; }
+                    self.save();
+                    if let Some(e) = event_loop { e.exit(); }
+                } else {
+                    self.emit(json!({"type":"quitConfirmation","visible":false}));
                 }
                 return;
             }

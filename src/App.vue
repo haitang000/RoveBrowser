@@ -14,6 +14,7 @@ import StatusToast from "./components/browser/StatusToast.vue";
 import ActionToast from "./components/browser/ActionToast.vue";
 import ErrorToast from "./components/browser/ErrorToast.vue";
 import OnboardingPage from "./components/browser/OnboardingPage.vue";
+import QuitDialog from "./components/browser/QuitDialog.vue";
 import Icon from "./components/common/Icon.vue";
 import { browserKey } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
@@ -223,5 +224,6 @@ onBeforeUnmount(() => {
     <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><SpaceEditor v-if="b.spaceEditor" :key="b.spaceEditor" /><CreationMenu v-if="!b.native && b.creationMenu" /><TabPreview />
     <ErrorToast v-if="!b.native" /><DownloadsPanel v-if="!b.native" />
     </template>
+    <QuitDialog v-if="!b.native && b.quitOpen" />
   </div>
 </template>

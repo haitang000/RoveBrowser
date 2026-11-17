@@ -51,6 +51,7 @@ export const useBrowser = defineStore("browser", () => {
     }, { deep: true });
   }
   const commandOpen = ref(false),
+    quitOpen = ref(false),
     thumbnails = ref<Record<string, string>>({}),
     previewTarget = ref<string>(),
     previewHiddenTicket = ref(0),
@@ -212,6 +213,7 @@ export const useBrowser = defineStore("browser", () => {
   }
   const overlay = computed(
     () =>
+      quitOpen.value ||
       commandOpen.value ||
       deskOpen.value ||
       settingsOpen.value ||
@@ -252,7 +254,14 @@ export const useBrowser = defineStore("browser", () => {
         }
         window.ipc!.postMessage(JSON.stringify(c));
       }
-      else if (c.type === "tabPreview") {
+      else if (c.type === "window" && c.action === "close") {
+        quitOpen.value = settings.value.askBeforeQuit;
+      } else if (c.type === "quitResponse") {
+        if (quitOpen.value && c.confirm && c.always) {
+          state.value = reduce(state.value, { type: "settingsUpdate", settings: { ...settings.value, askBeforeQuit: false } });
+        }
+        quitOpen.value = false;
+      } else if (c.type === "tabPreview") {
         if (!c.rect) previewHiddenTicket.value = Number(c.ticket);
       } else if (c.type.startsWith("tabPreview")) {
         // Standalone UI previews never create or capture real pages.
@@ -523,6 +532,7 @@ export const useBrowser = defineStore("browser", () => {
     if (native && !popupWindow) send({ type: "downloadsPanel", open });
   });
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "quitConfirmation") quitOpen.value = Boolean(e.visible);
     if (e.type === "readerState" && e.reader) reader.value = e.reader;
     if (e.type === "sidebarResize" && typeof e.width === "number" && Number.isFinite(e.width))
       sidebarResize.value = { width: e.width, resizing: Boolean(e.resizing), reset: Boolean(e.reset) };
@@ -796,6 +806,7 @@ export const useBrowser = defineStore("browser", () => {
     savedBookmarks,
     activeBookmark,
     commandOpen,
+    quitOpen,
     commandMode,
     deskOpen,
     settingsOpen,

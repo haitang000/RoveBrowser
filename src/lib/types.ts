@@ -132,6 +132,7 @@ declare global {
     __ERA_INITIAL_STATE__?: BrowserState;
     __ERA_RECEIVE__?: (event: {
       type: string;
+      visible?: boolean;
       reader?: import("./reader").ReaderState;
       importSources?: import("./import").ImportSource[];
       importBusy?: boolean;
