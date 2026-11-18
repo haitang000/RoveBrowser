@@ -36,6 +36,9 @@ pub struct Tab {
     /// The tab's sound is muted, as Chrome and Zigzag's `setMuted`.
     #[serde(default)]
     pub muted: bool,
+    /// A wheel zoom belongs to this tab, even when it navigates to another site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
     /// A rename from the tab's context menu; the page title stays in `title`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_title: Option<String>,
@@ -725,6 +728,7 @@ impl State {
             favicon: None,
             split_with: None,
             muted: false,
+            zoom: None,
             custom_title: None,
             last_activated: now_secs(),
         });
@@ -928,6 +932,7 @@ impl State {
             !site.is_empty() && site.len() <= 253 && valid_zoom(*zoom) && (*zoom - 1.0).abs() > 0.001
         });
         for tab in self.tabs.iter_mut().chain(self.closed.iter_mut()) {
+            tab.zoom = tab.zoom.filter(|factor| valid_zoom(*factor));
             if let Some(url) = crate::settings::normalize_settings_url(&tab.url) {
                 tab.url = url;
             }
@@ -1504,6 +1509,8 @@ mod tests {
         state.site_zoom.insert("".into(), 1.5);
         state.site_zoom.insert("nan.example".into(), f64::NAN);
         state.tabs[0].muted = true;
+        state.tabs[0].zoom = Some(1.0);
+        state.tabs[1].zoom = Some(0.0);
         state.repair();
         assert_eq!(state.site_zoom.len(), 1);
         assert_eq!(state.site_zoom.get("example.com"), Some(&1.25));
@@ -1513,12 +1520,16 @@ mod tests {
         restored.repair();
         assert_eq!(restored.site_zoom.len(), 1);
         assert!(restored.tabs[0].muted);
+        assert_eq!(restored.tabs[0].zoom, Some(1.0));
+        assert_eq!(restored.tabs[1].zoom, None);
         // A session written before mute and zoom existed still opens.
         let mut value: serde_json::Value = serde_json::to_value(&restored).unwrap();
         value["tabs"][0].as_object_mut().unwrap().remove("muted");
+        value["tabs"][0].as_object_mut().unwrap().remove("zoom");
         value.as_object_mut().unwrap().remove("siteZoom");
         let old: State = serde_json::from_value(value).unwrap();
         assert!(!old.tabs[0].muted);
+        assert_eq!(old.tabs[0].zoom, None);
         assert!(old.site_zoom.is_empty());
     }
     fn tab_for_test(id: &str, space: &str, last: u64) -> Tab {
@@ -1533,6 +1544,7 @@ mod tests {
             favicon: None,
             split_with: None,
             muted: false,
+            zoom: None,
             custom_title: None,
             last_activated: last,
         }

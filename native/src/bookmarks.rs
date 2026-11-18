@@ -250,6 +250,7 @@ impl State {
                     favicon: f.favicon,
                     split_with: None,
                     muted: false,
+                    zoom: None,
                     custom_title: None,
                     last_activated: crate::model::now_secs(),
                 });

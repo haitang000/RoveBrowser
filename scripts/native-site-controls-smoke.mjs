@@ -2,15 +2,18 @@
 // back/forward gesture opt-in, against real WebView2 pages. Two host names
 // (127.0.0.1 and localhost) serve the same fixture so per-site zoom is real.
 // The swipe gesture itself needs a precision touchpad and is not synthesized
-// here; everything else is driven through the same IPC the trusted UI uses.
+// here. Wheel checks use Windows mouse input; menu commands use the UI IPC.
 import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
 
 function toneWav() {
   const rate = 8000, seconds = 1, samples = rate * seconds;
@@ -41,7 +44,7 @@ const server = createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   const name = req.url === '/b' ? 'B' : 'A';
   res.end(`<!doctype html><title>${name} fixture</title>
-<style>html{background:#164e63;color:white;font:16px/1.6 sans-serif}</style>
+<style>html{background:#164e63;color:white;font:16px/1.6 sans-serif}body{min-height:200vh}</style>
 <h1>${name} site controls fixture</h1>
 <audio id="music" src="/tone.wav" loop></audio>
 <button id="play" onclick="document.getElementById('music').play()">play</button>
@@ -51,6 +54,9 @@ await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen
 
 const hostPort = server.address().port;
 const siteA = `http://127.0.0.1:${hostPort}/a`;
+const sameSite = `http://127.0.0.1:${hostPort}/b`;
+const freshSameSite = `http://127.0.0.1:${hostPort}/c`;
+const wheelDestination = `http://localhost:${hostPort}/wheel`;
 const siteB = `http://localhost:${hostPort}/b`;
 const profile = await mkdtemp(join(tmpdir(), 'rove-site-controls-smoke-'));
 createLegacyNativeProfile(profile);
@@ -72,6 +78,12 @@ async function waitFor(fn, label) {
 }
 async function send(command) {
   await ui.evaluate((c) => window.ipc.postMessage(JSON.stringify(c)), command);
+}
+async function pageInput(action, xFrac = 0.62) {
+  await run('powershell.exe', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve('scripts/real-keys.ps1'),
+    '-ProcessId', String(child.pid), '-Action', action, '-xFrac', String(xFrac),
+  ]);
 }
 async function pageAt(path) {
   return waitFor(async () => {
@@ -203,6 +215,72 @@ try {
   await widthEventually(first, baseWidth, 'reset to 100%');
   checks.push('缩小回到上一档，重置回到 100%');
 
+  await send({ type: 'new', url: sameSite });
+  const sibling = await pageAt(sameSite);
+  await sibling.waitForSelector('h1');
+  await ui.locator('[role=tab][aria-selected=true]').filter({ hasText: 'B fixture' }).waitFor();
+  const siblingId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
+  assert.notEqual(siblingId, activeId);
+  await widthEventually(sibling, baseWidth, 'same-site tab starts at 100%');
+  await events('zoomNotice');
+  await pageInput('ctrl-wheel-up');
+  await widthEventually(sibling, Math.round(baseWidth / 1.1), 'Ctrl+wheel up zooms the current tab to 110%');
+  await waitFor(async () => {
+    const notices = await events('zoomNotice');
+    return notices.some((event) => event.id === siblingId && Math.abs(event.factor - 1.1) < 0.001);
+  }, 'Ctrl+wheel zoom notice for the target tab');
+  await pageInput('ctrl-wheel-down');
+  await widthEventually(sibling, baseWidth, 'Ctrl+wheel down zooms the current tab back to 100%');
+  await pageInput('wheel-down');
+  await waitFor(() => sibling.evaluate(() => scrollY > 0), 'wheel without Ctrl scrolls the page');
+  await widthEventually(sibling, baseWidth, 'ordinary scrolling keeps zoom at 100%');
+  await pageInput('ctrl-wheel-up');
+  await waitFor(async () => (await lastState()).tabs.find((tab) => tab.id === siblingId)?.zoom === 1.1, 'tab stores wheel zoom');
+  assert.equal((await lastState()).siteZoom?.['127.0.0.1'], undefined, 'wheel never writes a site-wide setting');
+
+  await send({ type: 'activate', id: activeId });
+  await ui.locator(`[data-tab-id="${activeId}"][aria-selected="true"]`).waitFor();
+  await widthEventually(first, baseWidth, 'already open tab on the same site keeps 100%');
+  await send({ type: 'new', url: freshSameSite });
+  const fresh = await pageAt(freshSameSite);
+  await fresh.waitForSelector('h1');
+  await widthEventually(fresh, baseWidth, 'newly opened tab on the same site keeps 100%');
+  await send({ type: 'close' });
+  await send({ type: 'activate', id: siblingId });
+  await ui.locator(`[data-tab-id="${siblingId}"][aria-selected="true"]`).waitFor();
+  await widthEventually(sibling, Math.round(baseWidth / 1.1), 'switching back keeps the tab zoom');
+  await send({ type: 'navigate', url: wheelDestination });
+  const wheelPage = await pageAt(wheelDestination);
+  await wheelPage.waitForSelector('h1');
+  await widthEventually(wheelPage, Math.round(baseWidth / 1.1), 'tab zoom survives cross-site navigation');
+  await Promise.all([wheelPage.waitForEvent('load'), send({ type: 'reload' })]);
+  await widthEventually(wheelPage, Math.round(baseWidth / 1.1), 'tab zoom survives reload');
+  await pageInput('ctrl-0');
+  await widthEventually(wheelPage, baseWidth, 'Ctrl+0 resets the current tab');
+  await pageInput('ctrl-wheel-up');
+  await widthEventually(wheelPage, Math.round(baseWidth / 1.1), 'current tab zooms again after Ctrl+0');
+  await send({ type: 'activate', id: activeId });
+  await ui.locator(`[data-tab-id="${activeId}"][aria-selected="true"]`).waitFor();
+  checks.push('真实 Ctrl+滚轮向上放大、向下缩小并提示百分比，普通滚轮继续滚动网页');
+  checks.push('已有和新开的同站点标签保持原比例，滚轮缩放随当前标签切换、跨站导航和刷新保留');
+
+  await send({ type: 'split', id: activeId, other: siblingId });
+  await ui.locator('.split-divider').waitFor();
+  const [leftWidth, rightWidth] = await ui.locator('.page-pane > .webview-slot').evaluateAll((slots) =>
+    slots.map((slot) => slot.getBoundingClientRect().width),
+  );
+  await widthEventually(first, leftWidth, 'left split pane stays at 100%');
+  await widthEventually(wheelPage, Math.round(rightWidth / 1.1), 'right split pane starts at its tab zoom');
+  await pageInput('ctrl-wheel-up', 0.83);
+  await widthEventually(wheelPage, Math.round(rightWidth / 1.25), 'Ctrl+wheel zooms the right split pane');
+  await widthEventually(first, leftWidth, 'the left split pane keeps its zoom');
+  await pageInput('ctrl-wheel-down', 0.83);
+  await widthEventually(wheelPage, Math.round(rightWidth / 1.1), 'right split pane returns to 110%');
+  await send({ type: 'unsplit' });
+  await ui.locator('.split-divider').waitFor({ state: 'hidden' });
+  await widthEventually(first, baseWidth, 'primary tab regains the full-width viewport');
+  checks.push('分屏只缩放滚轮所在窗格，Ctrl+0 将当前标签恢复至 100%');
+
   // Per-site: 150% for 127.0.0.1, 100% for localhost, restored when returning.
   for (let step = 0; step < 3; step++) {
     await send({ type: 'zoom', action: 'in' });
@@ -301,13 +379,17 @@ try {
   await stop();
 
   const restarted = await launch();
-  const restoredWidth = await width(restarted);
   await widthEventually(restarted, Math.round(baseWidth / 1.25), 'zoom restored after restart');
   const restored = await lastState();
   assert.equal(restored.siteZoom?.['127.0.0.1'], 1.25, 'site zoom survives restart');
   assert.equal(restored.tabs.find((tab) => tab.id === activeId)?.muted, true, 'mute survives restart');
   await expectCount('.tab-row.selected .tab-audio.muted', 1, 'muted speaker after restart');
   checks.push('重启后按站点缩放 125% 与静音状态从 SQLite 会话恢复');
+  await send({ type: 'activate', id: siblingId });
+  const restoredWheelPage = await pageAt(wheelDestination);
+  await restoredWheelPage.waitForSelector('h1');
+  await widthEventually(restoredWheelPage, Math.round(baseWidth / 1.1), 'tab zoom restored after restart');
+  checks.push('重启后从会话恢复滚轮设置的标签缩放');
 
   const result = {
     passed: true,

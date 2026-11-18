@@ -37,6 +37,8 @@ export interface Tab {
   splitWith?: string;
   /** The tab's sound is muted (persisted with the session). */
   muted?: boolean;
+  /** Zoom set for this tab by Ctrl+wheel. */
+  zoom?: number;
   /** A rename from the tab context menu; the page title stays in `title`. */
   customTitle?: string;
   /** Unix seconds the tab was last shown, for fading and the Clear button. */

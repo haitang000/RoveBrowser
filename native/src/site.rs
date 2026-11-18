@@ -18,23 +18,7 @@ pub fn set_zoom_factor(view: &WebView, factor: f64) -> windows::core::Result<()>
 }
 
 pub fn zoom_factor(view: &WebView) -> windows::core::Result<f64> {
-    let mut factor = 1.0;
-    // SAFETY: plain out-parameter owned by this call on the UI thread.
-    unsafe { view.controller().ZoomFactor(&mut factor)? };
-    Ok(factor)
-}
-
-/// Applies a stored site zoom without saving a redundant change. A failure
-/// (for example an older runtime) leaves the page at its current zoom.
-pub fn ensure_zoom(view: &WebView, desired: f64) {
-    if !crate::model::valid_zoom(desired) {
-        return;
-    }
-    if let Ok(current) = zoom_factor(view) {
-        if (current - desired).abs() > 0.001 {
-            let _ = set_zoom_factor(view, desired);
-        }
-    }
+    zoom_factor_controller(&view.controller())
 }
 
 pub fn set_muted(view: &WebView, muted: bool) -> windows::core::Result<()> {

@@ -683,7 +683,6 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "zoom" && typeof e.factor === "number" && Number.isFinite(e.factor))
       pageZoom.value = e.factor;
     if (e.type === "zoomNotice" && typeof e.factor === "number" && Number.isFinite(e.factor)) {
-      pageZoom.value = e.factor;
       showZoomNotice(e.factor);
     }
     if (e.type === "audio" && e.id && typeof e.playing === "boolean")

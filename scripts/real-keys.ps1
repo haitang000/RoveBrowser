@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)][int]$ProcessId,
-  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'ctrl-r', 'f5', 'ctrl-shift-f', 'ctrl-alt-r', 'escape')][string]$Action,
+  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'ctrl-r', 'f5', 'ctrl-shift-f', 'ctrl-alt-r', 'ctrl-0', 'escape', 'ctrl-wheel-up', 'ctrl-wheel-down', 'wheel-down')][string]$Action,
   [double]$xFrac = 0.62,
   [double]$yFrac = 0.5
 )
@@ -69,7 +69,19 @@ switch ($Action) {
   'f5' { Send-Key 0x74 $false }
   'ctrl-shift-f' { Send-Key 0x46 $true $true }
   'ctrl-alt-r' { Send-Key 0x52 $true $false $true }
+  'ctrl-0' { Send-Key 0x30 $true }
   'escape' { Send-Key 0x1B $false }  # Esc
+  { $_ -in 'ctrl-wheel-up', 'ctrl-wheel-down', 'wheel-down' } {
+    $ctrl = $_ -ne 'wheel-down'
+    $delta = if ($_ -eq 'ctrl-wheel-up') { [uint32]120 } else { [BitConverter]::ToUInt32([BitConverter]::GetBytes(-120), 0) }
+    if ($ctrl) { [Native.Win]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero) }
+    try {
+      [Native.Win]::mouse_event(0x0800, 0, 0, $delta, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 100
+    } finally {
+      if ($ctrl) { [Native.Win]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero) }
+    }
+  }
 }
 [Native.Win]::SetCursorPos($oldX, $oldY) | Out-Null
 [Native.Win]::SetWindowPos($handle, [IntPtr](-2), 0, 0, 0, 0, 0x0013) | Out-Null
