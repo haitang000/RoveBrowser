@@ -461,6 +461,10 @@ pub enum Command {
     DownloadsPanel { open: bool },
     #[serde(rename = "findOpen")]
     FindOpen,
+    #[serde(rename = "printPage")]
+    PrintPage,
+    #[serde(rename = "savePageAs")]
+    SavePageAs,
     #[serde(rename = "reader")]
     Reader { id: Option<String> },
     #[serde(rename = "readerClose")]

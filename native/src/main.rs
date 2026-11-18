@@ -15,6 +15,7 @@ mod host;
 mod model;
 mod new_tab;
 mod onboarding;
+mod page_output;
 mod import;
 mod import_store;
 mod instance;

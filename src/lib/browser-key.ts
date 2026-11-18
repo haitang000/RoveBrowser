@@ -58,6 +58,11 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   }
   const value = shortcutFromEvent(e);
   const action = value && SHORTCUTS.find((item) => sameShortcut(value, shortcutFor(item.id, b.settings)))?.id;
+  if (!action && value?.ctrl && !value.alt && !value.shift && (value.key === 80 || value.key === 83)) {
+    e.preventDefault();
+    if (!e.repeat) b.outputPage(value.key === 80 ? "printPage" : "savePageAs");
+    return;
+  }
   if (!action) return;
   e.preventDefault();
   if (action === "address") b.openCommand("edit");

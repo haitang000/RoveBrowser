@@ -126,6 +126,8 @@ enum Event {
     PreviewThumbnail(String, u64, u64, Option<String>),
     PreviewCapture,
     FindMatches(i32, i32),
+    ChoosePageSavePath,
+    PageSaveFinished(Result<bool, String>),
     ReaderAvailable(String, String, bool),
     ReaderArticle(String, String, u64, Option<crate::reader::Article>),
     ReaderLink(String, String),
@@ -154,6 +156,7 @@ enum Event {
 }
 struct Page {
     view: WebView,
+    save_path: crate::page_output::SavePath,
     resize_surface: Rc<crate::resize_surface::Surface>,
     url: String,
     clip: Rc<WindowClip>,
@@ -287,6 +290,7 @@ struct PageShared {
     downloads_open: Rc<Cell<bool>>,
     downloads: Rc<RefCell<Downloads>>,
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+    save_path: crate::page_output::SavePath,
 }
 /// Tabs removed together by Clear or Close Others/Below, with the active tab
 /// before the batch so the Undo toast can put everything back as it was.
@@ -335,6 +339,7 @@ struct App {
     next_download_poll: Option<Instant>,
     downloads_open: Rc<Cell<bool>>,
     popup: Option<WebView>,
+    page_save: Option<crate::page_output::SaveRequest>,
     popup_state: serde_json::Map<String, serde_json::Value>,
     ui: Option<WebView>,
     window: Option<Window>,
@@ -484,6 +489,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         downloads_open: Rc::new(Cell::new(false)),
         popup: None,
         popup_state: serde_json::Map::new(),
+        page_save: None,
         ui: None,
         window: None,
         context: WebContext::new(Some(data.join("WebView2"))),
@@ -694,6 +700,28 @@ impl App {
             .map(|p| &p.page.view)
             .or_else(|| self.pages.get(&self.state.active_tab).map(|p| &p.view))
     }
+    fn page_output_target(&self, print: bool) -> Option<&Page> {
+        if self.quit_pending || self.space_form_open() {
+            return None;
+        }
+        // Like Zigzag, print the visible Peek or Reader, and save the active
+        // tab's original document even while its Reader view is open.
+        if print {
+            if let Some(peek) = self.peek.as_ref().filter(|peek| peek.phase != PeekPhase::Closing) {
+                let page = &peek.page;
+                return (page.visible.get() && model::is_web(&page.url) && !page.error_page.is_failed())
+                    .then_some(page);
+            }
+        }
+        let tab = self.state.active()?;
+        let page = self.pages.get(&tab.id)?;
+        let reader = self.reader.as_ref().filter(|reader| reader.id == tab.id);
+        let page = match reader {
+            Some(reader) if !print || !reader.ready => &reader.original,
+            _ => page,
+        };
+        (model::is_web(&page.url) && !page.error_page.is_failed()).then_some(page)
+    }
     fn publish_reader(&self) {
         let id = self.reader.as_ref().filter(|r| r.ready).map(|r| r.id.as_str());
         let rect = id.and_then(|id| if id == self.state.active_tab { Some(self.primary) }
@@ -880,7 +908,7 @@ impl App {
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
             resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
-            view, url: url.clone(), clip: Rc::new(WindowClip::default()),
+            view, url: url.clone(), clip: Rc::new(WindowClip::default()), save_path: Default::default(),
             thumbnail_version: 0, thumbnail_attempt: None, thumbnail_pending: false,
             visible: Cell::new(false), bounds: Rc::new(Cell::new(None)), viewport: Rc::new(Cell::new(None)),
             dark: Cell::new(self.state.theme == "dark"), transparent: true,
@@ -1338,7 +1366,9 @@ impl App {
             downloads_open: self.downloads_open.clone(),
             downloads: self.downloads.clone(),
             download_ops: self.download_ops.clone(),
+            save_path: Default::default(),
         };
+        let save_path = shared.save_path.clone();
         register_page_events(
             &view,
             tab.id.clone(),
@@ -1353,6 +1383,7 @@ impl App {
         Ok(Page {
             resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
             view,
+            save_path,
             url: tab.url.clone(),
             clip: Rc::new(WindowClip::default()),
             thumbnail_version: 0,
@@ -2495,6 +2526,8 @@ impl App {
             "readerEscape" => self.command(Command::ReaderClose, None),
             "find" => self.command(Command::FindOpen, None),
             "findEscape" => self.command(Command::FindClose, None),
+            "printPage" => self.command(Command::PrintPage, None),
+            "savePageAs" => self.command(Command::SavePageAs, None),
             "escape" => self.request_peek_close(),
             _ => {}
         }
@@ -3058,6 +3091,30 @@ impl App {
                 self.open_find();
                 return;
             }
+            Command::PrintPage => {
+                if let Some(page) = self.page_output_target(true).filter(|_| self.page_save.is_none()) {
+                    if let Err(error) = crate::page_output::print(&page.view) {
+                        self.toast(&error, None);
+                    }
+                }
+                return;
+            }
+            Command::SavePageAs => {
+                if let Some(page) = self.page_output_target(false).filter(|_| self.page_save.is_none()) {
+                    let proxy = self.proxy.clone();
+                    let choose_proxy = proxy.clone();
+                    match crate::page_output::SaveRequest::start(
+                        &page.view,
+                        page.save_path.clone(),
+                        move || choose_proxy.send_event(Event::ChoosePageSavePath).is_ok(),
+                        move |result| { let _ = proxy.send_event(Event::PageSaveFinished(result)); },
+                    ) {
+                        Ok(save) => self.page_save = Some(save),
+                        Err(error) => self.toast(&error, None),
+                    }
+                }
+                return;
+            }
             Command::FindClose => {
                 self.close_find(true);
                 self.focus_page_or_ui();
@@ -3605,6 +3662,25 @@ impl ApplicationHandler<Event> for App {
                     self.emit(json!({"type":"findMatches","count":count,"active":active}));
                 }
             }
+            Event::ChoosePageSavePath => {
+                let Some(save) = &self.page_save else { return; };
+                let Some(RawWindowHandle::Win32(handle)) = self.window.as_ref()
+                    .and_then(|window| window.window_handle().ok()).map(|handle| handle.as_raw()) else {
+                    self.page_save.take();
+                    return;
+                };
+                if let Err(error) = save.choose_path(HWND(handle.hwnd.get() as *mut _)) {
+                    self.toast(&format!("无法另存网页：{error}"), None);
+                }
+            }
+            Event::PageSaveFinished(result) => {
+                self.page_save.take();
+                match result {
+                    Ok(true) => self.toast("网页已保存", None),
+                    Ok(false) => {}
+                    Err(error) => self.toast(&error, None),
+                }
+            }
             Event::Zoom(id, factor) => {
                 if !model::valid_zoom(factor) {
                     return;
@@ -3979,6 +4055,7 @@ impl ApplicationHandler<Event> for App {
         event_loop.set_control_flow(due.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.page_save.take();
         self.glass_backdrop = None;
         self.flush_session();
         self.save_downloads();
@@ -3996,6 +4073,7 @@ fn register_page_events(
     let mut token = 0;
     let download_downloads = shared.downloads.clone();
     let download_ops = shared.download_ops.clone();
+    let save_path = shared.save_path.clone();
     let download_proxy = proxy.clone();
     let download = DownloadStartingEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
@@ -4003,25 +4081,26 @@ fn register_page_events(
                 // Rove owns the download UI. WebView2 still decides whether
                 // the transfer is allowed to complete.
                 args.SetHandled(true)?;
+                let mut suggested = PWSTR::null();
+                args.ResultFilePath(&mut suggested)?;
+                let mut path = PathBuf::from(take_pwstr(suggested));
+                // WebView2's PDF viewer saves through DownloadStarting. Its
+                // explicit Save As path takes precedence over the default folder.
+                let explicit = save_path.take_matching(&path);
                 let folder = settings.borrow().download_folder.clone();
-                if !folder.is_empty() {
-                    let mut suggested = PWSTR::null();
-                    args.ResultFilePath(&mut suggested)?;
-                    let suggested = PathBuf::from(take_pwstr(suggested));
-                    let filename = suggested.file_name().unwrap_or(std::ffi::OsStr::new("download"));
+                if !explicit && !folder.is_empty() {
+                    let filename = path.file_name().unwrap_or(std::ffi::OsStr::new("download"));
                     let mut destination = PathBuf::from(&folder).join(filename);
                     if !std::path::Path::new(&folder).is_dir() { args.SetCancel(true)?; return Ok(()); }
-                    let stem = suggested.file_stem().unwrap_or(filename).to_string_lossy();
-                    let ext = suggested.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+                    let stem = path.file_stem().unwrap_or(filename).to_string_lossy();
+                    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
                     let mut index = 1;
                     while destination.exists() { destination = PathBuf::from(&folder).join(format!("{stem} ({index}){ext}")); index += 1; }
                     args.SetResultFilePath(&HSTRING::from(destination.as_os_str()))?;
+                    path = destination;
                 }
                 // Track every download Zigzag-style: a row appears at once and
                 // the panel is revealed; progress and state arrive by events.
-                let mut path_pointer = PWSTR::null();
-                args.ResultFilePath(&mut path_pointer)?;
-                let path = PathBuf::from(take_pwstr(path_pointer));
                 let operation = args.DownloadOperation()?;
                 let mut uri = PWSTR::null();
                 operation.Uri(&mut uri)?;
@@ -4431,9 +4510,21 @@ fn register_accelerators(
                     else if ctrl && !alt && (key == 189 || key == 109) { Some("zoomOut".into()) }
                     else if ctrl && !alt && !shift && (key == 48 || key == 96) { Some("zoomReset".into()) }
                     else if ctrl && !alt && !shift && (49..=57).contains(&key) { Some(format!("space:{}", key - 49)) }
-                    else { shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift}) };
+                    else {
+                        shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift})
+                            .or_else(|| match (ctrl, alt, shift, key) {
+                                (true, false, false, 80) => Some("printPage".into()),
+                                (true, false, false, 83) => Some("savePageAs".into()),
+                                _ => None,
+                            })
+                    };
                 if let Some(action) = action {
                     args.SetHandled(true)?;
+                    if matches!(action.as_str(), "printPage" | "savePageAs") {
+                        let mut status = Default::default();
+                        args.PhysicalKeyStatus(&mut status)?;
+                        if status.WasKeyDown.as_bool() { return Ok(()); }
+                    }
                     let _ = p.send_event(Event::Shortcut(action, false));
                 }
             }

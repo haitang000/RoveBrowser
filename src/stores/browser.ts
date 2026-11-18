@@ -16,7 +16,7 @@ import { normalizeFindQuery } from "../lib/find";
 import type { ReaderState } from "../lib/reader";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, hasDownloadNotice, isActiveDownload } from "../lib/downloads";
-import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
+import { SHORTCUTS, sameShortcut, settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
 import type { LookFields } from "../lib/space-look";
@@ -110,6 +110,22 @@ export const useBrowser = defineStore("browser", () => {
   const active = computed(() =>
     state.value.tabs.find((t) => t.id === state.value.activeTab),
   );
+  function canOutputPage(action: "printPage" | "savePageAs") {
+    const tab = action === "printPage" && peekPhase.value !== "closing"
+      ? peek.value ?? active.value
+      : active.value;
+    return native && !!tab && /^https?:\/\//i.test(tab.url);
+  }
+  function pageOutputShortcut(action: "printPage" | "savePageAs") {
+    const key = action === "printPage" ? 80 : 83;
+    const value = { key, ctrl: true, alt: false, shift: false };
+    return SHORTCUTS.some(({ id }) => sameShortcut(shortcutFor(id, settings.value), value)) ? "" : shortcutText(value);
+  }
+  function outputPage(action: "printPage" | "savePageAs") {
+    if (!canOutputPage(action) || commandOpen.value || deskOpen.value || settingsOpen.value || spaceFormOpen.value) return;
+    browserMenuOpen.value = false;
+    send({ type: action });
+  }
   const splitPartner = computed(() =>
     state.value.tabs.find((tab) => tab.id === active.value?.splitWith),
   );
@@ -765,6 +781,7 @@ export const useBrowser = defineStore("browser", () => {
   }
   send({ type: popupWindow ? "popupReady" : "ready" });
   return {
+    canOutputPage, pageOutputShortcut, outputPage,
     importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser,
     onboardingOpen,
     openOnboarding,

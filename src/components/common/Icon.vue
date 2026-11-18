@@ -43,6 +43,8 @@ const paths: Record<string, string> = {
   copy: "M5 5h8v8H5zM3 3h8v2M3 3v8h2",
   duplicate: "M2 2h6v6H2zM8 8h6v6H8zM10 2h4v4",
   download: "M8 2v9M4.5 7.5 8 11l3.5-3.5M2 14h12",
+  savePage: "M3 2h7l3 3v9H3zM10 2v3h3M8 7v4m-2-2 2 2 2-2",
+  print: "M4 6V2h8v4M4 11H2V6h12v5h-2M4 9h8v5H4zM4 7.5h.01",
   folder: "M2 4h4l1.5 2H14v8H2z",
   pause: "M5 3v10M11 3v10",
   play: "M5 3v10l8-5z",

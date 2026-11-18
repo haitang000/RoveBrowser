@@ -108,6 +108,19 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <hr role="separator" />
+            <div role="group" aria-label="网页">
+              <button role="menuitem" tabindex="-1" :disabled="!b.canOutputPage('savePageAs')"
+                aria-haspopup="dialog" :aria-keyshortcuts="b.pageOutputShortcut('savePageAs') ? 'Control+S' : undefined"
+                @click="b.outputPage('savePageAs')">
+                <Icon name="savePage" :size="16" /><span>另存网页…</span><kbd v-if="b.pageOutputShortcut('savePageAs')" aria-hidden="true">{{ b.pageOutputShortcut('savePageAs') }}</kbd>
+              </button>
+              <button role="menuitem" tabindex="-1" :disabled="!b.canOutputPage('printPage')"
+                aria-haspopup="dialog" :aria-keyshortcuts="b.pageOutputShortcut('printPage') ? 'Control+P' : undefined"
+                @click="b.outputPage('printPage')">
+                <Icon name="print" :size="16" /><span>打印…</span><kbd v-if="b.pageOutputShortcut('printPage')" aria-hidden="true">{{ b.pageOutputShortcut('printPage') }}</kbd>
+              </button>
+            </div>
+            <hr role="separator" />
             <div role="group" aria-label="工具">
               <button role="menuitem" tabindex="-1" aria-label="下载" aria-haspopup="dialog" aria-keyshortcuts="Control+J"
                 :aria-description="b.activeDownloads ? `${b.activeDownloads} 个进行中` : undefined" @click="b.toggleDownloads(true)">
