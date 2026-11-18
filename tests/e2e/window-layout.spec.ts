@@ -6,7 +6,7 @@ declare global {
   interface Window {
     __windowTest: {
       layout?: Layout;
-      chrome?: { maximize: Rect; viewportWidth: number; background: number[]; hover: number[]; foreground: number[]; dragRegions: Rect[] };
+      chrome?: { maximize: Rect; viewportWidth: number; anchorLeft: boolean; background: number[]; hover: number[]; foreground: number[]; dragRegions: Rect[] };
       glass: boolean[];
       presented?: { theme?: string; width: number; fonts: string };
       samples: { expected: number; reported: number }[];
@@ -421,6 +421,39 @@ test("restores the full-width titlebar and framed page even for a saved borderle
   expect(await page.locator('.browser-shell').getAttribute('class')).not.toContain('borderless');
   const content = (await page.locator('.nt-home').boundingBox())!;
   expect(Math.abs(content.x + content.width / 2 - area.x - area.width / 2)).toBeLessThan(1);
+});
+
+test("split chrome aligns the panes and relocates native window buttons when the sidebar collapses", async ({ page }) => {
+  const state = initialState();
+  state.activeTab = "github";
+  state.tabs.find((t) => t.id === "github")!.splitWith = "wiki";
+  await nativeShell(page, state);
+  const left = page.getByRole("region", { name: "左侧窗格" });
+  const right = page.getByRole("region", { name: "右侧窗格" });
+  const caption = page.locator(".window-controls");
+  await expect(page.locator(".titlebar")).toHaveCount(0);
+  expect((await left.boundingBox())!.y).toBe((await right.boundingBox())!.y);
+  expect((await caption.boundingBox())!.y).toBe((await left.boundingBox())!.y);
+  expect((await caption.boundingBox())!.x).toBeLessThan((await left.boundingBox())!.x);
+  await expect.poll(() => page.evaluate(() => window.__windowTest.chrome?.anchorLeft)).toBe(true);
+
+  await page.evaluate((state) => window.__ERA_RECEIVE__!({ type: "state", state }), { ...state, sidebarCollapsed: true, sidebarHidden: true });
+  await page.setViewportSize({ width: 480, height: 400 });
+  await expect(page.locator(".sidebar-track")).toHaveCSS("width", "0px");
+  await expect.poll(() => page.evaluate(() => window.__windowTest.chrome?.anchorLeft)).toBe(false);
+  const buttons = (await caption.boundingBox())!;
+  const rightPane = (await right.boundingBox())!;
+  expect(buttons.x).toBeGreaterThan(rightPane.x);
+  expect(buttons.x + buttons.width).toBeLessThan(rightPane.x + rightPane.width);
+  await expect.poll(() => page.evaluate(() => {
+    const regions = window.__windowTest.chrome?.dragRegions ?? [];
+    const controls = [...document.querySelectorAll(".pane-header [data-window-control], .window-controls")]
+      .map(el => el.getBoundingClientRect()).filter(rect => rect.width && rect.height);
+    return regions.length > 0 && regions.length <= 32 && regions.every(region => controls.every(control =>
+      region.x >= control.right || region.x + region.width <= control.x
+      || region.y >= control.bottom || region.y + region.height <= control.y));
+  })).toBe(true);
+  expect((await right.getByRole("button", { name: "关闭分屏" }).boundingBox())!.x).toBeLessThan(buttons.x);
 });
 
 test("sidebar motion reports both pane bounds in the same paint frame, including reversal", async ({ page }) => {

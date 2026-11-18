@@ -8,12 +8,12 @@ import {
   watch,
 } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { host } from "../../lib/address";
 import { pageClip } from "../../lib/page-clip";
 import type { Rect } from "../../lib/types";
 import Icon from "../common/Icon.vue";
 import Peek from "./Peek.vue";
 import NewTabPage from "./NewTabPage.vue";
+import PageToolbar from "./PageToolbar.vue";
 import { isSettingsUrl } from "../../lib/settings";
 import { pageDirection, type PageDirection } from "../../lib/page-motion";
 const SettingsPage = defineAsyncComponent(() => import("./SettingsPage.vue"));
@@ -25,9 +25,7 @@ const b = useBrowser(),
   resizing = ref(false),
   sidebarMotion = ref(false),
   drop = ref(false);
-const other = computed(() =>
-  b.state.tabs.find((t) => t.id === b.active?.splitWith),
-);
+const other = computed(() => b.splitPartner);
 let ro: ResizeObserver;
 let finishResize: (() => void) | undefined;
 let reported: { primary: Rect; secondary: Rect | null; sidebar: Rect | null } | undefined;
@@ -76,13 +74,12 @@ function layout() {
   if (b.sidebarResize?.resizing) return;
   if (!primary.value || !container.value) return;
   const card = container.value.getBoundingClientRect();
-  const style = getComputedStyle(container.value);
   const popup = { x: card.x + container.value.clientLeft, y: card.y + container.value.clientTop, width: container.value.clientWidth, height: container.value.clientHeight };
   if (popup.x !== b.popupArea.x || popup.y !== b.popupArea.y || popup.width !== b.popupArea.width || popup.height !== b.popupArea.height)
     b.popupArea = popup;
   const rect = (e: HTMLElement) => {
-    const r = e.getBoundingClientRect();
-    return pageClip(r, card, style);
+    const frame = other.value ? e.parentElement! : container.value!;
+    return pageClip(e.getBoundingClientRect(), frame.getBoundingClientRect(), getComputedStyle(frame));
   };
   // ResizeObserver runs after layout and before paint. Report this frame's
   // geometry now; another rAF leaves native pages one frame behind the sidebar.
@@ -224,18 +221,17 @@ function split(e: DragEvent) {
     @dragleave.self="drop = false"
     @drop.prevent="split"
   >
-    <div class="page-pane">
-      <div v-if="other" class="pane-header">
-        <span>{{ host(b.active?.url || "") || "New Tab" }}</span
-        ><button
+    <div class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? '左侧窗格' : undefined">
+      <PageToolbar v-if="other && b.active" :pane="b.active">
+        <button
           class="icon-button"
           title="固定分屏组合"
           aria-label="固定分屏组合"
-          @click="!b.active?.pinned && b.send({ type: 'pin' })"
+          @click="!b.active.pinned && b.send({ type: 'pin' })"
         >
           <Icon name="pin" :size="13" />
         </button>
-      </div>
+      </PageToolbar>
       <div ref="primary" class="webview-slot" :data-page-dir="primaryDir">
         <Transition name="page">
         <SettingsPage v-if="b.active && isSettingsUrl(b.active.url)" :key="`settings:${b.active.id}`" :tab-id="b.active.id" :url="b.active.url" />
@@ -265,10 +261,9 @@ function split(e: DragEvent) {
         @keydown.left.prevent="ratio = Math.max(0.2, ratio - 0.05)"
         @keydown.right.prevent="ratio = Math.min(0.8, ratio + 0.05)"
       />
-      <div class="page-pane">
-        <div class="pane-header">
-          <span>{{ host(other.url) || "New Tab" }}</span
-          ><button
+      <div class="page-pane" role="region" aria-label="右侧窗格">
+        <PageToolbar :pane="other">
+          <button
             class="icon-button"
             aria-label="关闭分屏"
             title="关闭分屏"
@@ -276,7 +271,7 @@ function split(e: DragEvent) {
           >
             <Icon name="close" :size="13" />
           </button>
-        </div>
+        </PageToolbar>
         <div ref="secondary" class="webview-slot" :data-page-dir="secondaryDir">
           <Transition name="page">
           <SettingsPage v-if="isSettingsUrl(other.url)" :key="`settings:${other.id}`" :tab-id="other.id" :url="other.url" />

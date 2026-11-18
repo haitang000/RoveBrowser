@@ -145,7 +145,7 @@ function visibility() { if (document.hidden) blur(); }
 watch(() => b.state.sidebarCollapsed || b.overlay || !!b.peek, (blocked) => { if (blocked) blur(); });
 onMounted(() => {
   sidebarElement = handleElement.value?.parentElement?.querySelector<HTMLElement>(".sidebar") ?? null;
-  titlebarElement = document.querySelector<HTMLElement>(".titlebar");
+  titlebarElement = document.querySelector<HTMLElement>(".window-chrome");
   window.chrome?.webview?.addEventListener("message", nativeMessage);
   window.addEventListener("resize", windowResize);
   window.addEventListener("blur", blur);

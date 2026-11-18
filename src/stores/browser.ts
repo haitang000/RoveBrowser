@@ -67,6 +67,7 @@ export const useBrowser = defineStore("browser", () => {
     peekMoving = ref(0),
     peekSurface = ref<{ ticket: number; image: string | null } | null>(null),
     commandMode = ref<"new" | "edit">("new"),
+    commandTabId = ref<string | null>(null),
     deskOpen = ref(false),
     settingsOpen = ref(false),
     creationMenu = ref<Rect>(),
@@ -107,6 +108,9 @@ export const useBrowser = defineStore("browser", () => {
   if (!popupWindow) setInterval(() => { now.value = nowSeconds(); }, 60_000);
   const active = computed(() =>
     state.value.tabs.find((t) => t.id === state.value.activeTab),
+  );
+  const splitPartner = computed(() =>
+    state.value.tabs.find((tab) => tab.id === active.value?.splitWith),
   );
   const space = computed(
     () =>
@@ -328,7 +332,7 @@ export const useBrowser = defineStore("browser", () => {
           peekBackground.value = {};
           error.value = "无法解码 Peek 背景，请重试";
         }
-      } else if (c.type === "navigate" && peek.value) {
+      } else if (c.type === "navigate" && !c.id && peek.value) {
         const url = address(String(c.url));
         if (!url.startsWith("http")) throw Error("Peek 仅支持网页");
         peek.value = { ...peek.value, url, title: host(url) };
@@ -382,10 +386,11 @@ export const useBrowser = defineStore("browser", () => {
       error.value = String(e);
     }
   }
-  function openCommand(mode: "new" | "edit" = "new") {
+  function openCommand(mode: "new" | "edit" = "new", tabId: string | null = null) {
     closeSpaceCreation();
     error.value = "";
     commandMode.value = mode;
+    commandTabId.value = tabId;
     commandOpen.value = true;
   }
   function cycle(reverse = false) {
@@ -701,7 +706,7 @@ export const useBrowser = defineStore("browser", () => {
     if (surfaces.some(Boolean)) closeDownloads();
   });
   watch(() => peek.value?.id, (id) => { if (id) closeDownloads(); });
-  const popupFields = { commandOpen, commandMode, deskOpen, settingsOpen, creationMenu, spaceCreation, spaceEditor, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, downloadsFocus, downloadsAnchor };
+  const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, creationMenu, spaceCreation, spaceEditor, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, downloadsFocus, downloadsAnchor };
   function receivePopup(patch: Record<string, unknown>) {
     receivingPopup = true;
     for (const [key, value] of Object.entries(patch)) {
@@ -807,6 +812,7 @@ export const useBrowser = defineStore("browser", () => {
     downloadAction,
     now,
     active,
+    splitPartner,
     space,
     tabs,
     pinnedTabs,
@@ -816,6 +822,7 @@ export const useBrowser = defineStore("browser", () => {
     commandOpen,
     quitOpen,
     commandMode,
+    commandTabId,
     deskOpen,
     settingsOpen,
     creationMenu,

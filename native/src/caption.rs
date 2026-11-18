@@ -88,7 +88,8 @@ fn button_bounds(maximize: RECT) -> RECT {
 }
 #[derive(Clone, Copy)]
 struct Anchor {
-    right: f64,
+    inset: f64,
+    left_aligned: bool,
     top: f64,
     width: f64,
     height: f64,
@@ -302,7 +303,7 @@ impl Caption {
     /// Own dragging here instead of WebView2's CSS app-region child HWNDs.
     /// Updating those HWNDs during navigation can hang inside SetWindowPos.
     pub fn set_drag_regions(&self, regions: &[Rect]) {
-        if regions.len() > 16 || !regions.iter().all(|r| r.valid() && r.y + r.height <= 64.) {
+        if regions.len() > 32 || !regions.iter().all(|r| r.valid() && r.y + r.height <= 64.) {
             return;
         }
         let next: Vec<_> = regions.iter().map(|r| [r.x, r.y, r.width, r.height]).collect();
@@ -315,6 +316,7 @@ impl Caption {
         &self,
         rect: Rect,
         viewport_width: f64,
+        anchor_left: bool,
         _background: [u8; 4],
         hover: [u8; 4],
         foreground: [u8; 4],
@@ -331,8 +333,13 @@ impl Caption {
         {
             return Ok(());
         }
+        if self.state.anchor.get().is_some_and(|anchor| anchor.left_aligned != anchor_left) {
+            self.state.hot.set(None);
+            self.state.pressed.set(None);
+        }
         self.state.anchor.set(Some(Anchor {
-            right: (viewport_width - rect.x - rect.width).max(0.),
+            inset: if anchor_left { rect.x } else { (viewport_width - rect.x - rect.width).max(0.) },
+            left_aligned: anchor_left,
             top: rect.y,
             width: rect.width,
             height: rect.height,
@@ -358,10 +365,11 @@ impl Caption {
             .get()
             .map(|a| {
                 let width = (a.width * scale).round() as i32;
-                let right = client.right - (a.right * scale).round() as i32;
+                let inset = (a.inset * scale).round() as i32;
+                let left = if a.left_aligned { inset } else { client.right - inset - width };
                 RECT {
-                    left: right - width,
-                    right,
+                    left,
+                    right: left + width,
                     top: (a.top * scale).round() as i32,
                     bottom: ((a.top + a.height) * scale).round() as i32,
                 }
@@ -1221,19 +1229,23 @@ mod tests {
             caption
                 .update(
                     Rect {
-                        x: 708.,
-                        y: 0.,
-                        width: 46.,
+                        x: 36.,
+                        y: 9.,
+                        width: 28.,
                         height: 32.,
                         ..Rect::default()
                     },
                     800.,
+                    true,
                     [212, 228, 251, 255],
                     [228, 239, 253, 255],
                     [40, 40, 40, 255],
                     1.,
                 )
                 .unwrap();
+            SetWindowPos(ui, None, 0, 0, 640, 600, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
+            caption.refresh(1.).unwrap();
+            assert_eq!(caption.state.rect.get().left, 36);
             for button in Button::ALL {
                 let rect = button.rect(caption.state.rect.get());
                 let mut screen = POINT {
@@ -1343,6 +1355,7 @@ mod tests {
                         ..Rect::default()
                     },
                     800.,
+                    false,
                     [212, 228, 251, 255],
                     [228, 239, 253, 255],
                     [40, 40, 40, 255],

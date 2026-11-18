@@ -1,21 +1,28 @@
 <script setup lang="ts">
 import { useBrowser } from "../../stores/browser";
-import { host } from "../../lib/address";
-import { isSettingsUrl } from "../../lib/settings";
 import { titlebarDragRegions } from "../../lib/window-chrome";
 import Icon from "../common/Icon.vue";
+import PageToolbar from "./PageToolbar.vue";
 import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+const props = defineProps<{ split: boolean }>();
 const b = useBrowser();
 const maximize = ref<HTMLButtonElement>();
+const header = ref<HTMLElement>();
 let observer: ResizeObserver;
 let paletteObserver: MutationObserver;
 let paletteKey = "";
 let palette: { background: number[]; hover: number[]; foreground: number[] };
 let context: CanvasRenderingContext2D | null;
+const controls = "[data-window-control]";
+function dragSurfaces() {
+  const shell = header.value?.closest(".browser-shell");
+  return props.split && shell
+    ? [...shell.querySelectorAll<HTMLElement>("[data-window-drag]")]
+    : header.value ? [header.value] : [];
+}
 function report() {
   if (!b.native || !maximize.value) return;
   const shell = maximize.value.closest('.browser-shell')!;
-  const header = maximize.value.closest('header')!;
   const r = maximize.value.getBoundingClientRect(), style = getComputedStyle(shell);
   const frame = style.backgroundImage === "none"
     ? style.backgroundColor
@@ -39,37 +46,57 @@ function report() {
     palette = { background: color(frame), hover: color(hover), foreground: color(foreground) };
     paletteKey = nextPalette;
   }
+  const caption = maximize.value.parentElement!.getBoundingClientRect();
+  const dragRegions = dragSurfaces().flatMap(surface => {
+    const bounds = surface.getBoundingClientRect();
+    if (surface.matches(".split-sidebar-top")) {
+      if (b.state.sidebarCollapsed) return [];
+      bounds.width = Math.max(0, Math.min(bounds.width, surface.closest(".sidebar-track")!.getBoundingClientRect().right - bounds.x));
+    }
+    if (!bounds.width || !bounds.height) return [];
+    return titlebarDragRegions(bounds, [
+      caption,
+      ...[...surface.querySelectorAll(controls)].map(element => element.getBoundingClientRect()),
+    ]);
+  });
   b.send({
     type: "windowChrome",
     maximize: { x: r.x, y: r.y, width: r.width, height: r.height },
     viewportWidth: innerWidth,
-    dragRegions: titlebarDragRegions(header.getBoundingClientRect(),
-      [...header.querySelectorAll('.browser-navigation, .address-field, .reader-toggle, .window-controls')]
-        .map(element => element.getBoundingClientRect())),
+    anchorLeft: props.split && !b.state.sidebarCollapsed,
+    dragRegions,
     ...palette,
   });
 }
+function observeChrome() {
+  if (!observer || !maximize.value) return;
+  observer.disconnect();
+  observer.observe(maximize.value);
+  for (const surface of dragSurfaces()) {
+    observer.observe(surface);
+    surface.querySelectorAll(`.titlebar-identity, ${controls}`).forEach(element => observer.observe(element));
+  }
+  const track = header.value?.closest(".browser-shell")?.querySelector(".sidebar-track");
+  if (props.split && track) observer.observe(track);
+  report();
+}
+watch([() => props.split, () => b.onboardingOpen], observeChrome, { flush: "post" });
 watch(
-  [() => b.state.theme, () => b.space.color, () => b.space.translucency, () => b.onboardingOpen],
+  [() => b.state.theme, () => b.space.color, () => b.space.translucency],
   async () => {
     await nextTick();
     report();
   },
 );
 onMounted(() => {
+  if (!b.native) return;
   observer = new ResizeObserver(report);
-  if (maximize.value) {
-    observer.observe(maximize.value);
-    const header = maximize.value.closest('header')!;
-    observer.observe(header);
-    header.querySelectorAll('.titlebar-identity, .browser-navigation, .address-field').forEach(element => observer.observe(element));
-  }
   const shell = maximize.value?.closest('.browser-shell');
   shell?.addEventListener("frame-background-change", report);
   paletteObserver = new MutationObserver(report);
   if (shell) paletteObserver.observe(shell, { attributes: true, attributeFilter: ['class', 'style'] });
   window.addEventListener("resize", report);
-  report();
+  observeChrome();
 });
 onBeforeUnmount(() => {
   maximize.value?.closest('.browser-shell')?.removeEventListener("frame-background-change", report);
@@ -79,50 +106,9 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <header class="titlebar">
-    <div class="titlebar-identity"><span class="app-name">Rove</span></div>
-    <div v-if="!b.onboardingOpen" class="browser-toolbar">
-      <nav class="browser-navigation" aria-label="网页导航">
-        <button
-          class="icon-button"
-          :title="b.shortcutTitle('后退', 'back')"
-          aria-label="后退"
-          @click="b.send({ type: 'back' })"
-        ><Icon name="back" :size="14" /></button>
-        <button
-          class="icon-button"
-          :title="b.shortcutTitle('前进', 'forward')"
-          aria-label="前进"
-          @click="b.send({ type: 'forward' })"
-        ><Icon name="forward" :size="14" /></button>
-        <button
-          class="icon-button"
-          :title="b.shortcutTitle('刷新', 'reload')"
-          aria-label="刷新"
-          :aria-busy="b.active?.loading || undefined"
-          @click="b.send({ type: 'reload' })"
-        ><Icon
-          :name="b.active?.loading ? 'spinner' : 'reload'"
-          :class="{ 'reload-spinner': b.active?.loading }"
-          :size="14"
-        /></button>
-      </nav>
-      <button
-        class="address-field"
-        aria-label="搜索或输入地址"
-        :title="b.shortcutTitle('搜索或输入地址', 'address')"
-        @click="b.openCommand('edit')"
-      >
-        <span>{{ isSettingsUrl(b.active?.url) ? '设置' : host(b.active?.url || "") || "Search or enter address" }}</span>
-        <Icon name="settings" :size="13" />
-      </button>
-      <button v-if="b.reader.available.includes(b.state.activeTab) || b.reader.id === b.state.activeTab || b.reader.waiting === b.state.activeTab"
-        class="icon-button reader-toggle" :class="{ chosen: b.reader.id === b.state.activeTab }"
-        :aria-label="b.reader.id === b.state.activeTab ? '退出阅读模式' : b.reader.waiting === b.state.activeTab ? '取消阅读模式' : '进入阅读模式'"
-        :title="b.shortcutTitle(b.reader.id === b.state.activeTab ? '退出阅读模式' : '阅读模式', 'reader')"
-        :aria-pressed="b.reader.id === b.state.activeTab" :aria-busy="b.reader.waiting === b.state.activeTab || undefined"
-        @click="b.send({ type: 'reader' })"><Icon :name="b.reader.waiting === b.state.activeTab ? 'spinner' : 'reader'" :size="14" /></button>
-    </div>
+  <header ref="header" class="window-chrome" :class="split ? 'split-window-chrome' : 'titlebar'">
+    <div v-if="!split" class="titlebar-identity"><span class="app-name">Rove</span></div>
+    <PageToolbar v-if="!split && !b.onboardingOpen" />
     <div class="window-controls">
       <button
         aria-label="最小化"

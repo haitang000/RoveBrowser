@@ -25,6 +25,7 @@ import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
 import CreationMenu from "./components/browser/CreationMenu.vue";
 import { shareSnapshot } from "./lib/state-snapshot";
 const b = useBrowser();
+const split = computed(() => !b.onboardingOpen && Boolean(b.splitPartner));
 const shell = ref<HTMLElement>();
 const pageArea = ref<InstanceType<typeof PageArea>>();
 const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
@@ -195,10 +196,11 @@ onBeforeUnmount(() => {
       'glass-neutral': glassActive && painted.neutralGlass,
       'custom-frame': painted.custom,
       'space-form-open': b.spaceFormOpen,
+      'split-shell': split,
     }"
     :style="shellStyle"
   >
-    <WindowControls />
+    <WindowControls :split="split" />
     <OnboardingPage v-if="b.onboardingOpen" />
     <template v-else>
     <div class="browser-body">

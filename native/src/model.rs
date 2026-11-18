@@ -268,6 +268,8 @@ pub enum Command {
         drag_regions: Vec<Rect>,
         #[serde(rename = "viewportWidth")]
         viewport_width: f64,
+        #[serde(default, rename = "anchorLeft")]
+        anchor_left: bool,
         background: [u8; 4],
         hover: [u8; 4],
         foreground: [u8; 4],
@@ -278,7 +280,7 @@ pub enum Command {
         url: String,
     },
     #[serde(rename = "navigate")]
-    Navigate { url: String },
+    Navigate { url: String, id: Option<String> },
     #[serde(rename = "activate")]
     Activate { id: String },
     #[serde(rename = "close")]
@@ -380,11 +382,11 @@ pub enum Command {
     #[serde(rename = "unsplit")]
     Unsplit,
     #[serde(rename = "back")]
-    Back,
+    Back { id: Option<String> },
     #[serde(rename = "forward")]
-    Forward,
+    Forward { id: Option<String> },
     #[serde(rename = "reload")]
-    Reload,
+    Reload { id: Option<String> },
     #[serde(rename = "layout")]
     Layout {
         primary: Rect,
@@ -462,7 +464,7 @@ pub enum Command {
     #[serde(rename = "findOpen")]
     FindOpen,
     #[serde(rename = "reader")]
-    Reader,
+    Reader { id: Option<String> },
     #[serde(rename = "readerClose")]
     ReaderClose,
     #[serde(rename = "readerPreferences")]
@@ -676,6 +678,9 @@ impl Default for State {
 impl State {
     pub fn active(&self) -> Option<&Tab> {
         self.tabs.iter().find(|t| t.id == self.active_tab)
+    }
+    pub fn visible_tab(&self, id: &str) -> bool {
+        self.active().is_some_and(|tab| tab.id == id || tab.split_with.as_deref() == Some(id))
     }
     pub fn activate(&mut self, id: &str) {
         let favorite = self
@@ -1029,9 +1034,11 @@ impl State {
                 }
             }
             Command::New { url } => self.new_tab(url)?,
-            Command::Navigate { url } => {
+            Command::Navigate { url, id } => {
+                let id = id.as_deref().unwrap_or(&self.active_tab);
+                if !self.visible_tab(id) { return Ok(()); }
                 let u = normalize_with(url, &self.settings)?;
-                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == self.active_tab) {
+                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
                     t.url = u;
                     if crate::settings::is_settings(&t.url) { t.title = "设置".into(); }
                     t.favicon = None

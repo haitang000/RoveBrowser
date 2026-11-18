@@ -32,7 +32,9 @@ let previous: HTMLElement | null = null,
   suggestTimer: ReturnType<typeof setTimeout>,
   typedBeforeScope = "",
   pointer: { x: number; y: number } | undefined;
-const currentUrl = computed(() => (b.peek ?? b.active)?.url || "");
+const currentUrl = computed(() => (
+  b.commandTabId ? b.state.tabs.find((tab) => tab.id === b.commandTabId) : b.peek ?? b.active
+)?.url || "");
 const hinted = computed(() => scope.value ? undefined : matchSite(typed.value));
 const suffix = computed(() => {
   const match = completion.value;
@@ -48,7 +50,7 @@ const results = computed(() => {
   if (!match || !typed.value.trim()) return ranked;
   const top: CommandRow = { kind: { type: "open", url: match.url }, title: displayUrl(match.url), detail: "", icon: "globe", action: "Open", key: `completion:${match.url}` };
   const next = ranked.filter((row) => row.title !== top.title && !(row.kind.type === "open" && row.kind.url === match.url));
-  const existing = b.state.tabs.find((tab) => tab.url.replace(/\/$/, "") === match.url.replace(/\/$/, "") && tab.id !== b.state.activeTab);
+  const existing = b.state.tabs.find((tab) => tab.url.replace(/\/$/, "") === match.url.replace(/\/$/, "") && tab.id !== (b.commandTabId ?? b.state.activeTab));
   if (existing) next.unshift({ kind: { type: "switchTo", id: existing.id }, title: existing.title, detail: displayUrl(match.url), icon: "globe", action: "Switch to Tab", key: `switch:${existing.id}` });
   return [top, ...next].slice(0, 8);
 });
@@ -141,13 +143,14 @@ function runAction(id: string) {
   b.commandOpen = false;
 }
 function open(url: string) {
-  b.send({ type: b.commandMode === "edit" ? "navigate" : "new", url });
+  if (b.commandMode === "edit") b.send({ type: "navigate", url, id: b.commandTabId });
+  else b.send({ type: "new", url });
   b.commandOpen = false;
 }
 function run(index = selected.value) {
   const item = results.value[index];
   if (!item) {
-    if (b.commandMode === "edit" && typed.value === currentUrl.value) b.send({ type: "reload" });
+    if (b.commandMode === "edit" && typed.value === currentUrl.value) b.send({ type: "reload", id: b.commandTabId });
     b.commandOpen = false;
     return;
   }

@@ -1,7 +1,7 @@
 import type { Rect } from "./types";
 
-/** Match the native child to the page card's inner curve. Split headers cover
- * the top corners, while the seam between panes must remain square. */
+/** Match the native child to the inner corners it shares with its card.
+ * A split toolbar covers the card's upper corners. */
 export function pageClip(
   slot: DOMRect,
   card: DOMRect,

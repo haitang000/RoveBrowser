@@ -733,18 +733,23 @@ impl App {
             let _ = proxy.send_event(Event::ReaderArticle(id.clone(), url.clone(), epoch, article));
         });
     }
-    fn toggle_reader(&mut self) {
-        if self.reader.as_ref().is_some_and(|r| r.closing) {
+    fn toggle_reader(&mut self, id: Option<&str>) {
+        if id.is_some_and(|id| !self.state.visible_tab(id)) { return; }
+        let current = self.reader.as_ref().map(|reader| reader.id.as_str())
+            .or_else(|| self.reader_request.as_ref().map(|request| request.0.as_str()));
+        if id.is_some() && current.is_some() && current != id {
+            self.close_reader();
+        } else if self.reader.as_ref().is_some_and(|r| r.closing) {
             self.animate_reader(true);
             self.focus_page_or_ui();
             return;
-        }
-        if self.reader.is_some() || self.reader_request.is_some() {
+        } else if current.is_some() {
             self.dismiss_reader();
             return;
         }
         if self.peek.is_some() { return; }
-        let Some(tab) = self.state.active().filter(|t| model::is_web(&t.url)).cloned() else { return; };
+        let id = id.unwrap_or(&self.state.active_tab);
+        let Some(tab) = self.state.tabs.iter().find(|t| t.id == id && model::is_web(&t.url)).cloned() else { return; };
         self.reader_epoch += 1;
         self.reader_request = Some((tab.id.clone(), tab.url.clone(), self.reader_epoch));
         let proxy = self.proxy.clone();
@@ -1988,11 +1993,10 @@ impl App {
             return Ok(());
         }
         if !self.state.onboarding.completed { return self.sync_layout(); }
-        let visible_reader = |id: &str| self.state.active().is_some_and(|t| t.id == id || t.split_with.as_deref() == Some(id));
-        if self.reader.as_ref().is_some_and(|r| !visible_reader(&r.id) || !self.state.tabs.iter().any(|t| t.id == r.id && t.url == r.url)) {
+        if self.reader.as_ref().is_some_and(|r| !self.state.visible_tab(&r.id) || !self.state.tabs.iter().any(|t| t.id == r.id && t.url == r.url)) {
             self.close_reader();
         }
-        if self.reader_request.as_ref().is_some_and(|(id, url, _)| self.state.active_tab != *id || !self.state.tabs.iter().any(|t| t.id == *id && t.url == *url)) {
+        if self.reader_request.as_ref().is_some_and(|(id, url, _)| !self.state.visible_tab(id) || !self.state.tabs.iter().any(|t| t.id == *id && t.url == *url)) {
             self.reader_request = None; self.reader_epoch += 1; self.publish_reader();
         }
         self.reader_available.retain(|id, _| self.state.tabs.iter().any(|t| &t.id == id));
@@ -2528,13 +2532,13 @@ impl App {
             "restore" => self.command(Command::Restore, None),
             "sidebar" => self.command(Command::Sidebar, None),
             "sidebarFocus" => self.command(Command::SidebarFocus, None),
-            "reload" => self.command(Command::Reload, None),
-            "back" => self.command(Command::Back, None),
-            "forward" => self.command(Command::Forward, None),
+            "reload" => self.command(Command::Reload { id: None }, None),
+            "back" => self.command(Command::Back { id: None }, None),
+            "forward" => self.command(Command::Forward { id: None }, None),
             "zoomIn" => self.command(Command::Zoom { action: "in".into() }, None),
             "zoomOut" => self.command(Command::Zoom { action: "out".into() }, None),
             "zoomReset" => self.command(Command::Zoom { action: "reset".into() }, None),
-            "reader" => self.command(Command::Reader, None),
+            "reader" => self.command(Command::Reader { id: None }, None),
             "readerEscape" => self.command(Command::ReaderClose, None),
             "find" => self.command(Command::FindOpen, None),
             "findEscape" => self.command(Command::FindClose, None),
@@ -2765,6 +2769,7 @@ impl App {
                 maximize,
                 drag_regions,
                 viewport_width,
+                anchor_left,
                 background,
                 hover,
                 foreground,
@@ -2774,6 +2779,7 @@ impl App {
                     if let Err(e) = caption.update(
                         maximize,
                         viewport_width,
+                        anchor_left,
                         background,
                         hover,
                         foreground,
@@ -2861,7 +2867,7 @@ impl App {
                 }
                 self.capture_opening_surface();
             }
-            Command::Navigate { url } if self.peek.is_some() => {
+            Command::Navigate { url, id: None } if self.peek.is_some() => {
                 match model::normalize_with(&url, &self.state.settings).and_then(|url| {
                     if model::is_web(&url) {
                         Ok(url)
@@ -3096,7 +3102,7 @@ impl App {
                 }
                 return;
             }
-            Command::Reader => { self.toggle_reader(); return; }
+            Command::Reader { id } => { self.toggle_reader(id.as_deref()); return; }
             Command::ReaderClose => {
                 self.dismiss_reader(); return;
             }
@@ -3236,15 +3242,24 @@ impl App {
                 }
                 return;
             }
-            Command::Back | Command::Forward | Command::Reload => {
-                if self.peek.is_none() && (self.reader.is_some() || self.reader_request.is_some()) {
+            Command::Back { ref id } | Command::Forward { ref id } | Command::Reload { ref id } => {
+                if id.as_deref().is_some_and(|id| !self.state.visible_tab(id)) { return; }
+                let peek = id.is_none() && self.peek.is_some();
+                let on_target = |tab: &str| id.as_deref().is_none_or(|id| id == tab);
+                if !peek && (self.reader.as_ref().is_some_and(|r| on_target(&r.id))
+                    || self.reader_request.as_ref().is_some_and(|r| on_target(&r.0))) {
                     self.close_reader();
                     if let Err(e) = self.sync() { self.error(e); }
                 }
-                if let Some(p) = self.page() {
+                let page = if let Some(id) = id {
+                    self.pages.get(id).map(|page| &page.view)
+                } else {
+                    self.page()
+                };
+                if let Some(p) = page {
                     let r = match c {
-                        Command::Back => p.go_back(),
-                        Command::Forward => p.go_forward(),
+                        Command::Back { .. } => p.go_back(),
+                        Command::Forward { .. } => p.go_forward(),
                         _ => p.reload(),
                     };
                     if let Err(e) = r {
@@ -3612,7 +3627,7 @@ impl ApplicationHandler<Event> for App {
             Event::ReaderArticle(id, url, epoch, article) => {
                 if self.reader_request.as_ref() != Some(&(id.clone(), url.clone(), epoch)) { return; }
                 self.reader_request = None;
-                if self.state.active_tab != id || !self.state.tabs.iter().any(|t| t.id == id && t.url == url) {
+                if !self.state.visible_tab(&id) || !self.state.tabs.iter().any(|t| t.id == id && t.url == url) {
                     self.publish_reader(); return;
                 }
                 match article {
@@ -3623,7 +3638,7 @@ impl ApplicationHandler<Event> for App {
             }
             Event::ReaderDeadline(epoch) => {
                 if let Some((id, _, current)) = self.reader_request.clone() {
-                    if current == epoch && id == self.state.active_tab {
+                    if current == epoch && self.state.visible_tab(&id) {
                         if let Some(page) = self.pages.get(&id) {
                             let url = page.url.clone();
                             self.reader_request = Some((id.clone(), url.clone(), epoch));
@@ -3635,8 +3650,7 @@ impl ApplicationHandler<Event> for App {
             Event::ReaderLink(id, url) => {
                 if self.reader.as_ref().is_some_and(|r| r.id == id) {
                     self.close_reader();
-                    self.command(Command::Activate { id }, Some(event_loop));
-                    self.command(Command::Navigate { url }, Some(event_loop));
+                    self.command(Command::Navigate { url, id: Some(id) }, Some(event_loop));
                 }
             }
             Event::FindMatches(count, active) => {

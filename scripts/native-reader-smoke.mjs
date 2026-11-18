@@ -335,9 +335,15 @@ try {
   reader = await openReader();
   const geometry = await readerState();
   assert.ok(geometry.rect.width > 100 && geometry.rect.width < 1000);
+  await ui.getByRole('region', { name: '右侧窗格' }).getByRole('button', { name: '进入阅读模式', exact: true }).click();
+  const rightReader = await waitFor(async () => {
+    const state = await readerState();
+    return state?.id === rightId && state;
+  }, 'reader opens in the right pane');
+  assert.ok(rightReader.rect.x > geometry.rect.x);
   await send({ type: 'new', url: 'era://newtab' });
   await waitFor(async () => !(await readerState())?.id, 'switch closes reader');
-  checks.push('阅读视图按分屏窗格布局；切换到其他标签后自动关闭');
+  checks.push('阅读视图能从左窗格切到右窗格；切换到其他标签后自动关闭');
   // A fresh native process reads the same SQLite profile and preferences.
   await new Promise(resolve => setTimeout(resolve, 500));
   await pageBrowser.close(); pageBrowser = undefined;

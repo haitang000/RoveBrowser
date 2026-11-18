@@ -1,4 +1,5 @@
 // Exercise painted split viewports with two real WebView2 controllers.
+import assert from 'node:assert/strict';
 import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
@@ -54,8 +55,15 @@ try {
   await send({ type: 'new', url: base + '/right' });
   const right = await site('/right'); await right.waitForSelector('h1');
   const rightId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
+  await send({ type: 'activate', id: leftId });
+  await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id')) === leftId, 'primary activation');
   await send({ type: 'split', id: leftId, other: rightId });
   await ui.locator('.split-divider').waitFor();
+  const widths = await ui.locator('.webview-slot').evaluateAll(slots => slots.map(slot => slot.getBoundingClientRect().width));
+  await waitFor(async () => {
+    const viewports = await Promise.all([left, right].map(page => page.evaluate(() => innerWidth)));
+    return viewports.every((width, index) => Math.abs(width - widths[index]) <= 1);
+  }, 'split entry commits both viewports');
   if (process.env.ERA_SMOKE_REVIEW === '1') {
     await ui.evaluate(() => {
       window.__nativeSplitEvents = [];
@@ -73,6 +81,28 @@ try {
     console.log(JSON.stringify({ nativeMouseEvents: await ui.evaluate(() => window.__nativeSplitEvents) }));
   }
   const metrics = await checkSplitResize(ui, [left, right], { waitFor, capturePaints: true });
+  const rightPane = ui.getByRole('region', { name: '右侧窗格' });
+  const popup = await waitFor(() => ui.context().pages().find(p => p.url().endsWith('?popup')), 'popup renderer');
+  assert.equal(await ui.locator('.titlebar').count(), 0);
+  await rightPane.getByRole('button', { name: '搜索或输入地址' }).click();
+  const field = popup.getByRole('combobox');
+  await field.waitFor();
+  assert.equal(await field.inputValue(), base + '/right');
+  await field.fill(base + '/right-next');
+  await field.press('Enter');
+  await right.waitForURL(base + '/right-next');
+  assert.equal(left.url(), base + '/left');
+  await rightPane.getByRole('button', { name: '后退' }).click();
+  await right.waitForURL(base + '/right');
+  await rightPane.getByRole('button', { name: '前进' }).click();
+  await right.waitForURL(base + '/right-next');
+  const reloads = hits['/right-next'];
+  const leftLoads = hits['/left'];
+  await rightPane.getByRole('button', { name: '刷新' }).click();
+  await waitFor(() => hits['/right-next'] > reloads, 'right pane refresh');
+  assert.equal(hits['/left'], leftLoads);
+  await ui.getByRole('button', { name: '关闭分屏' }).click();
+  await ui.locator('.titlebar').waitFor();
   const report = { passed: true, profile, hits, ...metrics };
   await mkdir(output, { recursive: true });
   await writeFile(join(output, 'result.json'), JSON.stringify(report, null, 2));

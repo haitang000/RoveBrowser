@@ -199,7 +199,8 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     case "navigate": {
       const t = tab();
-      if (t) {
+      const active = s.tabs.find((item) => item.id === s.activeTab);
+      if (t && (t === active || t.id === active?.splitWith)) {
         t.url = address(String(c.url), s.settings);
         t.title = isSettingsUrl(t.url) ? "设置" : host(t.url) || "New Tab";
       }
