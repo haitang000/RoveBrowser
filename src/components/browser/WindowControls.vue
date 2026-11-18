@@ -107,8 +107,8 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <header ref="header" class="window-chrome" :class="split ? 'split-window-chrome' : 'titlebar'">
-    <div v-if="!split" class="titlebar-identity"><span class="app-name">Rove</span></div>
-    <PageToolbar v-if="!split && !b.onboardingOpen" />
+    <div v-if="!split" class="titlebar-identity" data-chrome-motion="app-name"><span class="app-name">Rove</span></div>
+    <PageToolbar v-if="!split && !b.onboardingOpen" data-chrome-motion="titlebar" />
     <div class="window-controls">
       <button
         aria-label="最小化"

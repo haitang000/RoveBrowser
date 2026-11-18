@@ -15,6 +15,7 @@ declare global {
       popupUpdates: number;
       observer?: ResizeObserver;
       paletteReads?: number;
+      reduceMotion?: boolean;
     };
   }
 }
@@ -35,6 +36,7 @@ async function nativeShell(page: import("@playwright/test").Page, state: Browser
         if (command.type === "popupState" && command.popup?.popupArea) window.__windowTest.popupUpdates++;
         if (command.type === "overlay") window.__windowTest.overlays.push(command.visible);
         if (command.type === "windowChrome") window.__windowTest.chrome = command;
+        if (command.type === "resizeAppearance") window.__windowTest.reduceMotion = command.reduceMotion;
         if (command.type === "glass") {
           window.__windowTest.glass.push(command.enabled);
         }
@@ -454,6 +456,67 @@ test("split chrome aligns the panes and relocates native window buttons when the
       || region.y >= control.bottom || region.y + region.height <= control.y));
   })).toBe(true);
   expect((await right.getByRole("button", { name: "关闭分屏" }).boundingBox())!.x).toBeLessThan(buttons.x);
+});
+
+test("split chrome crossfades through a quick reversal while native bounds settle immediately", async ({ page }) => {
+  const single = initialState();
+  single.activeTab = "github";
+  const split = structuredClone(single);
+  split.tabs.find(tab => tab.id === "github")!.splitWith = "wiki";
+  await nativeShell(page, single);
+  await page.evaluate(() => {
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (...args: Parameters<Element["animate"]>) {
+      const animation = animate.apply(this, args);
+      if (this.matches("[data-chrome-motion], [data-chrome-copy]")) {
+        // Hold a presentation frame so the assertions don't depend on CPU timing.
+        animation.pause();
+        animation.currentTime = 40;
+      }
+      return animation;
+    };
+  });
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), split);
+  const oldTitlebar = page.locator('[data-chrome-copy="titlebar"]');
+  const leftHeader = page.locator('[data-chrome-motion="left-pane"]');
+  const opacity = (element: import("@playwright/test").Locator) =>
+    element.evaluate(node => Number(getComputedStyle(node).opacity));
+  await expect(oldTitlebar).toBeAttached();
+  await expect.poll(() => opacity(leftHeader)).toBeGreaterThan(0);
+  const titlebarOpacity = await opacity(oldTitlebar);
+  const leftOpacity = await opacity(leftHeader);
+  expect(titlebarOpacity).toBeGreaterThan(0);
+  expect(titlebarOpacity).toBeLessThan(1);
+  expect(leftOpacity).toBeLessThan(1);
+  await expect(page.locator(".chrome-outgoing")).toHaveAttribute("inert", "");
+  await expect(page.getByRole("button", { name: "刷新" })).toHaveCount(2);
+  expect(await page.evaluate(() => window.__windowTest.chrome?.anchorLeft)).toBe(true);
+  const slot = (await page.locator(".webview-slot").first().boundingBox())!;
+  expect(await page.evaluate(() => window.__windowTest.layout?.primary.y)).toBe(slot.y);
+
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), single);
+  const newTitlebar = page.locator('[data-chrome-motion="titlebar"]');
+  await expect(newTitlebar).toBeAttached();
+  const restart = await newTitlebar.evaluate(node => {
+    const effect = node.getAnimations()[0]!.effect as KeyframeEffect;
+    return Number(effect.getKeyframes()[0]!.opacity);
+  });
+  expect(restart).toBeCloseTo(titlebarOpacity);
+  await expect(page.locator(".chrome-outgoing")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "刷新" })).toHaveCount(1);
+  expect(await page.evaluate(() => window.__windowTest.chrome?.anchorLeft)).toBe(false);
+  await page.evaluate(() => {
+    for (const animation of document.getAnimations()) {
+      if ((animation.effect as KeyframeEffect).target?.matches("[data-chrome-motion], [data-chrome-copy]")) animation.finish();
+    }
+  });
+  await expect(page.locator(".chrome-outgoing")).toHaveCount(0);
+  await expect(newTitlebar).toHaveCSS("opacity", "1");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => page.evaluate(() => window.__windowTest.reduceMotion)).toBe(true);
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), split);
+  await expect.poll(() => leftHeader.evaluate(node => node.getAnimations()[0]?.effect?.getTiming().duration)).toBe(80);
 });
 
 test("sidebar motion reports both pane bounds in the same paint frame, including reversal", async ({ page }) => {

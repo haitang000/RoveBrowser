@@ -222,7 +222,7 @@ function split(e: DragEvent) {
     @drop.prevent="split"
   >
     <div class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? '左侧窗格' : undefined">
-      <PageToolbar v-if="other && b.active" :pane="b.active">
+      <PageToolbar v-if="other && b.active" :pane="b.active" data-chrome-motion="left-pane">
         <button
           class="icon-button"
           title="固定分屏组合"
@@ -262,7 +262,7 @@ function split(e: DragEvent) {
         @keydown.right.prevent="ratio = Math.min(0.8, ratio + 0.05)"
       />
       <div class="page-pane" role="region" aria-label="右侧窗格">
-        <PageToolbar :pane="other">
+        <PageToolbar :pane="other" data-chrome-motion="right-pane">
           <button
             class="icon-button"
             aria-label="关闭分屏"

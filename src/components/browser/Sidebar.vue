@@ -30,13 +30,13 @@ function showMenu(e: MouseEvent, tab: Tab) {
 <template>
   <aside ref="sidebar" class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)" @dragstart.capture="tabDrag.start">
     <template v-if="b.splitPartner">
-      <div class="split-sidebar-top" data-window-drag>
+      <div class="split-sidebar-top" data-window-drag data-chrome-motion="sidebar-toolbar">
         <button class="icon-button" aria-label="收起侧栏" :title="b.shortcutTitle('收起侧栏', 'sidebar')"
           data-window-control @click="b.send({ type: 'sidebar' })">
           <Icon name="sidebar" :size="14" />
         </button>
       </div>
-      <button class="address-field split-sidebar-address" aria-label="搜索或输入地址"
+      <button class="address-field split-sidebar-address" aria-label="搜索或输入地址" data-chrome-motion="sidebar-address"
         :title="b.shortcutTitle('搜索或输入地址', 'address')" @click="b.openCommand('edit', b.active?.id)">
         <span>{{ splitAddress }}</span>
         <Icon name="settings" :size="13" />

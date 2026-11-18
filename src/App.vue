@@ -24,6 +24,7 @@ import { resizeAppearance } from "./lib/resize-appearance";
 import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
 import CreationMenu from "./components/browser/CreationMenu.vue";
 import { shareSnapshot } from "./lib/state-snapshot";
+import { useChromeTransition } from "./lib/chrome-transition";
 const b = useBrowser();
 const split = computed(() => !b.onboardingOpen && Boolean(b.splitPartner));
 const shell = ref<HTMLElement>();
@@ -81,11 +82,13 @@ function finishFrameAnimation() {
 watch(() => b.settings.reduceMotion, (value) => { document.documentElement.dataset.reduceMotion = String(value); if (value) finishFrameAnimation(); }, { immediate: true });
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const systemMotionReduced = ref(reducedMotion.matches);
+const reduceMotion = computed(() => b.settings.reduceMotion || systemMotionReduced.value);
+useChromeTransition(shell, split, computed(() => b.onboardingOpen), reduceMotion);
 function syncReducedMotion(event: MediaQueryListEvent) { systemMotionReduced.value = event.matches; }
 reducedMotion.addEventListener("change", syncReducedMotion);
 onBeforeUnmount(() => reducedMotion.removeEventListener("change", syncReducedMotion));
 watch(
-  () => JSON.stringify(resizeAppearance(shownSpace.value, b.state.theme, b.settings.reduceMotion || systemMotionReduced.value)),
+  () => JSON.stringify(resizeAppearance(shownSpace.value, b.state.theme, reduceMotion.value)),
   value => { if (b.native) b.send({ type: "resizeAppearance", ...JSON.parse(value) }); },
   { immediate: true },
 );
