@@ -2073,6 +2073,11 @@ impl App {
         }
         self.sync_layout()
     }
+    fn space_form_open(&self) -> bool {
+        ["spaceCreation", "spaceEditor"].iter().any(|key| {
+            self.popup_state.get(*key).is_some_and(|value| !value.is_null())
+        })
+    }
     // Layout messages arrive every frame during sidebar motion. They must not
     // create/navigate pages, touch profile settings, or repeat ShowWindow calls.
     fn sync_page_bounds(&self) -> Result<bool, Box<dyn std::error::Error>> {
@@ -2085,7 +2090,7 @@ impl App {
         let Some(window) = &self.window else {
             return Ok(false);
         };
-        if !self.state.onboarding.completed || self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null()) {
+        if !self.state.onboarding.completed || self.space_form_open() {
             let changed = self.pages.values().chain(self.peek.iter().map(|peek| &peek.page)).any(|page| page.visible.get());
             for page in self.pages.values().chain(self.peek.iter().map(|peek| &peek.page)) { page.set_visible(false)?; }
             if let Some(reader) = &self.reader { reader.original.set_visible(false)?; }
@@ -3008,14 +3013,14 @@ impl App {
             }
             Command::PopupState { popup } => {
                 if let Some(patch) = popup.as_object() {
-                    let was_creating = self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null());
+                    let was_open = self.space_form_open();
                     for (key, value) in patch { self.popup_state.insert(key.clone(), value.clone()); }
                     self.emit(json!({"type":"popupState","popup":patch}));
-                    let creating = self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null());
-                    if creating != was_creating {
+                    let form_open = self.space_form_open();
+                    if form_open != was_open {
                         self.finish_split_resize();
                         if let Err(e) = self.sync_layout() { self.error(e); }
-                        if creating {
+                        if form_open {
                             if let Some(ui) = &self.ui { let _ = ui.focus(); }
                         }
                     }
@@ -3031,7 +3036,7 @@ impl App {
                     if let Err(e) = result { self.error(e); }
                 }
                 if regions.is_empty() {
-                    if self.popup_state.get("spaceCreation").is_some_and(|value| !value.is_null()) {
+                    if self.space_form_open() {
                         if let Some(ui) = &self.ui { let _ = ui.focus(); }
                     }
                     else if let Some(page) = self.page() { let _ = page.focus(); }

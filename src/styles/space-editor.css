@@ -241,17 +241,6 @@
   pointer-events: none;
 }
 .space-editor-panel {
-  position: fixed;
-  z-index: 31;
-  top: 48px;
-  left: calc(var(--sidebar-width) + 8px);
-}
-.browser-shell.collapsed .space-editor-panel {
-  left: 12px;
-}
-.space-editor-panel {
-  width: 300px;
-  max-height: calc(100vh - 64px);
   overflow: auto;
   padding: 12px;
   background: var(--panel);

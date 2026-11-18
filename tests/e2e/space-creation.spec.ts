@@ -40,7 +40,7 @@ test("creation owns a separate page, validates the name and cancels without chan
   const oldTabs = await page.getByRole("tab").count();
   await openCreation(page);
   await expect(page.locator(".space-key")).toHaveCount(3);
-  await expect(page.locator(".space-create-page")).toHaveCount(1);
+  await expect(page.locator(".space-form")).toHaveCount(1);
   await expect(page.getByRole("dialog", { name: "工作区与外观" })).toHaveCount(0);
   await expect(page.locator(".page-area")).toHaveAttribute("inert", "");
   await expect(page.locator(".preview-page")).toBeHidden();
@@ -57,7 +57,7 @@ test("creation owns a separate page, validates the name and cancels without chan
   await expect(page.getByRole("region", { name: "Space 主题" })).toHaveCount(0);
   await expect(field).toHaveValue("未保存的空间");
   await page.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(page.locator(".space-create-page")).toHaveCount(0);
+  await expect(page.locator(".space-form")).toHaveCount(0);
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("Personal");
   await expect(page.locator(".space-key")).toHaveCount(3);
   await expect(page.locator("html")).toHaveAttribute("data-color", oldColor!);
@@ -75,7 +75,7 @@ test("creates and activates one Space with its name, icon and draft theme", asyn
   const previewFrame = await page.locator(".browser-shell").getAttribute("style");
   await page.getByRole("button", { name: "关闭主题", exact: true }).click();
   await page.getByRole("button", { name: "创建 Space", exact: true }).click();
-  await expect(page.locator(".space-create-page")).toHaveCount(0);
+  await expect(page.locator(".space-form")).toHaveCount(0);
   await expect(page.locator(".space-key")).toHaveCount(4);
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("📖研究空间");
   await expect(page.getByRole("button", { name: "工作区 研究空间", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -106,7 +106,7 @@ test("command action opens the creation page and Enter submits the name", async 
   await page.getByRole("combobox").fill("new space");
   await page.keyboard.press("Enter");
   await expect(page.locator(".space-key")).toHaveCount(3);
-  await expect(page.locator(".space-create-page")).toBeVisible();
+  await expect(page.locator(".space-form")).toBeVisible();
   await page.getByRole("textbox", { name: "工作区名称", exact: true }).fill("写作");
   await page.keyboard.press("Enter");
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("写作");
@@ -123,17 +123,17 @@ test("creation and theme editor fit narrow, short and dark windows", async ({ pa
   for (const viewport of [{ width: 480, height: 400 }, { width: 900, height: 640 }]) {
     await page.setViewportSize(viewport);
     await expect(page.getByRole("button", { name: "取消", exact: true })).toBeInViewport();
-    expect(await page.locator(".space-create-page").evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
-    expect(await page.locator(".space-create-scroll").evaluate(e => e.scrollWidth <= e.clientWidth && e.scrollLeft === 0)).toBe(true);
+    expect(await page.locator(".space-form").evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+    expect(await page.locator(".space-form-scroll").evaluate(e => e.scrollWidth <= e.clientWidth && e.scrollLeft === 0)).toBe(true);
     await page.getByRole("button", { name: "主题…", exact: true }).click();
-    const panel = await page.locator(".space-create-theme").boundingBox();
+    const panel = await page.getByRole("region", { name: "Space 主题" }).boundingBox();
     expect(panel!.x).toBeGreaterThanOrEqual(0);
     expect(panel!.x + panel!.width).toBeLessThanOrEqual(viewport.width);
     expect(panel!.y + panel!.height).toBeLessThanOrEqual(viewport.height);
     await page.keyboard.press("Escape");
   }
   await page.keyboard.press("Escape");
-  await expect(page.locator(".space-create-page")).toHaveCount(0);
+  await expect(page.locator(".space-form")).toHaveCount(0);
 });
 
 test("Space limit disables only the creation menu item", async ({ page }) => {

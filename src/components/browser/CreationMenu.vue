@@ -71,3 +71,20 @@ onBeforeUnmount(() => {
     </section>
   </div>
 </template>
+
+<style>
+.creation-menu {
+  z-index: 115;
+  width: min(224px, calc(var(--sidebar-width) - 16px));
+  padding: 6px;
+}
+.creation-menu button {
+  height: 40px;
+  gap: 12px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.creation-menu svg { color: currentColor; }
+.creation-menu hr { margin: 5px 2px; }
+.creation-trigger.active { background: var(--selected); }
+</style>

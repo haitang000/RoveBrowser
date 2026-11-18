@@ -222,17 +222,35 @@ test("space editor creates and deletes a space in place with confirmation", asyn
   ).toHaveCount(0);
 });
 
-test("quick workspace editor keeps a single live clear control", async ({ page }) => {
+test("sidebar Space editor uses the shared form and preserves the theme on rename", async ({ page }) => {
   await page.locator(".sidebar-header .space-name").click();
-  const dialog = page.getByRole("dialog", { name: "编辑空间", exact: true });
-  await dialog.getByRole("button", { name: "效果", exact: true }).click();
-  const clear = dialog.getByRole("slider", { name: "清透", exact: true });
+  const dialog = page.locator(".sidebar").getByRole("dialog", { name: "编辑空间", exact: true });
+  await expect(dialog.getByRole("heading", { name: "编辑 Space", exact: true })).toBeVisible();
+  await expect(page.locator(".page-area")).toHaveAttribute("inert", "");
+  const field = dialog.getByRole("textbox", { name: "工作区名称", exact: true });
+  await expect(field).toBeFocused();
+  const themeButton = dialog.getByRole("button", { name: "主题…", exact: true });
+  const theme = page.getByRole("region", { name: "Space 主题", exact: true });
+  await themeButton.click();
+  await theme.getByRole("button", { name: "薄荷", exact: true }).click();
+  await theme.getByRole("button", { name: "效果", exact: true }).click();
+  const clear = theme.getByRole("slider", { name: "清透", exact: true });
   await expect(clear).toBeVisible();
-  await expect(dialog.getByText("磨砂", { exact: true })).toHaveCount(0);
+  await expect(theme.getByText("磨砂", { exact: true })).toHaveCount(0);
   await clear.fill("0.7");
   await page.keyboard.press("Escape");
-  await page.locator(".sidebar-header .space-name").click();
+  await expect(theme).toHaveCount(0);
+  await expect(themeButton).toBeFocused();
+  await dialog.getByRole("button", { name: "完成", exact: true }).click();
+  await expect(page.locator(".page-area")).not.toHaveAttribute("inert");
+  await page.getByRole("button", { name: "工作区 Personal", exact: true }).click();
+  await field.fill("研究空间");
+  await themeButton.click();
   await expect(clear).toHaveValue("0.7");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".sidebar-header .space-name")).toHaveText("研究空间");
 });
 
 test("settings adapt to narrow panes without horizontal overflow", async ({

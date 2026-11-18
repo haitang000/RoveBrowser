@@ -1,73 +1,79 @@
 <script setup lang="ts">
-// Floating space editor, from Zigzag/Sidebar/SpaceEditor.swift (SpaceEditorPanel).
-// Copyright 2026 Zigao Wang, Apache-2.0. Modified for Rove: no profile row.
-import { onBeforeUnmount, onMounted, ref } from "vue";
+// Adapted from Zigzag/Sidebar/SpaceEditor.swift (SpaceEditorPanel).
+// Copyright 2026 Zigao Wang, Apache-2.0. Modified for Rove.
+import { nextTick, onBeforeUnmount, ref } from "vue";
 import { useBrowser } from "../../stores/browser";
+import SpaceForm from "./SpaceForm.vue";
 import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 import SpaceLookEditor from "./SpaceLookEditor.vue";
-import { commandLook, type LookFields } from "../../lib/space-look";
-const props = defineProps<{ embedded?: boolean }>();
+import { commandLook, lookOf, type LookFields } from "../../lib/space-look";
+defineProps<{ embedded?: boolean }>();
 const b = useBrowser();
-const panel = ref<HTMLElement>();
+const id = b.space.id;
 const name = ref(b.space.name);
 const icon = ref(b.space.icon);
 const picking = ref(false);
-const look = ref<LookFields>({ color: b.space.color });
+const look = ref(lookOf(b.space));
+let updatedName = name.value;
 
+function preview(next: LookFields) {
+  b.previewSpace(id, next);
+}
 function send(next = look.value) {
   look.value = next;
-  b.previewSpace(b.space.id, next);
+  preview(next);
   b.send({
     type: "spaceUpdate",
-    id: b.space.id,
-    name: name.value.trim() || b.space.name,
+    id,
+    name: updatedName,
     icon: icon.value ?? null,
-    ...commandLook({ ...next, color: b.space.color }),
+    ...commandLook(next),
   });
 }
-function onPointerDown(event: PointerEvent) {
-  const target = event.target as HTMLElement;
-  if (panel.value?.contains(target)) return;
-  if (target.closest?.(".space-name, .space-key")) return;
-  b.closeSpaceEditor();
+function rename(next: string) {
+  name.value = next;
+  const trimmed = next.trim();
+  if (!trimmed || trimmed === updatedName) return;
+  updatedName = trimmed;
+  send();
 }
-function onKey(event: KeyboardEvent) {
-  if (event.key !== "Escape" || event.isComposing) return;
-  event.preventDefault();
-  event.stopPropagation();
-  b.closeSpaceEditor();
+function setIcon(next?: string) {
+  icon.value = next;
+  send();
 }
-onMounted(() => {
-  name.value = b.space.name;
-  icon.value = b.space.icon;
-  if (!props.embedded) {
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKey, true);
-  }
-});
+function finish(restoreFocus = true) {
+  b.closeSpaceEditor();
+  if (restoreFocus) void nextTick(() => document.querySelector<HTMLElement>(".sidebar-header .space-name")?.focus());
+}
 onBeforeUnmount(() => {
-  window.removeEventListener("pointerdown", onPointerDown, true);
-  window.removeEventListener("keydown", onKey, true);
-  b.spacePreview = undefined;
+  if (b.spacePreview?.id === id) b.spacePreview = undefined;
 });
 </script>
 <template>
-  <section
-    ref="panel"
-    class="space-editor-panel"
-    :role="embedded ? 'region' : 'dialog'"
-    :aria-modal="embedded ? undefined : 'false'"
-    aria-label="编辑空间"
-    @keydown.esc="!embedded && b.closeSpaceEditor()"
-  >
-    <SpaceIdentityEditor v-model:name="name" v-model:icon="icon" v-model:picking="picking" @update:name="send()" @update:icon="send()" />
+  <section v-if="embedded" class="space-editor-panel" role="region" aria-label="编辑空间">
+    <SpaceIdentityEditor :name="name" :icon="icon" v-model:picking="picking" @update:name="rename" @update:icon="setIcon" />
     <SpaceLookEditor
       v-show="!picking"
-      :space="b.space"
+      :space="look"
       :dark="b.state.theme === 'dark'"
-      @preview="b.previewSpace(b.space.id, $event)"
+      @preview="preview"
       @commit="send"
     />
   </section>
+  <SpaceForm
+    v-else
+    editing
+    :name="name"
+    :icon="icon"
+    :look="look"
+    @update:name="rename"
+    @update:icon="setIcon"
+    @preview="preview"
+    @commit="send"
+    @close-theme="preview(look)"
+    @submit="finish()"
+    @dismiss="finish"
+  >
+    <button class="primary-button" type="submit">完成</button>
+  </SpaceForm>
 </template>
-<style src="../../styles/space-editor.css"></style>

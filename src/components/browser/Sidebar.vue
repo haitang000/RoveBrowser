@@ -9,6 +9,7 @@ import TabMenu from "./TabMenu.vue";
 import SpaceDeck from "./SpaceDeck.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 import SpaceCreatePage from "./SpaceCreatePage.vue";
+import SpaceEditor from "./SpaceEditor.vue";
 import { provideTabDrag } from "../../lib/tab-drag";
 const b = useBrowser();
 const sidebar = ref<HTMLElement>();
@@ -26,6 +27,7 @@ function showMenu(e: MouseEvent, tab: Tab) {
 <template>
   <aside ref="sidebar" class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)" @dragstart.capture="tabDrag.start">
     <SpaceCreatePage v-if="b.spaceCreation" />
+    <SpaceEditor v-else-if="b.spaceEditor" :key="b.spaceEditor" />
     <template v-else>
     <div class="sidebar-header">
       <h1 class="space-name editable" :class="{compact: !b.settings.largeSpaceNames}" :title="`${b.space.name} · 编辑空间`" role="button" tabindex="0" @click="b.toggleSpaceEditor(b.space.id)" @keydown.enter.prevent="b.toggleSpaceEditor(b.space.id)">

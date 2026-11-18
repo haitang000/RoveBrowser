@@ -21,7 +21,6 @@ import { SPACE_SWIPE } from "./lib/space-swipe";
 import { coverage, isSeeThrough } from "./lib/page-frame";
 import { frameOf, lookOf } from "./lib/space-look";
 import { resizeAppearance } from "./lib/resize-appearance";
-import SpaceEditor from "./components/browser/SpaceEditor.vue";
 import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
 import CreationMenu from "./components/browser/CreationMenu.vue";
 import { shareSnapshot } from "./lib/state-snapshot";
@@ -195,7 +194,7 @@ onBeforeUnmount(() => {
       glass: glassActive,
       'glass-neutral': glassActive && painted.neutralGlass,
       'custom-frame': painted.custom,
-      'space-creating': Boolean(b.spaceCreation),
+      'space-form-open': b.spaceFormOpen,
     }"
     :style="shellStyle"
   >
@@ -221,7 +220,7 @@ onBeforeUnmount(() => {
         <Icon name="sidebar" /></button
       ><PageArea ref="pageArea"><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
     </div>
-    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><SpaceEditor v-if="b.spaceEditor" :key="b.spaceEditor" /><CreationMenu v-if="!b.native && b.creationMenu" /><TabPreview />
+    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><CreationMenu v-if="!b.native && b.creationMenu" /><TabPreview />
     <ErrorToast v-if="!b.native" /><DownloadsPanel v-if="!b.native" />
     </template>
     <QuitDialog v-if="!b.native && b.quitOpen" />

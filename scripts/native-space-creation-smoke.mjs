@@ -114,6 +114,29 @@ try {
   checks.push('创建页隐藏真实网页；取消不新增或修改 Space，原网页 DOM、滚动位置与活动标签保持');
   console.log(checks.at(-1));
 
+  await ui.locator('.sidebar-header .space-name').click();
+  const editor = ui.getByRole('dialog', { name: '编辑空间', exact: true });
+  await expect(editor.getByRole('textbox', { name: '工作区名称', exact: true })).toHaveValue('Personal');
+  assert.equal(await visibleWebviews(), visibleBefore - 1, 'editing hides the real website HWND');
+  const themeButton = editor.getByRole('button', { name: '主题…', exact: true });
+  const theme = ui.getByRole('region', { name: 'Space 主题', exact: true });
+  await themeButton.click();
+  await theme.getByRole('button', { name: '薄荷', exact: true }).click();
+  await ui.keyboard.press('Escape');
+  await expect(themeButton).toBeFocused();
+  await ui.screenshot({ path: join(output, 'edit-page.png') });
+  await editor.getByRole('button', { name: '完成', exact: true }).click();
+  await waitFor(() => source.evaluate(() => document.visibilityState === 'visible'), 'source restored after editing');
+  assert.deepEqual(await source.evaluate(() => [window.__spaceCreationMarker, scrollY]), ['preserved', 240]);
+  await ui.locator('.sidebar-header .space-name').click();
+  await themeButton.click();
+  await expect(theme.getByRole('button', { name: '薄荷', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await ui.keyboard.press('Escape');
+  await ui.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
+  checks.push('编辑使用同一侧栏布局和主题面板；主题即时保存，完成后恢复原网页');
+  console.log(checks.at(-1));
+
   await ui.keyboard.press('Control+t');
   await popup.getByRole('combobox').fill('new space');
   await popup.keyboard.press('Enter');
