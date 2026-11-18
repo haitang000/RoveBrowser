@@ -1,5 +1,5 @@
 //! Download history and state, ported from Zigzag's `Web/DownloadManager.swift`
-//! (Apache-2.0): one row per started download, the five-state machine the
+//! (Apache-2.0): one row per started download, the state machine the
 //! panel renders, a 50-item recent list and Clear that never throws away a
 //! half-finished file. The WebView2 operation lives in the host; this module is
 //! pure data so it can be unit tested without a browser.
@@ -16,6 +16,7 @@ pub enum DownloadState {
     Paused,
     Finished,
     Failed,
+    Blocked,
     Cancelled,
 }
 
@@ -73,6 +74,8 @@ impl DownloadItem {
 #[derive(Default)]
 pub struct Downloads {
     pub items: Vec<DownloadItem>,
+    /// Transitions awaiting publication to the download UI.
+    pub newly_blocked: Vec<String>,
 }
 
 impl Downloads {
@@ -80,7 +83,7 @@ impl Downloads {
     /// cannot be resumed (WebView2 keeps no resume data across processes), so
     /// Zigzag's paused-with-resume data case becomes a plain interruption.
     pub fn load(items: Vec<DownloadItem>) -> Self {
-        let mut downloads = Self { items };
+        let mut downloads = Self { items, ..Self::default() };
         downloads.items.truncate(MAX_ITEMS);
         let now = crate::model::now_secs();
         for item in &mut downloads.items {
@@ -124,6 +127,7 @@ impl Downloads {
     pub fn finish(&mut self, id: &str, state: DownloadState, failure: Option<String>) -> bool {
         let now = crate::model::now_secs();
         if let Some(item) = self.get_mut(id) {
+            let newly_blocked = item.is_active() && state == DownloadState::Blocked;
             item.state = state;
             item.finished = Some(now);
             item.failure = failure;
@@ -132,6 +136,9 @@ impl Downloads {
                     item.received = item.total;
                 }
                 item.total = item.received;
+            }
+            if newly_blocked {
+                self.newly_blocked.push(id.into());
             }
             return true;
         }
@@ -162,6 +169,16 @@ impl Downloads {
         }
         self.items.clone()
     }
+}
+
+pub fn is_security_interrupt(reason: COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON) -> bool {
+    matches!(
+        reason,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_MALICIOUS
+            | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED_BY_POLICY
+            | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH
+            | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED
+    )
 }
 
 /// Zigzag shows the reason in a few plain words; WebView2's enum is much wider,
@@ -212,7 +229,7 @@ pub fn interrupt_reason_text(reason: COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON) -> 
     } else if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_TOO_SHORT {
         "文件不完整"
     } else if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_MALICIOUS {
-        "文件被安全拦截"
+        "安全检查发现此文件可能有害"
     } else if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED_BY_POLICY {
         "被策略阻止"
     } else if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH

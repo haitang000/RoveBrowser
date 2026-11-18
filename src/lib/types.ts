@@ -47,6 +47,7 @@ export type DownloadState =
   | "paused"
   | "finished"
   | "failed"
+  | "blocked"
   | "cancelled";
 /** One row of the downloads panel, persisted by the native host. */
 export interface DownloadItem {
@@ -171,6 +172,8 @@ declare global {
       ids?: string[];
       /** The full downloads list, and the row a just-started download created. */
       items?: DownloadItem[];
+      /** Download IDs blocked by the engine since the last list update. */
+      blockedIds?: string[];
     }) => void;
   }
 }

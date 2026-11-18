@@ -62,11 +62,12 @@ describe("download rows", () => {
     );
     expect(downloadStatus(item({ state: "failed", failure: "网络已断开" }))).toBe("失败 · 网络已断开");
     expect(downloadStatus(item({ state: "failed" }))).toBe("下载失败");
+    expect(downloadStatus(item({ state: "blocked" }))).toBe("已被安全拦截");
     expect(downloadStatus(item({ state: "cancelled" }))).toBe("已取消");
   });
   it("keeps a full transfer active until the engine confirms completion", () => {
     const pending = item({ received: 4096, total: 4096 });
-    expect(downloadStatus(pending)).toBe("正在检查或等待确认 · 4 KB");
+    expect(downloadStatus(pending)).toBe("正在等待下载结果 · 4 KB");
     expect(isFinalizingDownload(pending)).toBe(true);
     expect(isFinalizingDownload({ ...pending, state: "paused" })).toBe(false);
     expect(isFinalizingDownload({ ...pending, total: 0 })).toBe(false);

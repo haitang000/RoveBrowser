@@ -16,13 +16,13 @@ use std::{
 };
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler, DOMContentLoadedEventHandler,
-    DownloadStartingEventHandler, FaviconChangedEventHandler, IsDefaultDownloadDialogOpenChangedEventHandler,
+    DownloadStartingEventHandler, FaviconChangedEventHandler,
     IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
         ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
-        ICoreWebView2_4, ICoreWebView2_9,
+        ICoreWebView2_4,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED,
@@ -145,8 +145,6 @@ enum Event {
     },
     /// A new download joined the list: the UI reveals the panel on it.
     DownloadStarted(String),
-    /// The native download hub auto-opened; show it only after an explicit review.
-    DownloadDialogOpened(String),
     /// Zigzag `TabSleep`: every tick, background pages nobody has seen for a
     /// while give their memory back.
     SleepTick,
@@ -289,7 +287,6 @@ struct PageShared {
     downloads_open: Rc<Cell<bool>>,
     downloads: Rc<RefCell<Downloads>>,
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
-    download_sources: Rc<RefCell<HashMap<String, String>>>,
 }
 /// Tabs removed together by Clear or Close Others/Below, with the active tab
 /// before the batch so the Undo toast can put everything back as it was.
@@ -335,12 +332,7 @@ struct App {
     downloads: Rc<RefCell<Downloads>>,
     /// Live WebView2 operations for pause/resume/cancel; dropped on completion.
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
-    /// The originating page owns the built-in security/retention prompt.
-    download_sources: Rc<RefCell<HashMap<String, String>>>,
     next_download_poll: Option<Instant>,
-    download_popup_visible: bool,
-    pending_download_review: Option<String>,
-    download_review_source: Option<String>,
     downloads_open: Rc<Cell<bool>>,
     popup: Option<WebView>,
     popup_state: serde_json::Map<String, serde_json::Value>,
@@ -488,11 +480,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         undo_batch: None,
         downloads,
         download_ops: Rc::new(RefCell::new(HashMap::new())),
-        download_sources: Rc::new(RefCell::new(HashMap::new())),
         next_download_poll: None,
-        download_popup_visible: false,
-        pending_download_review: None,
-        download_review_source: None,
         downloads_open: Rc::new(Cell::new(false)),
         popup: None,
         popup_state: serde_json::Map::new(),
@@ -1142,10 +1130,11 @@ impl App {
         self.toast(&format!("已恢复 {count} 个标签"), None);
     }
     fn publish_downloads(&self) {
-        self.download_sources.borrow_mut()
-            .retain(|id, _| self.download_ops.borrow().contains_key(id));
-        let items = self.downloads.borrow_mut().publish_items();
-        self.emit(json!({"type":"downloads","items":items}));
+        let (items, blocked_ids) = {
+            let mut downloads = self.downloads.borrow_mut();
+            (downloads.publish_items(), std::mem::take(&mut downloads.newly_blocked))
+        };
+        self.emit(json!({"type": "downloads", "items": items, "blockedIds": blocked_ids}));
     }
     fn save_downloads(&mut self) {
         let items = self.downloads.borrow().items.clone();
@@ -1224,43 +1213,6 @@ impl App {
         let Some(id) = id else { return };
         let operation = self.download_ops.borrow().get(&id).cloned();
         match action {
-            "review" => {
-                if self.download_popup_visible {
-                    // Opening the native prompt before the leaving popup hands
-                    // focus back would immediately dismiss the native prompt.
-                    self.pending_download_review = Some(id);
-                    return;
-                }
-                let source = self.download_sources.borrow().get(&id).cloned();
-                let Some(source) = source else {
-                    self.error("这个下载已结束或来源页面已关闭");
-                    return;
-                };
-                if self.pages.contains_key(&source) {
-                    self.state.activate(&source);
-                    self.publish();
-                    self.save();
-                    if let Err(error) = self.sync() {
-                        self.error(error);
-                        return;
-                    }
-                }
-                let page = self.pages.get(&source).or_else(|| self.peek.as_ref()
-                    .filter(|peek| peek.tab.id == source).map(|peek| &peek.page));
-                let Some(page) = page else {
-                    self.error("下载来源页面已关闭");
-                    return;
-                };
-                self.download_review_source = Some(source);
-                let _ = page.view.focus();
-                let result = unsafe {
-                    page.view.webview().cast::<ICoreWebView2_9>()
-                        .and_then(|view| view.OpenDefaultDownloadDialog())
-                };
-                if let Err(error) = result {
-                    self.error(format!("无法显示下载提示：{error}"));
-                }
-            }
             "pause" => {
                 if let Some(operation) = &operation {
                     if let Err(error) = unsafe { operation.Pause() } {
@@ -1323,7 +1275,9 @@ impl App {
                 self.publish_downloads();
             }
             "open" | "reveal" => {
-                let Some(item) = self.downloads.borrow().get(&id).cloned() else {
+                let Some(item) = self.downloads.borrow().get(&id)
+                    .filter(|item| item.state == DownloadState::Finished).cloned()
+                else {
                     return;
                 };
                 let path = PathBuf::from(&item.path);
@@ -1384,7 +1338,6 @@ impl App {
             downloads_open: self.downloads_open.clone(),
             downloads: self.downloads.clone(),
             download_ops: self.download_ops.clone(),
-            download_sources: self.download_sources.clone(),
         };
         register_page_events(
             &view,
@@ -3033,9 +2986,8 @@ impl App {
                 }
                 return;
             }
-            Command::PopupLayer { regions, cutout, focus, downloads } => {
+            Command::PopupLayer { regions, cutout, focus } => {
                 if regions.len() > 16 || !regions.iter().all(|r| r.valid()) || cutout.is_some_and(|r| !r.valid()) { return; }
-                self.download_popup_visible = downloads;
                 if let (Some(popup), Some(window)) = (&self.popup, &self.window) {
                     let result = WindowClip::popup(popup.hwnd(), &regions, cutout, window.scale_factor());
                     if result.is_ok() && focus { let _ = popup.focus(); }
@@ -3047,11 +2999,6 @@ impl App {
                     }
                     else if let Some(page) = self.page() { let _ = page.focus(); }
                     else if let Some(ui) = &self.ui { let _ = ui.focus(); }
-                }
-                if !downloads {
-                    if let Some(id) = self.pending_download_review.take() {
-                        self.download_action(Some(id), "review");
-                    }
                 }
                 return;
             }
@@ -3711,24 +3658,11 @@ impl ApplicationHandler<Event> for App {
                 self.publish_downloads();
             }
             Event::DownloadStarted(id) => {
-                self.download_review_source = None;
                 // A small/cached download may already be complete by the time
                 // its handlers are registered; events do not replay old states.
                 self.refresh_downloads();
                 self.save_downloads();
                 self.emit(json!({"type":"downloadStarted","id":id}));
-            }
-            Event::DownloadDialogOpened(source) => {
-                if self.download_review_source.as_ref() != Some(&source) {
-                    let page = self.pages.get(&source).or_else(|| self.peek.as_ref()
-                        .filter(|peek| peek.tab.id == source).map(|peek| &peek.page));
-                    if let Some(page) = page {
-                        // Keep the native entry and its security decision alive;
-                        // only hide the duplicate auto-opening surface.
-                        let _ = unsafe { page.view.webview().cast::<ICoreWebView2_9>()
-                            .and_then(|view| view.CloseDefaultDownloadDialog()) };
-                    }
-                }
             }
             Event::Command(c) => self.command(c, Some(event_loop)),
             Event::PeekRequest(source, url, point) => {
@@ -4062,12 +3996,13 @@ fn register_page_events(
     let mut token = 0;
     let download_downloads = shared.downloads.clone();
     let download_ops = shared.download_ops.clone();
-    let download_sources = shared.download_sources.clone();
-    let download_source = id.clone();
     let download_proxy = proxy.clone();
     let download = DownloadStartingEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
             unsafe {
+                // Rove owns the download UI. WebView2 still decides whether
+                // the transfer is allowed to complete.
+                args.SetHandled(true)?;
                 let folder = settings.borrow().download_folder.clone();
                 if !folder.is_empty() {
                     let mut suggested = PWSTR::null();
@@ -4082,10 +4017,6 @@ fn register_page_events(
                     while destination.exists() { destination = PathBuf::from(&folder).join(format!("{stem} ({index}){ext}")); index += 1; }
                     args.SetResultFilePath(&HSTRING::from(destination.as_os_str()))?;
                 }
-                // Wry's default handler sets Handled=true before ours. Restore
-                // the native entry so uncommon EXEs can receive a Keep/Discard
-                // decision. Hiding that entry strands them at full byte count.
-                args.SetHandled(false)?;
                 // Track every download Zigzag-style: a row appears at once and
                 // the panel is revealed; progress and state arrive by events.
                 let mut path_pointer = PWSTR::null();
@@ -4118,7 +4049,6 @@ fn register_page_events(
                     exists: false,
                 });
                 download_ops.borrow_mut().insert(id.clone(), operation.clone());
-                download_sources.borrow_mut().insert(id.clone(), download_source.clone());
                 track_download(
                     &operation,
                     id.clone(),
@@ -4132,19 +4062,6 @@ fn register_page_events(
         Ok(())
     }));
     unsafe { view.webview().cast::<ICoreWebView2_4>()?.add_DownloadStarting(&download, &mut token)?; }
-    let dialog_proxy = proxy.clone();
-    let dialog_source = id.clone();
-    let dialog = IsDefaultDownloadDialogOpenChangedEventHandler::create(Box::new(move |sender, _| {
-        let Some(sender) = sender else { return Ok(()) };
-        let mut open = BOOL::default();
-        unsafe { sender.cast::<ICoreWebView2_9>()?.IsDefaultDownloadDialogOpen(&mut open)?; }
-        if open.as_bool() {
-            let _ = dialog_proxy.send_event(Event::DownloadDialogOpened(dialog_source.clone()));
-        }
-        Ok(())
-    }));
-    unsafe { view.webview().cast::<ICoreWebView2_9>()?
-        .add_IsDefaultDownloadDialogOpenChanged(&dialog, &mut token)?; }
     let p = proxy.clone();
     let source_id = id.clone();
     let popup = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
@@ -4364,11 +4281,16 @@ fn sync_download(
                 }
                 DownloadState::Paused
             } else {
+                let state = if crate::downloads::is_security_interrupt(reason) {
+                    DownloadState::Blocked
+                } else {
+                    DownloadState::Failed
+                };
                 downloads.finish(
-                    id, DownloadState::Failed,
+                    id, state,
                     Some(crate::downloads::interrupt_reason_text(reason)),
                 );
-                DownloadState::Failed
+                state
             }
         } else {
             if let Some(item) = downloads.get_mut(id) {

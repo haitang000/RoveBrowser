@@ -31,12 +31,16 @@ export function isFinalizingDownload(item: Pick<DownloadItem, "state" | "receive
   return item.state === "inProgress" && item.total > 0 && item.received >= item.total;
 }
 
+export function hasDownloadNotice(item: DownloadItem): boolean {
+  return item.state === "blocked" || isFinalizingDownload(item);
+}
+
 /** The line under the file name, in Zigzag's plain words. */
 export function downloadStatus(item: DownloadItem): string {
   switch (item.state) {
     case "inProgress":
       if (isFinalizingDownload(item)) {
-        return `正在检查或等待确认 · ${formatBytes(item.received)}`;
+        return `正在等待下载结果 · ${formatBytes(item.received)}`;
       }
       return item.total > 0
         ? `${downloadPercent(item)}% · ${formatBytes(item.received)} / ${formatBytes(item.total)}`
@@ -51,6 +55,8 @@ export function downloadStatus(item: DownloadItem): string {
         : `已完成 · ${formatBytes(item.total || item.received)}`;
     case "failed":
       return item.failure ? `失败 · ${item.failure}` : "下载失败";
+    case "blocked":
+      return "已被安全拦截";
     case "cancelled":
       return "已取消";
     default:

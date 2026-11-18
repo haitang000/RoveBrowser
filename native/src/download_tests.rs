@@ -159,3 +159,30 @@ fn polling_preserves_pause_and_detects_resume_and_failure() {
     assert_eq!(fixture.item().failure.as_deref(), Some("网络错误"));
     assert!(fixture.ops.borrow().is_empty());
 }
+
+#[test]
+fn security_interrupts_publish_a_blocked_notice_once() {
+    for reason in [
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_MALICIOUS,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED_BY_POLICY,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED,
+    ] {
+        let fixture = Fixture::new();
+        fixture.state.set(COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED);
+        fixture.reason.set(reason);
+
+        assert!(fixture.sync());
+        let item = fixture.item();
+        assert_eq!(item.state, DownloadState::Blocked);
+        assert_eq!(item.failure, Some(crate::downloads::interrupt_reason_text(reason)));
+        assert!(!item.exists);
+        assert!(fixture.ops.borrow().is_empty());
+        assert_eq!(std::mem::take(&mut fixture.downloads.borrow_mut().newly_blocked), ["file"]);
+        assert!(!fixture.sync());
+        assert!(fixture.downloads.borrow().newly_blocked.is_empty());
+        let restored = Downloads::load(vec![item]);
+        assert_eq!(restored.get("file").unwrap().state, DownloadState::Blocked);
+        assert!(restored.newly_blocked.is_empty());
+    }
+}

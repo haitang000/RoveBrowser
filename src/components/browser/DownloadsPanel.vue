@@ -2,9 +2,10 @@
 // State/actions belong to the host; the surface also runs in the native popup.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { clearableDownloads, downloadFraction, downloadPercent, downloadStatus, isActiveDownload, isFinalizingDownload } from "../../lib/downloads";
+import { clearableDownloads, downloadFraction, downloadPercent, downloadStatus, hasDownloadNotice, isActiveDownload } from "../../lib/downloads";
 import Icon from "../common/Icon.vue";
 import DownloadFileIcon from "./DownloadFileIcon.vue";
+import DownloadSecurityDialog from "./DownloadSecurityDialog.vue";
 
 const b = useBrowser();
 const panel = ref<HTMLElement>();
@@ -31,8 +32,6 @@ const position = computed(() => {
 function resize() { viewport.value = { width: innerWidth, height: innerHeight }; }
 function act(action: string, id?: string) {
   menuOpen.value = false;
-  // Release the native popup so WebView2's security prompt can receive input.
-  if (action === "review") b.closeDownloads();
   b.downloadAction(action, id);
 }
 function close() { b.closeDownloads(); }
@@ -54,7 +53,7 @@ async function toggleSearch() {
   else query.value = "";
 }
 function outside(event: PointerEvent) {
-  if (!b.downloadsOpen) return;
+  if (!b.downloadsOpen || b.downloadNotice) return;
   const target = event.target as Element | null;
   if (target && (panel.value?.contains(target) || target.closest(".downloads-button"))) return;
   close();
@@ -119,8 +118,8 @@ watch(() => b.downloadsFocus, async () => {
                 role="progressbar" :aria-label="`${item.filename} 下载进度`" :aria-valuenow="item.total > 0 ? downloadPercent(item) : undefined" :aria-valuemin="0" :aria-valuemax="100" :aria-valuetext="downloadStatus(item)">
                 <span :style="{ transform: `scaleX(${item.total > 0 ? downloadFraction(item) : 0.3})` }" />
               </div>
-              <span class="download-meta" :class="{ caution: item.state === 'failed' }" :title="downloadStatus(item)">{{ downloadStatus(item) }}</span>
-              <button v-if="isFinalizingDownload(item)" class="download-open" @click="act('review', item.id)">查看下载提示</button>
+              <span class="download-meta" :class="{ caution: item.state === 'failed' || item.state === 'blocked' }" :title="downloadStatus(item)">{{ downloadStatus(item) }}</span>
+              <button v-if="hasDownloadNotice(item)" class="download-open" @click="b.showDownloadNotice(item.id)">查看下载提示</button>
               <button v-if="item.state === 'finished' && item.exists" class="download-open" @click="act('open', item.id)">打开文件</button>
             </div>
             <div class="download-actions">
@@ -138,4 +137,6 @@ watch(() => b.downloadsFocus, async () => {
       </section>
     </div>
   </Transition>
+  <DownloadSecurityDialog v-if="b.downloadNotice && !b.quitOpen" :key="b.downloadNotice.id"
+    :item="b.downloadNotice" @dismiss="b.dismissDownloadNotice" @cancel-download="act('cancel', $event)" />
 </template>

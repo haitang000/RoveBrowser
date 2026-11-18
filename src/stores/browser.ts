@@ -15,7 +15,7 @@ import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
 import type { ReaderState } from "../lib/reader";
 import { nowSeconds } from "../lib/tab-meta";
-import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
+import { activeDownloadCount, hasDownloadNotice, isActiveDownload } from "../lib/downloads";
 import { settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
 import { upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
@@ -94,6 +94,7 @@ export const useBrowser = defineStore("browser", () => {
     downloadsOpen = ref(false),
     downloadsAnchor = ref<Rect>(),
     downloadsFocus = ref<string | undefined>(undefined),
+    downloadNoticeIds = ref<string[]>([]),
     /** Clock for tab fading and the Clear button's stale check. */
     now = ref(nowSeconds());
   let zoomNoticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -131,6 +132,10 @@ export const useBrowser = defineStore("browser", () => {
   const savedBookmarks = computed(() => new Map([...(state.value.pins || []), ...state.value.favorites].map(mark => [mark.id, mark])));
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedBookmarks.value.get(active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
+  const downloadNotice = computed(() => {
+    const id = downloadNoticeIds.value[0];
+    return downloads.value.find((item) => item.id === id && hasDownloadNotice(item));
+  });
   const settings = computed(() => settingsFor(state.value.settings));
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
@@ -517,6 +522,12 @@ export const useBrowser = defineStore("browser", () => {
   function closeDownloads() {
     downloadsOpen.value = false;
   }
+  function showDownloadNotice(id: string) {
+    downloadNoticeIds.value = [id, ...downloadNoticeIds.value.filter((queued) => queued !== id)];
+  }
+  function dismissDownloadNotice() {
+    downloadNoticeIds.value = downloadNoticeIds.value.slice(1);
+  }
   /** Runs a panel action; the standalone preview mutates its own list so the
    * panel stays usable without the native host. */
   function downloadAction(action: string, id?: string) {
@@ -662,7 +673,14 @@ export const useBrowser = defineStore("browser", () => {
       asleep.value = { ...asleep.value, [e.id]: e.asleep };
     if (e.type === "sleepState" && Array.isArray(e.ids))
       asleep.value = Object.fromEntries(e.ids.map((id) => [id, true]));
-    if (e.type === "downloads" && e.items) downloads.value = e.items;
+    if (e.type === "downloads" && e.items) {
+      downloads.value = e.items;
+      if ((!native || popupWindow) && (downloadNoticeIds.value.length || e.blockedIds?.length)) {
+        const eligible = new Set(e.items.filter(hasDownloadNotice).map((item) => item.id));
+        downloadNoticeIds.value = [...new Set([...downloadNoticeIds.value, ...(e.blockedIds ?? [])])]
+          .filter((id) => eligible.has(id));
+      }
+    }
     if (e.type === "downloadStarted" && e.id && !popupWindow) {
       toggleDownloads(true);
       downloadsFocus.value = e.id;
@@ -806,6 +824,9 @@ export const useBrowser = defineStore("browser", () => {
     downloadsOpen,
     downloadsAnchor,
     downloadsFocus,
+    downloadNotice,
+    showDownloadNotice,
+    dismissDownloadNotice,
     activeDownloads,
     toggleDownloads,
     closeDownloads,
