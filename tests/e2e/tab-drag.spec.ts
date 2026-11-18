@@ -1,5 +1,6 @@
 import { expect, test, type JSHandle, type Page } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
+import { browserMenuTrigger } from "./browser-menu";
 
 const rows = (page: Page) => page.locator('[aria-label="标签页"] .tab-row');
 const row = (page: Page, id: string) => page.locator(`.tab-list [data-tab-id="${id}"]`);
@@ -98,6 +99,27 @@ test("crossing the fixed area opens one gap, leaving removes it and dropping con
   await expect(rows(page)).toHaveCount(3);
   await row(page, "alpha").dispatchEvent("dragend", { dataTransfer: transfer });
   await expect(page.locator(".tab-drag-item, .tab-drag-source, .tab-drag-gap")).toHaveCount(0);
+});
+
+test("holding a dragged tab over the browser menu reveals workspace drop targets", async ({ page }) => {
+  await setup(page);
+  const from = (await row(page, "alpha").boundingBox())!;
+  const trigger = browserMenuTrigger(page);
+  const to = (await trigger.boundingBox())!;
+  await page.mouse.move(from.x + 40, from.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2);
+  const work = page.getByRole("menuitem", { name: "工作区 Work", exact: true });
+  await expect(work).toBeVisible();
+  const target = (await work.boundingBox())!;
+  await page.mouse.move(target.x + 40, target.y + target.height / 2, { steps: 8 });
+  await page.mouse.move(target.x + 40, target.y + target.height / 2);
+  await page.mouse.up();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(row(page, "alpha")).toHaveCount(0);
+  await page.keyboard.press("Control+2");
+  await expect(row(page, "alpha")).toBeVisible();
 });
 
 test("reduced motion keeps the insertion preview without moving neighbouring rows", async ({ page }) => {

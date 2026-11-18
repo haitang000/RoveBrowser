@@ -1,4 +1,4 @@
-/* Shared anchored bubble motion: downloads and Reader appearance settings. */
+/* Shared motion for anchored menus and panels. */
 .bubble-enter-active { transition: opacity 260ms ease; }
 .bubble-leave-active { transition: opacity 180ms ease; pointer-events: none; }
 .bubble-enter-active .bubble-surface { transition: transform 260ms cubic-bezier(.16, 1.6, .3, 1); }

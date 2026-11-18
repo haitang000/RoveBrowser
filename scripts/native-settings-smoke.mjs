@@ -125,7 +125,9 @@ try {
   await send({ type: "settingsOpen", pane: "privacy" });
   await ui.locator(".settings-page").waitFor();
   const id = (await state()).activeTab;
-  await ui.getByRole("button", { name: "设置", exact: true }).click();
+  const popup = await waitFor(() => ui.context().pages().find(p => p.url().endsWith('?popup')), 'popup renderer');
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '设置', exact: true }).click();
   assert.equal(
     (await state()).tabs.filter((t) => t.url.startsWith("rove://settings"))
       .length,

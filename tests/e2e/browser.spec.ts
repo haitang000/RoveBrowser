@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { test, expect } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -61,11 +62,9 @@ test("command keyboard navigation, close and restore", async ({ page }) => {
   await expect(field).toHaveCount(0);
 });
 test("spaces, dark mode, pinning and split container", async ({ page }) => {
-  await page.getByRole("button", { name: "工作区 Work", exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 Work");
   await expect(page.locator('.sidebar-header .space-name')).toHaveText('Work');
-  await page
-    .getByRole("button", { name: "工作区 Personal", exact: true })
-    .click();
+  await chooseBrowserMenuItem(page, "工作区 Personal");
   // Coming back restores Personal's New Tab page, so select the pinned web page
   // the split needs explicitly instead of relying on the first tab.
   await page.getByRole("tab", { name: "GitHub" }).click();
@@ -88,7 +87,7 @@ test("spaces, dark mode, pinning and split container", async ({ page }) => {
   await page.getByRole("button", { name: "关闭分屏" }).click();
   await expect(page.locator(".page-pane")).toHaveCount(1);
   await expect(page.locator(".titlebar")).toBeVisible();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator(".browser-shell")).toHaveCSS(

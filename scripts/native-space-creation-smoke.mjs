@@ -74,7 +74,7 @@ async function close() {
   await browser?.close(); browser = undefined;
 }
 async function openFromMenu() {
-  await ui.getByRole('button', { name: '新建', exact: true }).click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
   await popup.getByRole('menuitem', { name: '新建 Space', exact: true }).click();
   await ui.getByRole('heading', { name: '创建 Space', exact: true }).waitFor();
 }
@@ -88,15 +88,27 @@ try {
   const before = await state();
   const visibleBefore = await visibleWebviews();
 
-  await ui.getByRole('button', { name: '新建', exact: true }).click();
-  await expect(popup.getByRole('menuitem')).toHaveText(['新建 Space', '新建分屏', '新建标签页']);
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  const menu = popup.getByRole('menu', { name: '浏览器菜单', exact: true });
+  await expect(menu.getByRole('group', { name: '新建' }).getByRole('menuitem')).toHaveCount(3);
+  await expect(menu.getByRole('menuitem', { name: '下载', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: '设置', exact: true })).toBeVisible();
   await expect(ui.getByRole('menu')).toHaveCount(0);
-  await popup.locator('.creation-menu').screenshot({ path: join(output, 'creation-menu.png') });
+  await menu.screenshot({ path: join(output, 'browser-menu.png') });
   await popup.mouse.click(500, 192);
   await expect(popup.getByRole('menu')).toHaveCount(0);
   await waitFor(() => source.evaluate(() => document.visibilityState === 'visible'), 'source remains visible after menu');
-  checks.push('加号使用原生浮层显示菜单，没有创建文件夹；点击网页区域可关闭菜单');
+  checks.push('浏览器菜单使用原生浮层显示，包含新建、下载、设置与工作区；点击网页区域可关闭菜单');
   console.log(checks.at(-1));
+
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await menu.getByRole('menuitem', { name: '下载', exact: true }).click();
+  const downloads = popup.getByRole('dialog', { name: '下载', exact: true });
+  await expect(downloads).toBeVisible();
+  await expect(menu).toHaveCount(0);
+  await popup.keyboard.press('Escape');
+  await expect(downloads).toHaveCount(0);
+  checks.push('聚合菜单中的下载入口可打开原生下载弹窗，Esc 可关闭弹窗');
 
   await openFromMenu();
   assert.equal(await visibleWebviews(), visibleBefore - 1, 'creation hides the real website HWND');
@@ -156,10 +168,12 @@ try {
   assert.equal(created.icon, '📖');
   assert.equal(typeof created.hue, 'number');
   assert.equal(typeof created.hue2, 'number');
-  await ui.getByRole('button', { name: '工作区 Personal', exact: true }).click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '工作区 Personal', exact: true }).click();
   await waitFor(() => source.evaluate(() => document.visibilityState === 'visible'), 'source visible after switching back');
   await expect(ui.locator('.sidebar-header .space-name')).toHaveText('Personal');
-  await ui.getByRole('button', { name: '工作区 原生研究空间', exact: true }).click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '工作区 原生研究空间', exact: true }).click();
   await expect(ui.locator('.sidebar-header .space-name')).toHaveText('📖原生研究空间');
   await waitFor(async () => (await state()).activeSpace === created.id, 'new Space selected before exit');
   checks.push('命令面板的新 Space 也进入创建页；名称、图标和主题经原生 IPC 创建且自动切换');

@@ -1,5 +1,4 @@
 /* Rounded, anchored downloads surface, shared with the native popup layer. */
-.downloads-button { position: relative; }
 .downloads-badge {
   position: absolute;
   top: -1px;
@@ -20,27 +19,32 @@
   inset: 0;
   z-index: 130;
 }
+.anchored-bubble {
+  border-radius: 20px;
+  background: var(--surface);
+  filter: drop-shadow(0 12px 18px var(--panel-shadow)) drop-shadow(0 2px 4px var(--shadow));
+  transform-origin: var(--bubble-tip) calc(100% + 10px);
+}
+.anchored-bubble::after {
+  content: "";
+  position: absolute;
+  /* Sink the pointer into the rounded corner so the panel casts one shadow. */
+  z-index: -1;
+  top: calc(100% - 10px);
+  left: calc(var(--bubble-tip) - 14px);
+  width: 28px;
+  height: 20px;
+  background: var(--surface);
+  clip-path: path("M 4 0 H 28 V 10 H 26 Q 23 10 21 12.5 L 15.2 18 Q 14 19.3 12.8 18 L 8.5 13 C 7.1 11.2 6.6 7.2 5 6 C 3.5 4.9 3.5 2 4 0 Z");
+  pointer-events: none;
+}
 .downloads-panel {
   position: absolute;
   display: flex;
   flex-direction: column;
   padding: 10px;
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: 0 12px 36px var(--panel-shadow), 0 2px 8px var(--shadow);
-  transform-origin: var(--downloads-tip) calc(100% + 10px);
   outline: none;
   user-select: none;
-}
-.downloads-panel::after {
-  content: "";
-  position: absolute;
-  top: calc(100% - 1px);
-  left: calc(var(--downloads-tip) - 11px);
-  width: 22px;
-  height: 12px;
-  background: var(--surface);
-  clip-path: polygon(0 0, 100% 0, 60% 90%, 55% 98%, 45% 98%, 40% 90%);
 }
 .downloads-header {
   display: flex;

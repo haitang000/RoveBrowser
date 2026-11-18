@@ -14,7 +14,7 @@ import ReaderControls from "./ReaderControls.vue";
 import StatusToast from "./StatusToast.vue";
 import ActionToast from "./ActionToast.vue";
 import DownloadsPanel from "./DownloadsPanel.vue";
-import CreationMenu from "./CreationMenu.vue";
+import BrowserMenu from "./BrowserMenu.vue";
 import QuitDialog from "./QuitDialog.vue";
 import { browserKey } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
@@ -40,7 +40,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const modals = ".quit-scrim, .download-security-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer";
+  const modals = ".quit-scrim, .download-security-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer";
   const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer`);
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
@@ -57,7 +57,7 @@ function report() {
     return surfaceRegion(bounds, element.classList.contains("reader-options-layer") ? 24 : shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout });
-  const active = b.quitOpen ? "quit" : b.downloadNotice ? "downloadSecurity" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.creationMenu ? "creation" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
+  const active = b.quitOpen ? "quit" : b.downloadNotice ? "downloadSecurity" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
   const focus = Boolean(active && active !== focusKey);
   focusKey = active;
   if (next !== last || focus) {
@@ -65,7 +65,7 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus });
   }
   if (focus) {
-    const selector = active === "quit" ? ".quit-dialog" : active === "downloadSecurity" ? ".download-security-dialog button[autofocus]" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "creation" ? ".creation-menu button:not(:disabled)" : ".context-menu input, .context-menu button";
+    const selector = active === "quit" ? ".quit-dialog" : active === "downloadSecurity" ? ".download-security-dialog button[autofocus]" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : ".context-menu input, .context-menu button";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }
@@ -93,7 +93,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
-  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><CreationMenu v-if="b.creationMenu" /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
+  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><BrowserMenu /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
   <ReaderControls />
   <QuitDialog v-if="b.quitOpen" />
 </template>

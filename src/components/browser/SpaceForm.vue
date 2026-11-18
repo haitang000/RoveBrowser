@@ -39,7 +39,7 @@ function toggleTheme() {
   }
 }
 function key(event: KeyboardEvent) {
-  if (event.defaultPrevented || event.key !== "Escape" || event.isComposing || b.creationMenu) return;
+  if (event.defaultPrevented || event.key !== "Escape" || event.isComposing || b.browserMenuOpen) return;
   event.preventDefault();
   event.stopPropagation();
   if (themeOpen.value) closeTheme(true);

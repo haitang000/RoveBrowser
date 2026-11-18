@@ -22,7 +22,7 @@ import { coverage, isSeeThrough } from "./lib/page-frame";
 import { frameOf, lookOf } from "./lib/space-look";
 import { resizeAppearance } from "./lib/resize-appearance";
 import DownloadsPanel from "./components/browser/DownloadsPanel.vue";
-import CreationMenu from "./components/browser/CreationMenu.vue";
+import BrowserMenu from "./components/browser/BrowserMenu.vue";
 import { shareSnapshot } from "./lib/state-snapshot";
 import { useChromeTransition } from "./lib/chrome-transition";
 const b = useBrowser();
@@ -225,7 +225,7 @@ onBeforeUnmount(() => {
         <Icon name="sidebar" /></button
       ><PageArea ref="pageArea"><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
     </div>
-    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><CreationMenu v-if="!b.native && b.creationMenu" /><TabPreview />
+    <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><BrowserMenu v-if="!b.native" /><TabPreview />
     <ErrorToast v-if="!b.native" /><DownloadsPanel v-if="!b.native" />
     </template>
     <QuitDialog v-if="!b.native && b.quitOpen" />

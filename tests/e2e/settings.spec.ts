@@ -1,9 +1,10 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/favicon.ico", (route) => route.abort());
   await page.goto("/");
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
 });
 
 test("settings are a reusable tab with searchable sections and live preferences", async ({
@@ -52,7 +53,7 @@ test("settings are a reusable tab with searchable sections and live preferences"
   await expect(
     page.getByRole("tab", { name: "设置", exact: true }),
   ).toHaveAttribute("title", "rove://settings/privacy");
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await expect(
     page.getByRole("tab", { name: "设置", exact: true }),
   ).toHaveCount(1);
@@ -243,7 +244,7 @@ test("sidebar Space editor uses the shared form and preserves the theme on renam
   await expect(themeButton).toBeFocused();
   await dialog.getByRole("button", { name: "完成", exact: true }).click();
   await expect(page.locator(".page-area")).not.toHaveAttribute("inert");
-  await page.getByRole("button", { name: "工作区 Personal", exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 Personal");
   await field.fill("研究空间");
   await themeButton.click();
   await expect(clear).toHaveValue("0.7");

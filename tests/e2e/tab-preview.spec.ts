@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { test, expect } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
 
@@ -77,9 +78,11 @@ test("unloaded favorites remain unloaded; snapshots update while a split is prev
 test("preview stays inside a narrow viewport and works with reduced motion and dark theme", async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 400 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await page.getByRole('combobox', { name: '外观', exact: true }).selectOption('dark');
   await page.keyboard.press('Control+w');
+  await expect(page.locator(".settings-page")).toHaveCount(0);
+  await page.mouse.move(460, 30);
   await page.locator('.pinned-tabs [data-bookmark-id="pin-wiki"]').hover();
   await expect(page.locator(preview)).toBeVisible();
   const rect = await page.locator(preview).boundingBox();

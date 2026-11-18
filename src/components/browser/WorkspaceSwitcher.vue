@@ -1,101 +1,81 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
-import SpaceGlyph from "../common/SpaceGlyph.vue";
+import BrowserMenu from "./BrowserMenu.vue";
+
 const b = useBrowser();
-const downloadButton = ref<HTMLElement>();
-function toggleCreationMenu(event: MouseEvent) {
-  if (b.creationMenu) { b.creationMenu = undefined; return; }
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+const trigger = ref<HTMLButtonElement>();
+// Keep the drag source and drop targets in the shell WebView on Windows.
+const dragMenuOpen = ref(false);
+
+function syncAnchor() {
+  const rect = trigger.value?.getBoundingClientRect();
+  if (!rect) return;
+  const { x, y, width, height } = rect;
+  const anchor = b.browserMenuAnchor;
+  if (anchor && x === anchor.x && y === anchor.y && width === anchor.width && height === anchor.height) return;
+  b.browserMenuAnchor = { x, y, width, height };
+}
+function toggleMenu() {
+  if (b.browserMenuOpen) { b.browserMenuOpen = false; return; }
+  syncAnchor();
   b.commandOpen = false;
   b.settingsOpen = false;
   b.deskOpen = false;
   b.contextMenu = undefined;
   b.closeSpaceEditor();
   b.closeDownloads();
-  b.creationMenu = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  b.browserMenuOpen = true;
 }
+function openDropMenu(event: DragEvent) {
+  if (!b.dragging || !event.dataTransfer?.types.includes("text/era-tab")) return;
+  event.preventDefault();
+  if (dragMenuOpen.value) return;
+  syncAnchor();
+  dragMenuOpen.value = true;
+}
+
 let observer: ResizeObserver;
-function syncAnchor() {
-  const rect = downloadButton.value?.getBoundingClientRect();
-  if (rect) b.downloadsAnchor = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-}
-watch(() => [b.downloadsOpen, b.state.sidebarCollapsed, b.state.sidebarWidth], async () => { await nextTick(); syncAnchor(); });
+watch(() => b.dragging, (dragging) => { if (!dragging) dragMenuOpen.value = false; });
+watch(() => [b.downloadsOpen, b.state.sidebarCollapsed, b.state.sidebarWidth], syncAnchor, { flush: "post" });
 onMounted(() => {
   observer = new ResizeObserver(syncAnchor);
-  if (downloadButton.value?.parentElement) observer.observe(downloadButton.value.parentElement);
+  if (trigger.value?.parentElement) observer.observe(trigger.value.parentElement);
   window.addEventListener("resize", syncAnchor);
   syncAnchor();
 });
-onBeforeUnmount(() => { observer?.disconnect(); window.removeEventListener("resize", syncAnchor); });
-defineProps<{ swipeShares?: Record<string, number> | null }>();
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  window.removeEventListener("resize", syncAnchor);
+});
 </script>
+
 <template>
   <footer class="workspace-switcher">
     <button
-      class="icon-button"
-      :title="b.shortcutTitle('设置', 'settings')"
-      aria-label="设置"
-      @click="b.openSettings()"
-    ><Icon name="settings" :size="14" /></button>
+      ref="trigger"
+      class="icon-button browser-menu-trigger"
+      :class="{ active: b.browserMenuOpen || dragMenuOpen || b.downloadsOpen || b.activeDownloads }"
+      :title="b.activeDownloads ? `浏览器菜单 · ${b.activeDownloads} 个下载进行中` : '浏览器菜单'"
+      aria-label="浏览器菜单"
+      :aria-description="b.activeDownloads ? `${b.activeDownloads} 个下载进行中` : undefined"
+      aria-haspopup="menu"
+      :aria-expanded="b.browserMenuOpen || dragMenuOpen"
+      :aria-controls="dragMenuOpen ? 'browser-menu-drop-targets' : 'browser-menu'"
+      @click="toggleMenu"
+      @keydown.down.prevent="!b.browserMenuOpen && toggleMenu()"
+      @dragover="openDropMenu"
+    >
+      <Icon name="more" :size="15" />
+      <span v-if="b.activeDownloads" class="downloads-badge" aria-hidden="true">{{ b.activeDownloads }}</span>
+    </button>
     <button
       class="icon-button"
       :title="b.shortcutTitle('全部标签页', 'desk')"
       aria-label="全部标签页"
       @click="b.deskOpen = true"
-    >
-      <Icon name="grid" :size="14" />
-    </button>
-    <button
-      class="icon-button downloads-button"
-      ref="downloadButton"
-      :class="{ active: b.activeDownloads > 0 || b.downloadsOpen }"
-      :title="b.activeDownloads ? `下载 · ${b.activeDownloads} 个进行中 (Ctrl+J)` : '下载 (Ctrl+J)'"
-      aria-label="下载"
-      aria-haspopup="dialog"
-      :aria-expanded="b.downloadsOpen"
-      aria-controls="downloads-panel"
-      @click="b.toggleDownloads()"
-    >
-      <Icon name="download" :size="14" />
-      <span v-if="b.activeDownloads" class="downloads-badge">{{ b.activeDownloads }}</span>
-    </button>
-    <div class="space-keys" :class="{ 'space-keys-tracking': swipeShares }" aria-label="工作区" title="在侧栏左右轻扫切换工作区">
-      <button
-        v-for="(s, i) in b.state.spaces"
-        :key="s.id"
-        class="space-key"
-        :class="{ current: s.id === b.state.activeSpace }"
-        :style="swipeShares ? { '--space-share': swipeShares[s.id] || 0 } : undefined"
-        :title="s.name"
-        :aria-label="`工作区 ${s.name}`"
-        :aria-pressed="s.id === b.state.activeSpace"
-        @click="s.id === b.state.activeSpace ? b.toggleSpaceEditor(s.id) : b.send({ type: 'space', id: s.id })"
-        @dragover.prevent
-        @drop.prevent="
-          b.send({
-            type: 'move',
-            id: $event.dataTransfer?.getData('text/era-tab'),
-            spaceId: s.id,
-          });
-          b.dragging = false;
-        "
-      >
-        <SpaceGlyph v-if="s.icon" :icon="s.icon" :size="12" /><span v-else>{{ i + 1 }}</span>
-      </button>
-    </div>
-    <button
-      class="icon-button creation-trigger"
-      :class="{ active: b.creationMenu }"
-      title="新建"
-      aria-label="新建"
-      aria-haspopup="menu"
-      :aria-expanded="Boolean(b.creationMenu)"
-      aria-controls="creation-menu"
-      @click="toggleCreationMenu"
-    >
-      <Icon :name="b.creationMenu ? 'close' : 'plus'" :size="14" />
-    </button>
+    ><Icon name="grid" :size="14" /></button>
+    <BrowserMenu drop-targets-only :drop-menu-open="dragMenuOpen" />
   </footer>
 </template>

@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { test, expect, type Page } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
 
@@ -42,7 +43,7 @@ test('context editing and tab promotion work without the manager', async ({ page
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   const edited = page.locator('.favorites').getByRole('button', { name: '我的百科', exact: true });
   await expect(edited).toBeVisible();
-  await page.getByRole('button', { name: '工作区 Work', exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 Work");
   await edited.click();
   await expect(edited).toHaveClass(/chosen/);
   await expect(page.locator('.sidebar-header .space-name')).toHaveText('Work');

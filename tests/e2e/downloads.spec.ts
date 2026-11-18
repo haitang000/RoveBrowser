@@ -1,3 +1,4 @@
+import { browserMenuTrigger, chooseBrowserMenuItem, openBrowserMenu } from "./browser-menu";
 import { expect, test } from "@playwright/test";
 import type { DownloadItem } from "../../src/lib/types";
 
@@ -45,7 +46,12 @@ test.beforeEach(async ({ page }) => {
 test("downloads panel opens from the sidebar and lists every state", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: "下载" }).click();
+  await expect(browserMenuTrigger(page)).toHaveAccessibleDescription("1 个下载进行中");
+  const menu = await openBrowserMenu(page);
+  const entry = menu.getByRole("menuitem", { name: "下载", exact: true });
+  await expect(entry).toHaveAccessibleDescription("1 个进行中");
+  await entry.click();
+  await expect(menu).toHaveCount(0);
   const panel = page.getByRole("dialog", { name: "下载" });
   await expect(panel).toBeVisible();
   await expect(panel).toHaveCSS("border-top-width", "0px");
@@ -62,7 +68,7 @@ test("downloads panel opens from the sidebar and lists every state", async ({
 });
 
 test("the final bytes and engine completion have distinct states", async ({ page }) => {
-  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   const row = panel.locator(".download-row");
   const pending = download({ received: 999, total: 1000 });
@@ -83,7 +89,7 @@ test("the final bytes and engine completion have distinct states", async ({ page
 test("a pending download can be reviewed and cancelled in the app", async ({ page }) => {
   const pending = download({ filename: "setup.exe", received: 1000, total: 1000 });
   await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }), pending);
-  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   const review = panel.getByRole("button", { name: "查看下载提示", exact: true });
   const notice = page.getByRole("dialog", { name: "正在等待下载结果" });
@@ -119,7 +125,7 @@ test("security blocks automatically show the filename and reason, and remain rev
   await expect(notice).toContainText("被策略阻止");
   await page.keyboard.press("Escape");
   await expect(notice).toHaveCount(0);
-  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   await expect(panel.getByRole("button", { name: "打开文件" })).toHaveCount(0);
   await panel.locator(".download-row", { hasText: "policy.zip" }).getByRole("button", { name: "查看下载提示" }).click();
@@ -143,7 +149,7 @@ test("downloads replace the command panel and the actions menu supports the keyb
 });
 
 test("pause, resume and cancel follow Zigzag's rules", async ({ page }) => {
-  await page.getByRole("button", { name: "下载" }).click();
+  await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   const active = panel.locator(".download-row", { hasText: "movie.mp4" });
   await active.getByTitle("暂停下载").click();
@@ -187,7 +193,7 @@ test("Ctrl+J and Escape toggle the panel, and a new download reveals it", async 
 });
 
 test("Clear keeps the unfinished row and removes the rest", async ({ page }) => {
-  await page.getByRole("button", { name: "下载" }).click();
+  await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   await page.evaluate(() => {
     window.__ERA_RECEIVE__?.({
@@ -228,18 +234,18 @@ test("Clear keeps the unfinished row and removes the rest", async ({ page }) => 
 test("outside clicks close the panel across the page, sidebar and title bar", async ({ page }) => {
   const panel = page.getByRole("dialog", { name: "下载" });
   for (const point of [{ x: 900, y: 400 }, { x: 100, y: 100 }, { x: 600, y: 12 }]) {
-    await page.getByRole("button", { name: "下载", exact: true }).click();
+    await chooseBrowserMenuItem(page, "下载");
     await expect(panel).toBeVisible();
     await panel.getByRole("heading", { name: "下载" }).click();
     await expect(panel).toBeVisible();
     await page.mouse.click(point.x, point.y);
     await expect(panel).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "下载", exact: true })).toHaveAttribute("aria-expanded", "false");
+    await expect(browserMenuTrigger(page)).toHaveAttribute("aria-expanded", "false");
   }
 });
 
 test("search filters filenames and completed rows offer explicit open, reveal and remove actions", async ({ page }) => {
-  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   await panel.getByRole("button", { name: "搜索下载", exact: true }).click();
   const search = panel.getByRole("searchbox", { name: "搜索下载文件" });
@@ -263,7 +269,7 @@ test("long names wrap, history scrolls and the bubble stays anchored on resize",
   await page.evaluate((list) => window.__ERA_RECEIVE__?.({ type: "downloads", items: list }),
     Array.from({ length: 18 }, (_, i) => download({ ...items[1], id: `long-${i}`, filename: `BaiduNetdisk_${"longfilename".repeat(8)}_${i}.exe` })),
   );
-  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   await expect(panel).toBeVisible();
   await panel.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished)));
@@ -278,9 +284,9 @@ test("long names wrap, history scrolls and the bubble stays anchored on resize",
   expect(geometry.right).toBeLessThanOrEqual(800);
   await page.setViewportSize({ width: 1000, height: 760 });
   await expect.poll(async () => panel.evaluate((element) => {
-    const anchor = document.querySelector(".downloads-button")!.getBoundingClientRect();
+    const anchor = document.querySelector(".browser-menu-trigger")!.getBoundingClientRect();
     const box = element.getBoundingClientRect();
-    const tip = parseFloat(getComputedStyle(element).getPropertyValue("--downloads-tip"));
+    const tip = parseFloat(getComputedStyle(element).getPropertyValue("--bubble-tip"));
     return Math.abs(box.x + tip - anchor.x - anchor.width / 2) < 1 && Math.abs(box.bottom + 10 - anchor.y) < 1;
   })).toBe(true);
 });

@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { expect, test } from "@playwright/test";
 
 test("command bar floats over the current page and follows its bounds", async ({ page }) => {
@@ -45,7 +46,7 @@ test("new command stays over the current page and dismisses outside the panel", 
   await entry.click();
   await expect(page.getByRole("combobox")).toBeFocused();
   await expect(page.getByRole("tab", { selected: true })).toHaveAttribute("data-tab-id", selected!);
-  await page.getByRole("button", { name: "工作区 Work", exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 Work");
   await expect(page.getByRole("combobox")).toHaveCount(0);
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("Work");
 });

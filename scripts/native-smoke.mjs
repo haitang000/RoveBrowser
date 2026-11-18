@@ -139,7 +139,8 @@ try{
   await favoriteWeb.waitForSelector('h1');
   await waitFor(()=>ui.locator('.favorite-tile').filter({has:ui.getByRole('button',{name:'我的常用网页',exact:true})}).locator('img').getAttribute('src').then(src=>src?.startsWith('data:image/png;base64,')),'favorite PNG cached');
   await favoriteWeb.evaluate(()=>window.__favoriteMarker='one shared favorite page');
-  await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '工作区 Work', exact: true }).click();
   await waitFor(()=>ui.locator('.sidebar-header .space-name').textContent().then(name=>name==='Work'),'work space selected before favorite');
   await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click();
   assert.equal(await favoriteWeb.evaluate(()=>window.__favoriteMarker),'one shared favorite page');
@@ -147,7 +148,8 @@ try{
   await ui.locator('.favorites').getByRole('button',{name:'我的常用网页',exact:true}).click({button:'middle'});
   await waitFor(()=>Promise.resolve(favoriteWeb.isClosed()),'favorite controller unloaded');
   assert.match(await ui.locator('.favorite-tile').filter({has:ui.getByRole('button',{name:'我的常用网页',exact:true})}).locator('img').getAttribute('src'),/^data:image\/png;base64,/);
-  await ui.getByRole('button',{name:'工作区 Personal',exact:true}).click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '工作区 Personal', exact: true }).click();
   await waitFor(()=>ui.locator('.sidebar-header .space-name').textContent().then(name=>name==='Personal'),'personal space selected before pin');
   await ui.getByRole('tab',{name:'First fixture',exact:false}).click();
   await waitFor(()=>ui.evaluate(url=>window.__nativeSmokeState.tabs.find(t=>t.id===window.__nativeSmokeState.activeTab)?.url===url,base+'/first'),'source tab selected before pin');
@@ -177,7 +179,8 @@ try{
   await web.evaluate(()=>window.__promotionMarker='same controller through all representations');
   await send(ui,{type:'favoriteTab',id:retainedID});
   const promoted=ui.locator('.favorites').getByRole('button',{name:'First fixture',exact:true});await promoted.waitFor();
-  await ui.getByRole('button',{name:'工作区 Work',exact:true}).click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '工作区 Work', exact: true }).click();
   await waitFor(()=>ui.locator('.sidebar-header .space-name').textContent().then(name=>name==='Work'),'work space selected before promoted favorite');
   await promoted.click();
   assert.equal(await web.evaluate(()=>window.__promotionMarker),'same controller through all representations');

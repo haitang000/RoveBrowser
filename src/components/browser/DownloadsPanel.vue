@@ -21,12 +21,12 @@ const clearable = computed(() => clearableDownloads(b.downloads).length);
 const filtered = computed(() => b.downloads.filter((item) => item.filename.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
 const position = computed(() => {
   const width = Math.min(380, viewport.value.width - 24);
-  const anchor = b.downloadsAnchor;
+  const anchor = b.browserMenuAnchor;
   const bottom = Math.max(24, viewport.value.height - (anchor?.y ?? viewport.value.height - 42) + 10);
   return {
     left: "12px", width: `${width}px`, bottom: `${bottom}px`,
     maxHeight: `${Math.max(100, Math.min(520, viewport.value.height - bottom - 40))}px`,
-    "--downloads-tip": `${Math.max(24, Math.min(width - 24, (anchor ? anchor.x + anchor.width / 2 : 88) - 12))}px`,
+    "--bubble-tip": `${Math.max(16, Math.min(width - 24, (anchor ? anchor.x + anchor.width / 2 : 28) - 12))}px`,
   };
 });
 function resize() { viewport.value = { width: innerWidth, height: innerHeight }; }
@@ -55,7 +55,7 @@ async function toggleSearch() {
 function outside(event: PointerEvent) {
   if (!b.downloadsOpen || b.downloadNotice) return;
   const target = event.target as Element | null;
-  if (target && (panel.value?.contains(target) || target.closest(".downloads-button"))) return;
+  if (target && panel.value?.contains(target)) return;
   close();
 }
 onMounted(() => {
@@ -82,7 +82,7 @@ watch(() => b.downloadsFocus, async () => {
   <Transition name="bubble">
     <div v-if="b.downloadsOpen" class="downloads-layer" @pointerdown.self="close">
       <section
-        id="downloads-panel" ref="panel" class="downloads-panel bubble-surface" :style="position"
+        id="downloads-panel" ref="panel" class="downloads-panel anchored-bubble bubble-surface" :style="position"
         role="dialog" aria-label="下载" tabindex="-1"
         @wheel.stop @keydown.esc.stop.prevent="close"
         @pointerdown="panelPointerDown"

@@ -1,8 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
+import { browserMenuTrigger, chooseBrowserMenuItem, openBrowserMenu } from "./browser-menu";
 
 async function openCreation(page: Page) {
-  await page.getByRole("button", { name: "新建", exact: true }).click();
+  await openBrowserMenu(page);
   await page.getByRole("menuitem", { name: "新建 Space", exact: true }).click();
   await expect(page.getByRole("heading", { name: "创建 Space", exact: true })).toBeVisible();
 }
@@ -12,21 +13,26 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("plus opens a keyboard-accessible menu without folders and dismisses outside", async ({ page }) => {
-  const trigger = page.getByRole("button", { name: "新建", exact: true });
-  await trigger.click();
-  const menu = page.getByRole("menu", { name: "新建", exact: true });
-  await expect(menu.getByRole("menuitem")).toHaveText(["新建 Space", "新建分屏", "新建标签页"]);
+test("the footer keeps the tab overview separate and the browser menu supports keyboard and outside dismissal", async ({ page }) => {
+  const trigger = browserMenuTrigger(page);
+  await expect(page.locator(".workspace-switcher").getByRole("button")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "全部标签页" })).toBeVisible();
+  const menu = await openBrowserMenu(page);
+  await expect(menu.getByRole("group", { name: "新建" }).getByRole("menuitem")).toHaveCount(3);
+  await expect(menu.getByRole("menuitem", { name: "下载", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "设置", exact: true })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "新建分屏", exact: true })).toBeDisabled();
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(menu.getByRole("menuitem", { name: "新建标签页", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(menu.getByRole("menuitem", { name: "新建 Space", exact: true })).toBeFocused();
   await page.keyboard.press("ArrowDown");
-  await expect(menu.getByRole("menuitem", { name: "新建标签页", exact: true })).toBeFocused();
+  await expect(menu.getByRole("menuitem", { name: "下载", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await trigger.click();
-  await page.locator(".creation-menu-scrim").click({ position: { x: 450, y: 80 } });
+  await page.mouse.click(450, 80);
   await expect(menu).toHaveCount(0);
   await trigger.click();
   const bounds = (await trigger.boundingBox())!;
@@ -34,12 +40,28 @@ test("plus opens a keyboard-accessible menu without folders and dismisses outsid
   await expect(menu).toHaveCount(0);
 });
 
+test("the browser menu uses the download bubble curve and honors reduced motion", async ({ page }) => {
+  const openingMotion = await page.evaluate(async () => {
+    document.querySelector<HTMLButtonElement>(".browser-menu-trigger")!.click();
+    await Promise.resolve();
+    const menu = document.querySelector(".browser-menu")!;
+    const style = getComputedStyle(menu);
+    return { timing: style.transitionTimingFunction, duration: style.transitionDuration };
+  });
+  expect(openingMotion).toEqual({ timing: "cubic-bezier(0.16, 1.6, 0.3, 1)", duration: "0.26s" });
+  await page.keyboard.press("Escape");
+  const menu = page.getByRole("menu", { name: "浏览器菜单", exact: true });
+  await expect(menu).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openBrowserMenu(page);
+  await expect(menu).toHaveCSS("transform", "none");
+});
+
 test("creation owns a separate page, validates the name and cancels without changes", async ({ page }) => {
   await page.getByRole("tab", { name: "Wikipedia", exact: true }).click();
   const oldColor = await page.locator("html").getAttribute("data-color");
   const oldTabs = await page.getByRole("tab").count();
   await openCreation(page);
-  await expect(page.locator(".space-key")).toHaveCount(3);
   await expect(page.locator(".space-form")).toHaveCount(1);
   await expect(page.getByRole("dialog", { name: "工作区与外观" })).toHaveCount(0);
   await expect(page.locator(".page-area")).toHaveAttribute("inert", "");
@@ -59,7 +81,6 @@ test("creation owns a separate page, validates the name and cancels without chan
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.locator(".space-form")).toHaveCount(0);
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("Personal");
-  await expect(page.locator(".space-key")).toHaveCount(3);
   await expect(page.locator("html")).toHaveAttribute("data-color", oldColor!);
   await expect(page.getByRole("tab", { name: "Wikipedia", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab")).toHaveCount(oldTabs);
@@ -76,26 +97,27 @@ test("creates and activates one Space with its name, icon and draft theme", asyn
   await page.getByRole("button", { name: "关闭主题", exact: true }).click();
   await page.getByRole("button", { name: "创建 Space", exact: true }).click();
   await expect(page.locator(".space-form")).toHaveCount(0);
-  await expect(page.locator(".space-key")).toHaveCount(4);
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("📖研究空间");
-  await expect(page.getByRole("button", { name: "工作区 研究空间", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".browser-shell")).toHaveAttribute("style", previewFrame!);
   await expect(page.locator(".page-area")).not.toHaveAttribute("inert");
   await expect(page.getByRole("tab", { name: "New Tab", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "工作区 Personal", exact: true }).click();
+  const menu = await openBrowserMenu(page);
+  await expect(menu.getByRole("group", { name: "工作区", exact: true }).getByRole("menuitem")).toHaveCount(4);
+  await expect(menu.getByRole("menuitem", { name: "工作区 研究空间", exact: true })).toHaveAttribute("aria-current", "true");
+  await menu.getByRole("menuitem", { name: "工作区 Personal", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-color", "sky");
-  await page.getByRole("button", { name: "工作区 研究空间", exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 研究空间");
   await expect(page.locator(".browser-shell")).toHaveAttribute("style", previewFrame!);
 });
 
 test("new tab and split menu actions use the existing browser flows", async ({ page }) => {
-  await page.getByRole("button", { name: "新建", exact: true }).click();
+  await openBrowserMenu(page);
   await page.getByRole("menuitem", { name: "新建标签页", exact: true }).click();
   await expect(page.getByRole("combobox")).toBeFocused();
   await page.keyboard.press("Escape");
   await page.getByRole("tab", { name: "GitHub", exact: true }).click();
   await page.getByRole("tab", { name: "Wikipedia", exact: true }).click();
-  await page.getByRole("button", { name: "新建", exact: true }).click();
+  await openBrowserMenu(page);
   await expect(page.getByRole("menuitem", { name: "新建分屏", exact: true })).toBeEnabled();
   await page.getByRole("menuitem", { name: "新建分屏", exact: true }).click();
   await expect(page.locator(".page-pane")).toHaveCount(2);
@@ -105,16 +127,14 @@ test("command action opens the creation page and Enter submits the name", async 
   await page.keyboard.press("Control+t");
   await page.getByRole("combobox").fill("new space");
   await page.keyboard.press("Enter");
-  await expect(page.locator(".space-key")).toHaveCount(3);
   await expect(page.locator(".space-form")).toBeVisible();
   await page.getByRole("textbox", { name: "工作区名称", exact: true }).fill("写作");
   await page.keyboard.press("Enter");
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("写作");
-  await expect(page.locator(".space-key")).toHaveCount(4);
 });
 
 test("creation and theme editor fit narrow, short and dark windows", async ({ page }) => {
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await page.keyboard.press("Control+w");
   await openCreation(page);
@@ -141,7 +161,7 @@ test("Space limit disables only the creation menu item", async ({ page }) => {
   state.spaces = Array.from({ length: 16 }, (_, i) => ({ id: `space-${i}`, name: `Space ${i}`, color: "sky" }));
   state.activeSpace = "space-0";
   await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
-  await page.getByRole("button", { name: "新建", exact: true }).click();
+  await openBrowserMenu(page);
   await expect(page.getByRole("menuitem", { name: "新建 Space", exact: true })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: "新建标签页", exact: true })).toBeEnabled();
 });

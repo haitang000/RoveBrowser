@@ -76,7 +76,9 @@ try {
   await forward(['--',`${base}/warm`]);
   await waitFor(async()=>(await state()).tabs.some(t=>t.url===`${base}/warm`),'warm external URL');
   checks.push('Warm link launch and shortcut activation exit without creating another profile owner');
-  await ui.getByRole('button',{name:'设置',exact:true}).click();
+  const popup = await waitFor(() => ui.context().pages().find(p => p.url().endsWith('?popup')), 'popup renderer');
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '设置', exact: true }).click();
   await ui.getByRole('button',{name:'设为默认浏览器',exact:true}).click();
   await waitFor(()=>ui.evaluate(()=>!!window.__defaultTest.status),'default status');
   const registration = (await run('reg.exe',['query',`HKCU\\${registry}\\Software\\Classes\\RoveURL\\shell\\open\\command`,'/ve'],{windowsHide:true})).stdout;

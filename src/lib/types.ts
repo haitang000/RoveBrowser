@@ -19,7 +19,7 @@ export interface Space {
   angle?: number;
   /** 0 is smooth. Absent means smooth. */
   grain?: number;
-  /** One emoji. Absent: the switcher shows its number. */
+  /** One emoji. Absent: the menu shows a workspace icon. */
   icon?: string;
   /** The tab this space was showing when the user left it; restored on switch back. */
   activeTab?: string;

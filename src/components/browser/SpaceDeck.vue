@@ -8,7 +8,7 @@ import type { Tab } from "../../lib/types";
 import SpaceList from "./SpaceList.vue";
 
 const props = defineProps<{ blocked: boolean }>();
-const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab]; progress: [shares: Record<string, number> | null] }>();
+const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser(), viewport = ref<HTMLElement>(), track = ref<HTMLElement>();
 const center = ref(b.state.activeSpace), width = ref(240), offset = ref(0);
 const panes = ref([{ id: center.value, slot: 0 }]);
@@ -43,7 +43,6 @@ async function settle(from: number, velocity?: number, switching = false) {
   const ticket = ++generation;
   settling.value = true;
   offset.value = 0;
-  emit("progress", null);
   if (reduced.value && !switching) {
     panes.value = [{ id: center.value, slot: 0 }];
     settling.value = false;
@@ -104,12 +103,6 @@ function neighbors() {
   panes.value = b.state.spaces.slice(Math.max(0, index.value - 1), index.value + 2)
     .map((s) => ({ id: s.id, slot: b.state.spaces.indexOf(s) - index.value }));
 }
-function updateProgress() {
-  if (reduced.value) return;
-  const share = Math.min(Math.abs(offset.value) / width.value, 1);
-  const neighbor = b.state.spaces[index.value + (offset.value > 0 ? -1 : 1)];
-  emit("progress", { [center.value]: 1 - share, ...(neighbor ? { [neighbor.id]: share } : {}) });
-}
 function finish(cancelled = false) {
   clearRelease();
   if (phase !== "tracking") return;
@@ -132,8 +125,6 @@ function begin() { phase = "deciding"; accumX = 0; accumY = 0; samples = []; cle
 
 function wheel(event: WheelEvent) {
   if (props.blocked || b.state.sidebarCollapsed || event.ctrlKey || event.metaKey || event.altKey) { cancel(); return; }
-  const keys = (event.target as Element).closest(".space-keys");
-  if (keys && keys.scrollWidth > keys.clientWidth) return;
   const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? width.value : 1;
   // DOM deltas describe scrolling; NSEvent deltas describe the list's movement.
   const dx = -(event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX) * unit;
@@ -183,7 +174,6 @@ function wheel(event: WheelEvent) {
   event.preventDefault();
   const pulled = swipeOffset(travel, geometry());
   offset.value = reduced.value ? 0 : pulled;
-  updateProgress();
   const direction = swipeLanding(pulled, swipeVelocity(samples, now), width.value);
   // Coasting releases both a successful swipe and a spring home. At the edges
   // there is no target space; its inertia must not keep stretching the list.
@@ -198,7 +188,7 @@ function wheel(event: WheelEvent) {
 
 function reset() {
   clearRelease(); interrupt(); phase = "idle"; tracking.value = false;
-  offset.value = 0; panes.value = [{ id: center.value, slot: 0 }]; emit("progress", null);
+  offset.value = 0; panes.value = [{ id: center.value, slot: 0 }];
 }
 function motionChanged() { systemReduced.value = motion.matches; reset(); }
 watch(() => b.settings.reduceMotion, reset);

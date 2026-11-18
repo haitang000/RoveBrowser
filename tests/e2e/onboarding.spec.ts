@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { expect, test } from "@playwright/test";
 
 async function reachSites(page: import("@playwright/test").Page) {
@@ -111,7 +112,7 @@ test("space editor and search choices persist through reload and completion", as
   await expect(page.locator(".favorites .favorite-tile")).toHaveCount(8);
   await page.reload();
   await expect(page.locator(".onboarding")).toHaveCount(0);
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await expect(page.getByRole("combobox", { name: "搜索引擎", exact: true })).toHaveValue("bing");
   // Embedded behavior must not change the same editor's normal popover mode.
   await page.locator(".sidebar-header .space-name").click();
@@ -139,7 +140,7 @@ test("skip discards uncommitted picks and small windows keep actions reachable",
 
 test("existing sessions reopen the welcome without losing tabs or custom search", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await page.getByRole("combobox", { name: "搜索引擎", exact: true }).selectOption("baidu");
   const originalTabs = await page.getByRole("tab").count();
@@ -155,6 +156,6 @@ test("existing sessions reopen the welcome without losing tabs or custom search"
   await page.getByRole("button", { name: "开始浏览", exact: true }).click();
   await expect(page.getByRole("tab")).toHaveCount(originalTabs);
   await expect(page.locator(".favorites .favorite-tile")).toHaveCount(8);
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await expect(page.getByRole("combobox", { name: "搜索引擎", exact: true })).toHaveValue("baidu");
 });

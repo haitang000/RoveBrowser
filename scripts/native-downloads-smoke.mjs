@@ -201,14 +201,16 @@ try {
   // after the leave transition; CDP input alone cannot prove native hit testing.
   await realKeys('click-page');
   await waitFor(async () => (await panel().count()) === 0, 'native page click closes panel');
-  await ui.locator('.downloads-button').click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
   await panel().waitFor();
-  await waitFor(() => ui.locator('.downloads-button').getAttribute('aria-expanded').then((value) => value === 'true'), 'shared open state');
+  await waitFor(() => ui.locator('.browser-menu-trigger').evaluate(element => element.classList.contains('active')), 'shared open state');
   checks.push('真实系统鼠标点击网页关闭浮窗，侧栏按钮与原生浮层开关状态同步');
   for (const [x, y] of [[0.08, 0.25], [0.4, 0.03]]) {
     await realKeys('click-page', x, y);
     await waitFor(async () => (await panel().count()) === 0, 'native sidebar/title click closes panel');
-    await ui.locator('.downloads-button').click();
+    await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+    await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
     await panel().waitFor();
   }
   checks.push('真实系统鼠标点击侧栏与标题栏空白也能关闭浮窗');
@@ -330,7 +332,8 @@ try {
   await waitFor(async () => (await items()).some((entry) => entry.state === 'finished'), 'download before restart');
   await stop();
   await launch();
-  await ui.locator('.downloads-button').click();
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
   await panel().waitFor();
   await waitFor(async () =>
     (await rows().count()) === 1 &&

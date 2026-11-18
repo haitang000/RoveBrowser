@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { expect, test } from "@playwright/test";
 
 test("default browser status distinguishes partial associations and invokes the native settings action", async ({ page }) => {
@@ -25,7 +26,7 @@ test("default browser status distinguishes partial associations and invokes the 
 
 test("standalone preview explains that default-browser changes need the desktop app", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await expect(page.getByRole("button", { name: "设为默认浏览器", exact: true })).toBeDisabled();
   await expect(page.getByText("请在 Rove 桌面版中设置默认浏览器。").first()).toBeVisible();
 });

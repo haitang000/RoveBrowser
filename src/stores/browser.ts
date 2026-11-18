@@ -70,7 +70,8 @@ export const useBrowser = defineStore("browser", () => {
     commandTabId = ref<string | null>(null),
     deskOpen = ref(false),
     settingsOpen = ref(false),
-    creationMenu = ref<Rect>(),
+    browserMenuOpen = ref(false),
+    browserMenuAnchor = ref<Rect>(),
     spaceCreation = ref<LookFields & { name: string; icon?: string }>(),
     spaceEditor = ref<string>(),
     spacePreview = ref<{ id: string; look: LookFields }>(),
@@ -92,7 +93,6 @@ export const useBrowser = defineStore("browser", () => {
     undoAvailable = ref(false),
     downloads = ref<DownloadItem[]>([]),
     downloadsOpen = ref(false),
-    downloadsAnchor = ref<Rect>(),
     downloadsFocus = ref<string | undefined>(undefined),
     downloadNoticeIds = ref<string[]>([]),
     /** Clock for tab fading and the Clear button's stale check. */
@@ -190,7 +190,7 @@ export const useBrowser = defineStore("browser", () => {
     spacePreview.value = { id, look };
   }
   function closeSpaceCreation() {
-    creationMenu.value = undefined;
+    browserMenuOpen.value = false;
     spaceCreation.value = undefined;
   }
   function openSpaceCreation() {
@@ -202,7 +202,7 @@ export const useBrowser = defineStore("browser", () => {
     deskOpen.value = false;
     settingsOpen.value = false;
     contextMenu.value = undefined;
-    creationMenu.value = undefined;
+    browserMenuOpen.value = false;
     closeSpaceEditor();
     closeDownloads();
     closeFind();
@@ -216,7 +216,10 @@ export const useBrowser = defineStore("browser", () => {
     closeSpaceCreation();
   });
   watch(() => state.value.sidebarCollapsed, (collapsed) => {
-    if (collapsed) closeSpaceEditor();
+    if (collapsed) {
+      closeSpaceEditor();
+      browserMenuOpen.value = false;
+    }
   });
   watch([commandOpen, deskOpen, settingsOpen], ([command, desk, settings]) => {
     if ((command || desk || settings) && spaceEditor.value) closeSpaceEditor();
@@ -235,7 +238,7 @@ export const useBrowser = defineStore("browser", () => {
       commandOpen.value ||
       deskOpen.value ||
       settingsOpen.value ||
-      Boolean(creationMenu.value) ||
+      browserMenuOpen.value ||
       spaceFormOpen.value ||
       Boolean(contextMenu.value) ||
       dragging.value,
@@ -720,11 +723,11 @@ export const useBrowser = defineStore("browser", () => {
   // Only transient UI state crosses the trusted popup bridge. Each renderer keeps
   // its own DOM; native browser state continues to come from the host.
   let receivingPopup = false;
-  watch([commandOpen, deskOpen, settingsOpen, contextMenu, spaceEditor, creationMenu, spaceCreation], (surfaces) => {
+  watch([commandOpen, deskOpen, settingsOpen, contextMenu, spaceEditor, browserMenuOpen, spaceCreation], (surfaces) => {
     if (surfaces.some(Boolean)) closeDownloads();
   });
   watch(() => peek.value?.id, (id) => { if (id) closeDownloads(); });
-  const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, creationMenu, spaceCreation, spaceEditor, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, downloadsFocus, downloadsAnchor };
+  const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, browserMenuOpen, browserMenuAnchor, spaceCreation, spaceEditor, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, downloadsFocus };
   function receivePopup(patch: Record<string, unknown>) {
     receivingPopup = true;
     for (const [key, value] of Object.entries(patch)) {
@@ -822,7 +825,6 @@ export const useBrowser = defineStore("browser", () => {
     undoBatch,
     downloads,
     downloadsOpen,
-    downloadsAnchor,
     downloadsFocus,
     downloadNotice,
     showDownloadNotice,
@@ -846,7 +848,8 @@ export const useBrowser = defineStore("browser", () => {
     commandTabId,
     deskOpen,
     settingsOpen,
-    creationMenu,
+    browserMenuOpen,
+    browserMenuAnchor,
     spaceCreation,
     spaceFormOpen,
     openSpaceCreation,

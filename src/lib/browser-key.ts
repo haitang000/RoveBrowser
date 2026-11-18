@@ -4,6 +4,11 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing) return;
   if (b.quitOpen || b.downloadNotice) return;
   if (b.onboardingOpen) return;
+  if (e.key === "Escape" && b.browserMenuOpen) {
+    e.preventDefault();
+    b.browserMenuOpen = false;
+    return;
+  }
   if (e.key === "Escape" && b.downloadsOpen) {
     e.preventDefault();
     b.closeDownloads();

@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem } from "./browser-menu";
 import { expect, test } from "@playwright/test";
 test.use({ timezoneId: "America/New_York" });
 
@@ -102,7 +103,7 @@ test("home and discover adapt to narrow panes and dark appearance", async ({ pag
     expect(await page.locator(".new-tab-page").evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false);
     await page.getByRole("button", { name: "完成编辑", exact: true }).click();
   }
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await chooseBrowserMenuItem(page, "设置");
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await page.keyboard.press("Control+w");
   await expect(page.locator(".new-tab-page")).toHaveCSS("background-color", "rgb(30, 30, 32)");

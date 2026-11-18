@@ -18,7 +18,6 @@ const splitAddress = computed(() => isSettingsUrl(b.active?.url) ? "设置" : ho
 const sidebar = ref<HTMLElement>();
 const tabDrag = provideTabDrag(sidebar);
 const spaceDeck = ref<InstanceType<typeof SpaceDeck>>();
-const swipeShares = ref<Record<string, number> | null>(null);
 function showMenu(e: MouseEvent, tab: Tab) {
   b.contextMenu = {
     x: Math.min(e.clientX, innerWidth - 220),
@@ -52,8 +51,8 @@ function showMenu(e: MouseEvent, tab: Tab) {
       </h1>
     </div>
     <Favorites />
-    <SpaceDeck ref="spaceDeck" :blocked="b.overlay || Boolean(b.peek) || Boolean(b.contextMenu)" @menu="showMenu" @progress="swipeShares = $event" />
+    <SpaceDeck ref="spaceDeck" :blocked="b.overlay || Boolean(b.peek) || Boolean(b.contextMenu)" @menu="showMenu" />
     </template>
-    <WorkspaceSwitcher :swipe-shares="swipeShares" /><TabMenu v-if="!b.native" />
+    <WorkspaceSwitcher /><TabMenu v-if="!b.native" />
   </aside>
 </template>

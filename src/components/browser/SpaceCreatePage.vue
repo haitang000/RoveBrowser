@@ -13,7 +13,7 @@ function preview(look: LookFields) {
 }
 function cancel() {
   b.closeSpaceCreation();
-  void nextTick(() => document.querySelector<HTMLElement>(".creation-trigger")?.focus());
+  void nextTick(() => document.querySelector<HTMLElement>(".browser-menu-trigger")?.focus());
 }
 function create() {
   const draft = b.spaceCreation;

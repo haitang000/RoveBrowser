@@ -1,3 +1,4 @@
+import { chooseBrowserMenuItem, openBrowserMenu } from "./browser-menu";
 import { expect, test, type Page } from "@playwright/test";
 import { initialState } from "../../src/lib/preview";
 
@@ -41,13 +42,11 @@ test("a real horizontal wheel gesture tracks the neighboring list and lands once
     return { offset: new DOMMatrixReadOnly(getComputedStyle(track).transform).m41,
       name: document.querySelector('.sidebar-header .space-name')!.textContent,
       inert: incoming.hasAttribute("inert"), hidden: incoming.getAttribute("aria-hidden"),
-      x: incoming.getBoundingClientRect().x,
-      share: getComputedStyle(document.querySelector('.space-key[title="Work"]')!).getPropertyValue("--space-share") };
+      x: incoming.getBoundingClientRect().x };
   });
-  expect(shown).toEqual({ offset: -100, name: "Personal", inert: true, hidden: "true", x: 146, share: String(100 / 240) });
+  expect(shown).toEqual({ offset: -100, name: "Personal", inert: true, hidden: "true", x: 146 });
   await expect(currentName(page)).toHaveText("Work");
   await expect(page.locator("html")).toHaveAttribute("data-color", "sage");
-  await expect(page.locator('.space-key[title="Work"]')).toHaveAttribute("aria-pressed", "true");
   // Descending packets in one turn are consumed even after the switch.
   await packets(page, [50, 30, 15, 5]);
   await settled(page);
@@ -166,8 +165,12 @@ test("exposing a whole neighbor commits immediately and consumes the remaining d
 });
 
 test("small drags spring home; an easy flick lands and a reversed flick cancels", async ({ page }) => {
-  await wheel(page, 30);
-  await expect.poll(() => offset(page)).toBe(-30);
+  const pulled = await page.locator(".sidebar").evaluate(async sidebar => {
+    sidebar.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    return new DOMMatrixReadOnly(getComputedStyle(sidebar.querySelector(".space-track")!).transform).m41;
+  });
+  expect(pulled).toBe(-30);
   await settled(page);
   await expect(currentName(page)).toHaveText("Personal");
   await page.waitForTimeout(260);
@@ -198,7 +201,7 @@ test("first and last spaces rubber band without wrapping; notched wheels switch 
   expect(await offset(page)).toBeLessThan(120);
   await settled(page);
   await expect(currentName(page)).toHaveText("Personal");
-  await page.getByRole("button", { name: "工作区 Studio", exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 Studio");
   await settled(page);
   await page.waitForTimeout(260);
   await wheel(page, 300);
@@ -231,7 +234,7 @@ test("new input picks up a settling list from its presentation position", async 
 });
 
 test("click/keyboard switches slide by a sidebar width and background colors retarget continuously", async ({ page }) => {
-  await page.getByRole("button", { name: "工作区 Work", exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 Work");
   await page.locator(".space-track").evaluate(async (e) => {
     const animation = e.getAnimations()[0]!;
     animation.pause(); await animation.ready; animation.currentTime = 80;
@@ -256,7 +259,7 @@ test("click/keyboard switches slide by a sidebar width and background colors ret
   await expect(page.locator(".browser-shell")).toHaveCSS("background-color", "rgb(232, 221, 253)");
 });
 
-test("space scroll positions survive switches; overflowed space keys retain scrolling", async ({ page }) => {
+test("space scroll positions survive switches and the browser menu scrolls through long workspace lists", async ({ page }) => {
   const state = initialState();
   for (let i = 0; i < 40; i++) state.tabs.push({ id: `extra-${i}`, spaceId: "personal", title: `Extra ${i}`, url: "https://example.com", pinned: false });
   for (let i = 0; i < 15; i++) state.spaces.push({ id: `space-${i}`, name: `Space ${i}`, color: "sky" });
@@ -267,7 +270,16 @@ test("space scroll positions survive switches; overflowed space keys retain scro
   await page.keyboard.press("Control+1");
   await settled(page);
   expect(await page.locator('[data-space-id="personal"]').evaluate((e) => e.scrollTop)).toBe(350);
-  expect(await wheel(page, 120, 0, 0, ".space-keys")).toBe(false);
+  await page.setViewportSize({ width: 800, height: 420 });
+  const menu = await openBrowserMenu(page);
+  const bounds = (await menu.boundingBox())!;
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press("End");
+  const last = menu.getByRole("menuitem", { name: "工作区 Space 14", exact: true });
+  await expect(last).toBeFocused();
+  await expect(last).toBeInViewport();
+  await expect(menu.getByRole("menuitem", { name: "工作区 Personal", exact: true })).toHaveAttribute("aria-current", "true");
+  expect(await wheel(page, 120, 0, 0, ".browser-menu-scroll")).toBe(false);
   await expect(currentName(page)).toHaveText("Personal");
 });
 
@@ -325,7 +337,7 @@ test("same-color native state broadcasts leave the background animation alone", 
     await new Promise(requestAnimationFrame);
   }, state);
   expect(await page.locator(".browser-shell").evaluate((e) => e.getAnimations().length)).toBe(0);
-  await page.getByRole("button", { name: "工作区 Work", exact: true }).click();
+  await chooseBrowserMenuItem(page, "工作区 Work");
   await page.locator(".browser-shell").evaluate(async (e) => {
     const animation = e.getAnimations()[0]!;
     animation.pause(); await animation.ready; animation.currentTime = 70;
