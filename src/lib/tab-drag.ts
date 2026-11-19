@@ -79,6 +79,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
     const rect = row.getBoundingClientRect();
     item = row.cloneNode(true) as HTMLElement;
     item.className = "tab-row tab-drag-item";
+    if (row.classList.contains("tab-row-split")) item.classList.add("tab-row-split");
     for (const attribute of [...item.attributes]) {
       if (attribute.name !== "class") item.removeAttribute(attribute.name);
     }
@@ -171,6 +172,8 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
     }
   }
   function visibilityChanged() { if (document.hidden) reset(); }
+  // A drop on the page can merge the source row into a split before dragend.
+  watch(() => b.dragging, (dragging) => { if (!dragging && !pending && state.value) reset(); });
   watch(() => b.state.tabs, () => { if (pending) reset(); });
   watch([() => b.state.activeSpace, () => b.state.sidebarCollapsed], reset);
   onMounted(() => {

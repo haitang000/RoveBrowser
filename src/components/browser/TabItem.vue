@@ -1,86 +1,112 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useBrowser } from "../../stores/browser";
 import type { Tab } from "../../lib/types";
-import Favicon from "../common/Favicon.vue";
-import Icon from "../common/Icon.vue";
-import { computed } from "vue";
 import { samePinnedUrl } from "../../lib/bookmarks";
 import { isSettingsUrl } from "../../lib/settings";
 import { tabDisplayTitle, tabFreshness } from "../../lib/tab-meta";
-const props = defineProps<{ tab: Tab; doomed?: boolean }>();
+import Favicon from "../common/Favicon.vue";
+import Icon from "../common/Icon.vue";
+
+const props = defineProps<{ tab: Tab; panes?: [Tab, Tab]; doomedIds?: string[] }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser();
-const selected = computed(() => b.state.activeTab === props.tab.id);
+const primary = computed(() => props.panes?.[0] ?? props.tab);
 const previewed = computed(() => b.previewTarget === (props.tab.bookmarkId || props.tab.id));
-const playing = computed(() => Boolean(b.audio[props.tab.id]));
-const asleep = computed(() => Boolean(b.asleep[props.tab.id]));
-const muted = computed(() => Boolean(props.tab.muted));
-const title = computed(() => tabDisplayTitle(props.tab));
-/** Zigzag TabSleep: the hover card and the row explain why the page gave its memory back. */
-const sleepNote = "已休眠以节省内存";
-const rowTitle = computed(() =>
-  asleep.value ? `${sleepNote} · ${props.tab.url}` : props.tab.url,
-);
-// Zigzag's aging: freshly used tabs stay full, days-old tabs rest at 42%. The
-// Clear button previews what it would close by sinking those rows further.
-const fade = computed(() =>
-  props.doomed ? 0.18 : tabFreshness(props.tab.lastActivated, b.now),
-);
-function toggleMute() {
-  b.toggleMute(props.tab);
-}
+const labels = computed(() => (props.panes ?? [props.tab]).map((tab) => {
+  const sleeping = Boolean(b.asleep[tab.id]);
+  return {
+    tab,
+    title: tabDisplayTitle(tab),
+    tooltip: sleeping ? `已休眠以节省内存 · ${tab.url}` : tab.url,
+    sleeping,
+    audio: Boolean(b.audio[tab.id] || tab.muted),
+    doomed: props.doomedIds?.includes(tab.id),
+    fade: tabFreshness(tab.lastActivated, b.now),
+  };
+}));
+const selected = computed(() => labels.value.some(({ tab }) => tab.id === b.state.activeTab));
+const sleeping = computed(() => labels.value.some((label) => label.sleeping));
+const title = computed(() => labels.value.map((label) => label.title).join(" / "));
+const rowTitle = computed(() => props.panes
+  ? labels.value.map((label) => `${label.title} · ${label.tooltip}`).join("\n")
+  : labels.value[0].tooltip);
 const away = computed(() => {
-  if (!props.tab.bookmarkId || props.tab.unloaded) return false;
-  const f = b.savedBookmarks.get(props.tab.bookmarkId);
-  return Boolean(f && !samePinnedUrl(f.url, props.tab.url));
+  const { bookmarkId, unloaded, url } = primary.value;
+  const bookmark = bookmarkId && b.savedBookmarks.get(bookmarkId);
+  return Boolean(bookmark && !unloaded && !samePinnedUrl(bookmark.url, url));
 });
-function close() {
-  b.send(away.value ? { type: "bookmarkReset", id: props.tab.bookmarkId } : props.tab.bookmarkId ? { type: "bookmarkUnload", id: props.tab.bookmarkId } : { type: "close", id: props.tab.id });
+const closeLabel = computed(() => away.value ? "返回固定网址" : primary.value.bookmarkId ? "卸载" : "关闭");
+function unload(tab: Tab) {
+  b.send(tab.bookmarkId ? { type: "bookmarkUnload", id: tab.bookmarkId } : { type: "close", id: tab.id });
 }
-function activate() { b.send({ type: props.tab.bookmarkId ? "bookmarkOpen" : "activate", id: props.tab.bookmarkId || props.tab.id }); }
-function unload() { b.send(props.tab.bookmarkId ? { type: "bookmarkUnload", id: props.tab.bookmarkId } : { type: "close", id: props.tab.id }); }
+function close() {
+  if (away.value) b.send({ type: "bookmarkReset", id: primary.value.bookmarkId });
+  else unload(primary.value);
+}
+function activate() {
+  const tab = primary.value;
+  if (tab.bookmarkId && (!props.panes || tab.unloaded)) b.send({ type: "bookmarkOpen", id: tab.bookmarkId });
+  else b.send({ type: "activate", id: tab.id });
+}
 </script>
+
 <template>
   <div
     class="tab-row"
     :data-tab-id="tab.id"
     :data-bookmark-id="tab.bookmarkId"
-    :data-sleeping="asleep || undefined"
-    :class="{ selected, loading: tab.loading, unloaded: tab.unloaded, doomed, sleeping: asleep }"
+    :data-sleeping="sleeping || undefined"
+    :class="{
+      selected,
+      'tab-row-split': panes,
+      unloaded: primary.unloaded,
+      sleeping,
+      doomed: labels.every((label) => label.doomed),
+    }"
     role="tab"
-    :aria-label="title"
+    :aria-label="panes ? `分屏：${title}` : title"
     :aria-selected="selected"
     :tabindex="selected ? 0 : -1"
     :title="previewed ? undefined : rowTitle"
     :aria-describedby="previewed ? 'tab-hover-preview' : undefined"
-    :style="{ '--tab-freshness': fade }"
     draggable="true"
     @mousedown.middle.prevent
-    @auxclick.middle.prevent.stop="unload"
+    @auxclick.middle.prevent.stop="unload(primary)"
     @click="activate"
-    @keydown.enter="activate"
-    @contextmenu.prevent="emit('menu', $event, tab)"
+    @keydown.enter.self.prevent="activate"
+    @contextmenu.prevent="emit('menu', $event, primary)"
   >
-    <span class="tab-picture"
-      ><Icon v-if="tab.splitWith" name="split" /><Icon v-else-if="isSettingsUrl(tab.url)" name="settings" /><Favicon
-        v-else
-        :url="tab.url"
-        :favicon="tab.favicon" /></span
-    ><span class="tab-title">{{ title }}</span
-    ><button
-      v-if="playing || muted"
-      class="tab-audio"
-      :class="{ muted }"
-      :aria-label="muted ? `取消静音 ${title}` : `静音 ${title}`"
-      :title="muted ? '取消静音标签页' : '静音标签页'"
-      @click.stop="toggleMute"
+    <span
+      v-for="label in labels"
+      :key="label.tab.bookmarkId || label.tab.id"
+      class="tab-label"
+      :class="{ sleeping: label.sleeping, loading: label.tab.loading, unloaded: label.tab.unloaded, doomed: label.doomed }"
+      :style="{ '--tab-freshness': label.fade }"
+      @auxclick.middle.prevent.stop="unload(label.tab)"
+      @contextmenu.prevent.stop="emit('menu', $event, label.tab)"
     >
-      <Icon :name="muted ? 'speakerMuted' : 'speaker'" :size="12" />
-    </button><button
+      <span class="tab-picture">
+        <Icon v-if="isSettingsUrl(label.tab.url)" name="settings" />
+        <Favicon v-else :url="label.tab.url" :favicon="label.tab.favicon" />
+      </span>
+      <span class="tab-title">{{ label.title }}</span>
+      <button
+        v-if="label.audio"
+        class="tab-audio"
+        :class="{ muted: label.tab.muted }"
+        :aria-label="`${label.tab.muted ? '取消静音' : '静音'} ${label.title}`"
+        :title="label.tab.muted ? '取消静音标签页' : '静音标签页'"
+        @click.stop="b.toggleMute(label.tab)"
+      >
+        <Icon :name="label.tab.muted ? 'speakerMuted' : 'speaker'" :size="12" />
+      </button>
+    </span>
+    <button
       class="tab-close"
-      :aria-label="`${away ? '返回固定网址' : tab.pinned ? '卸载' : '关闭'} ${title}`"
-      :title="away ? '返回固定网址' : tab.pinned ? '卸载网页（保留固定项）' : '关闭标签页'"
-      :disabled="tab.unloaded"
+      :aria-label="`${closeLabel} ${tabDisplayTitle(primary)}`"
+      :title="away ? closeLabel : primary.bookmarkId ? '卸载网页（保留固定项）' : `关闭 ${tabDisplayTitle(primary)}`"
+      :disabled="primary.unloaded"
       @click.stop="close"
     >
       <Icon :name="away ? 'back' : 'close'" :size="11" />

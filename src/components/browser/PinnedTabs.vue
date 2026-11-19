@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { useBrowser } from "../../stores/browser";
 import TabList from "./TabList.vue";
 import type { Tab } from "../../lib/types";
-const b = useBrowser();
-defineProps<{ tabs?: Tab[]; spaceId?: string }>();
+import type { TabRow } from "../../lib/tab-rows";
+defineProps<{ rows: TabRow[]; doomedIds?: string[] }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 </script>
 <template>
   <TabList
     class="pinned-tabs"
-    :tabs="tabs ?? b.pinnedTabs"
+    :rows="rows"
+    :doomed-ids="doomedIds"
     aria-label="固定标签页"
     @menu="(e, t) => emit('menu', e, t)"
   />

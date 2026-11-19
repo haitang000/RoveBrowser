@@ -88,6 +88,10 @@ try {
   await tabDropInput('drag-tab');
   await ui.locator('.split-divider').waitFor({ timeout: 5000 });
   await ui.locator('.split-drop-target').waitFor({ state: 'detached' });
+  const splitTab = ui.getByRole('tab', { name: '分屏：Left split fixture / Right split fixture', selected: true });
+  await splitTab.waitFor();
+  assert.equal(await splitTab.locator('.tab-close').count(), 1);
+  assert.equal(await ui.locator('.tab-list').getByRole('tab', { name: 'Right split fixture', exact: true }).count(), 0);
   assert.equal(await left.evaluate(() => window.tabDropMarker), marker, 'dragging keeps the live page document');
   const widths = await ui.locator('.webview-slot').evaluateAll(slots => slots.map(slot => slot.getBoundingClientRect().width));
   await waitFor(async () => {

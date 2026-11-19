@@ -33,6 +33,56 @@ async function finishMotion(page: Page) {
   await expect(page.locator(".tab-enter-active, .tab-leave-active, .tab-move")).toHaveCount(0);
 }
 
+test("a split occupies one sidebar row and reopens both panes from either title", async ({ page }) => {
+  await setup(page);
+  const tabs = page.getByRole("tablist", { name: "标签页", exact: true });
+  await tabs.getByRole("tab", { name: "gamma" }).click();
+  await tabs.getByRole("tab", { name: "alpha" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "在当前网页旁分屏" }).click();
+
+  const split = tabs.getByRole("tab", { name: "分屏：gamma / alpha" });
+  await expect(tabs.getByRole("tab")).toHaveCount(3);
+  await expect(split).toHaveAttribute("aria-selected", "true");
+  await expect(split.locator(".tab-label")).toHaveText(["gamma", "alpha"]);
+  await expect(split.locator(".tab-picture")).toHaveCount(2);
+  await expect(split.locator(".tab-close")).toHaveCount(1);
+
+  await tabs.getByRole("tab", { name: "beta" }).click();
+  await expect(split).toHaveAttribute("aria-selected", "false");
+  await expect(page.locator(".split-divider")).toHaveCount(0);
+  await split.getByText("alpha", { exact: true }).click();
+  await expect(split).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".split-divider")).toBeVisible();
+
+  await split.getByText("alpha", { exact: true }).click({ button: "right" });
+  await expect(page.getByRole("menu").locator(".menu-tab-title")).toHaveText("alpha");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "关闭分屏", exact: true }).click();
+  await expect(tabs.getByRole("tab", { name: "alpha" })).toBeVisible();
+  await expect(tabs.getByRole("tab", { name: "gamma" })).toBeVisible();
+});
+
+test("a saved split uses one pinned row while unloaded and when reopened", async ({ page }) => {
+  const state = initialState();
+  const pins = state.pins!;
+  pins[0].splitWith = pins[1].id;
+  pins[1].splitWith = pins[0].id;
+  state.tabs = state.tabs.filter((tab) => !tab.pinned);
+  await page.goto("/");
+  await page.evaluate((state) => window.__ERA_RECEIVE__?.({ type: "state", state }), state);
+
+  const pinned = page.getByRole("tablist", { name: "固定标签页" });
+  const row = pinned.getByRole("tab", { name: "分屏：GitHub / Wikipedia" });
+  await expect(pinned.getByRole("tab")).toHaveCount(1);
+  await expect(row).toHaveClass(/unloaded/);
+  await row.click();
+  await expect(page.locator(".split-divider")).toBeVisible();
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  await row.getByRole("button", { name: "卸载 GitHub" }).click();
+  await expect(row).toHaveClass(/unloaded/);
+  await expect(pinned.getByRole("tab")).toHaveCount(1);
+});
+
 test("middle click closes regular and pinned background tabs without activating them", async ({ page }) => {
   await setup(page);
   for (const id of ["beta", "wiki"]) {

@@ -3,17 +3,19 @@ import type { Tab } from "../../lib/types";
 import TabItem from "./TabItem.vue";
 import { computed, ref } from "vue";
 import { useTabDrag } from "../../lib/tab-drag";
+import type { TabRow } from "../../lib/tab-rows";
 
-const props = defineProps<{ tabs: Tab[]; doomedIds?: string[] }>();
+const props = defineProps<{ rows: TabRow[]; doomedIds?: string[] }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const group = ref<{ $el: HTMLElement }>();
 const drag = useTabDrag();
 const keyOf = (tab: Tab) => tab.bookmarkId || tab.id;
+const tabs = computed(() => props.rows.map(({ tab }) => tab));
 const sourceHere = computed(() => drag?.state.value?.source === group.value?.$el);
 const sourceAway = computed(() => sourceHere.value && drag?.state.value?.target && drag.state.value.target !== group.value?.$el);
 const entries = computed(() => {
   const state = drag?.state.value;
-  const rows: { key: string; tab?: Tab }[] = props.tabs.map((tab) => ({ key: keyOf(tab), tab }));
+  const rows: { key: string; row?: TabRow }[] = props.rows.map((row) => ({ key: keyOf(row.tab), row }));
   if (!state || state.target !== group.value?.$el) return rows;
   const source = rows.findIndex((row) => row.key === state.key);
   const moving = source >= 0 ? rows.splice(source, 1)[0]! : { key: "tab-drag-gap" };
@@ -48,13 +50,13 @@ function beforeLeave(element: Element) {
   >
     <template v-for="entry in entries" :key="entry.key">
       <TabItem
-        v-if="entry.tab"
-        :tab="entry.tab"
+        v-if="entry.row"
+        v-bind="entry.row"
         :class="{
           'tab-drag-source': sourceHere && entry.key === drag?.state.value?.key && (drag.state.value.dragging || sourceAway),
           'tab-drag-away': sourceAway && entry.key === drag?.state.value?.key,
         }"
-        :doomed="doomedIds?.includes(entry.tab.id)"
+        :doomed-ids="doomedIds"
         @menu="(event, tab) => emit('menu', event, tab)"
       />
       <div v-else class="tab-drag-gap" aria-hidden="true" />

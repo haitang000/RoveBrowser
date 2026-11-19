@@ -476,7 +476,7 @@ kbd {
 .favorite-loaded::after { content: ""; position: absolute; bottom: 3px; width: 3px; height: 3px; border-radius: 50%; background: var(--quiet); }
 .favorites .favorite-close { position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; opacity: 0; background: var(--selected); }
 .favorite-tile:hover .favorite-close, .favorite-tile:focus-within .favorite-close { opacity: 1; }
-.tab-row.unloaded .tab-picture { opacity: 0.55; }
+.tab-label.unloaded .tab-picture { opacity: 0.55; }
 .context-menu { max-height: calc(100dvh - 48px); overflow-y: auto; }
 .bookmark-menu-form { display: grid; gap: 10px; padding: 6px; }
 .bookmark-menu-form label { display: grid; gap: 5px; font-size: 12px; }
@@ -585,6 +585,20 @@ kbd {
 .tab-row.selected:hover {
   background: var(--selected-hover);
 }
+.tab-label {
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: inherit;
+}
+.tab-row-split {
+  gap: 5px;
+}
+.tab-row-split .tab-label + .tab-label {
+  border-inline-start: 1px solid var(--edge);
+  padding-inline-start: 5px;
+}
 .tab-picture {
   width: 16px;
   height: 16px;
@@ -594,10 +608,10 @@ kbd {
 }
 /* Zigzag TabSleep: a thin, even dashed ring round the icon of a page that gave
  * its memory back. The row also says why in its tooltip and hover card. */
-.tab-row.sleeping .tab-picture {
+.tab-label.sleeping .tab-picture {
   position: relative;
 }
-.tab-row.sleeping .tab-picture::after {
+.tab-label.sleeping .tab-picture::after {
   content: "";
   position: absolute;
   inset: -2.5px;
@@ -639,8 +653,8 @@ kbd {
 .tab-row:not(:hover):not(.selected):not(:focus-within) .tab-title {
   opacity: var(--tab-freshness, 1);
 }
-.tab-row.doomed .tab-picture,
-.tab-row.doomed .tab-title {
+.tab-label.doomed .tab-picture,
+.tab-label.doomed .tab-title {
   opacity: 0.18;
 }
 /* Zigzag's speaker on a tab that is playing sound or muted (SidebarRows.audio). */

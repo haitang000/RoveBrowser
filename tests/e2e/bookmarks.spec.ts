@@ -91,6 +91,7 @@ test("a saved split reopens a closed half and unloads together from its sidebar 
   await expect(group.locator('.tab-close:disabled')).toHaveCount(0);
   await expect(page.locator('.page-pane')).toHaveCount(2);
   await group.first().click({ button: 'middle' });
-  await expect(group.locator('.tab-close:disabled')).toHaveCount(2);
+  await expect(group.locator('.tab-close:disabled')).toHaveCount(1);
+  await expect(group.locator('.tab-label.unloaded')).toHaveCount(2);
   await expect(page.locator('.page-pane')).toHaveCount(1);
 });

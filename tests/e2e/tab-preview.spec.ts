@@ -64,7 +64,7 @@ test("unloaded favorites remain unloaded; snapshots update while a split is prev
   await page.locator(`[data-tab-id="${ids[0]}"]`).click({ button: "right" });
   await page.getByRole("menuitem", { name: "在当前网页旁分屏", exact: true }).click();
   await page.locator('[data-tab-id="start"]').click();
-  await page.locator(`[data-tab-id="${ids[0]}"]`).hover();
+  await page.locator(`[data-tab-id="${ids[1]}"]`).hover();
   await expect(page.locator(`${preview} .tab-preview-caption`)).toHaveCount(2);
   await expect(page.locator(`${preview} .tab-preview-empty`)).toHaveCount(2);
   await page.evaluate((ids) => {
