@@ -872,14 +872,28 @@ kbd {
   .pane-header .icon-button { width: 20px; }
 }
 .split-divider {
+  position: relative;
   width: var(--split-gap, 8px);
-  background: transparent;
   cursor: col-resize;
   flex-shrink: 0;
   touch-action: none;
 }
-.split-divider:hover {
+.split-divider:focus-visible {
+  outline: none;
+}
+.split-divider::after {
+  content: "";
+  position: absolute;
+  inset: 8px 0;
+  width: 2px;
+  margin-inline: auto;
+  border-radius: 1px;
   background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+}
+.split-divider:is(:hover, :focus-visible, .is-hovered, .is-dragging)::after {
+  opacity: 1;
 }
 .preview-page {
   height: 100%;

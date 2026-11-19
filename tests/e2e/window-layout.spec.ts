@@ -627,14 +627,27 @@ test("native split feedback updates the shell without sending a resize back whil
   state.activeTab = "github";
   state.tabs.find(t => t.id === "github")!.splitWith = "wiki";
   await nativeShell(page, state);
+  const divider = page.getByRole('separator', { name: '调整分屏比例' });
+  const guideOpacity = () => divider.evaluate(node => getComputedStyle(node, '::after').opacity);
+  await expect.poll(guideOpacity).toBe('0');
+  await divider.hover();
+  await expect.poll(guideOpacity).toBe('1');
+  await page.mouse.move(0, 0);
+  await expect.poll(guideOpacity).toBe('0');
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitHover', visible: true }));
+  await expect.poll(guideOpacity).toBe('1');
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitHover', visible: false }));
+  await expect.poll(guideOpacity).toBe('0');
   await page.evaluate(() => {
     window.__windowTest.layoutCount = 0;
     window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: true });
   });
-  await expect(page.getByRole('separator', { name: '调整分屏比例' })).toHaveAttribute('aria-valuenow', '60');
+  await expect(divider).toHaveAttribute('aria-valuenow', '60');
+  await expect.poll(guideOpacity).toBe('1');
   await expect(page.locator('.page-area')).toHaveCSS('border-radius', '0px');
   expect(await page.evaluate(() => window.__windowTest.layoutCount)).toBe(0);
   await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: false }));
+  await expect.poll(guideOpacity).toBe('0');
   await expect(page.locator('.page-area')).toHaveCSS('border-radius', '8px');
   await expect.poll(() => page.evaluate(() => window.__windowTest.layoutCount)).toBe(1);
   await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: true }));

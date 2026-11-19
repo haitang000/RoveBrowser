@@ -30,6 +30,7 @@ export const useBrowser = defineStore("browser", () => {
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
   const splitResize = ref<{ ratio: number; resizing: boolean }>();
+  const splitHovered = ref(false);
   const sidebarResize = ref<{ width: number; resizing: boolean; reset: boolean }>();
   const sidebarResizing = ref(false);
   const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
@@ -570,6 +571,7 @@ export const useBrowser = defineStore("browser", () => {
       sidebarResize.value = { width: e.width, resizing: Boolean(e.resizing), reset: Boolean(e.reset) };
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
       splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
+    if (e.type === "splitHover") splitHovered.value = Boolean(e.visible);
     if (e.type === "tabPreviewPresented" && e.ticket !== undefined) previewPresentedTicket.value = e.ticket;
     if (e.type === "tabPreviewUnavailable" && e.id) previewFailures.value[e.id] = true;
     if (e.type === "tabPreviewHidden" && e.ticket !== undefined) previewHiddenTicket.value = e.ticket;
@@ -767,6 +769,7 @@ export const useBrowser = defineStore("browser", () => {
     contextMenu,
     popupArea,
     splitResize,
+    splitHovered,
     sidebarResize,
     sidebarResizing,
     hoverPreview,

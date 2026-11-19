@@ -14,7 +14,10 @@ use windows::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{BeginPaint, EndPaint, MapWindowPoints, PAINTSTRUCT},
         UI::{
-            Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture},
+            Controls::WM_MOUSELEAVE,
+            Input::KeyboardAndMouse::{
+                GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+            },
             Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
             WindowsAndMessaging::*,
         },
@@ -193,6 +196,8 @@ struct State {
     config: RefCell<Option<Config>>,
     pending: RefCell<Option<Update>>,
     notify: Box<dyn Fn()>,
+    present_hover: Box<dyn Fn(bool)>,
+    hovered: Cell<bool>,
     dragging: Cell<bool>,
     busy: Cell<bool>,
     grab_offset: Cell<f64>,
@@ -201,7 +206,12 @@ pub struct SplitHandle {
     state: Box<State>,
 }
 impl SplitHandle {
-    pub fn new(root: HWND, popup: HWND, notify: impl Fn() + 'static) -> Result<Self> {
+    pub fn new(
+        root: HWND,
+        popup: HWND,
+        notify: impl Fn() + 'static,
+        present_hover: impl Fn(bool) + 'static,
+    ) -> Result<Self> {
         let state = Box::new(State {
             root,
             popup,
@@ -209,12 +219,13 @@ impl SplitHandle {
             config: RefCell::new(None),
             pending: RefCell::new(None),
             notify: Box::new(notify),
+            present_hover: Box::new(present_hover),
+            hovered: Cell::new(false),
             dragging: Cell::new(false),
             busy: Cell::new(false),
             grab_offset: Cell::new(0.),
         });
-        // An invisible native input strip, like Zigzag's NSView ResizeHandle.
-        // It draws no background and never hides or snapshots either page.
+        // The native strip owns pointer input. The shell draws the themed guide.
         let hwnd = unsafe {
             CreateWindowExW(
                 WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
@@ -263,6 +274,7 @@ impl SplitHandle {
         if let Some(config) = self.state.config.borrow().as_ref() {
             place_handle(&self.state, config)?;
         } else {
+            set_hovered(&self.state, false);
             unsafe {
                 let _ = ShowWindow(self.state.hwnd.get(), SW_HIDE);
             }
@@ -284,6 +296,21 @@ impl Drop for SplitHandle {
             let _ = DestroyWindow(self.state.hwnd.get());
         }
     }
+}
+fn set_hovered(s: &State, hovered: bool) {
+    if s.hovered.replace(hovered) == hovered {
+        return;
+    }
+    if hovered {
+        let mut track = TRACKMOUSEEVENT {
+            cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+            dwFlags: TME_LEAVE,
+            hwndTrack: s.hwnd.get(),
+            ..Default::default()
+        };
+        let _ = unsafe { TrackMouseEvent(&mut track) };
+    }
+    (s.present_hover)(hovered);
 }
 fn place_handle(s: &State, config: &Config) -> Result<()> {
     let left = (config.layout.primary.x + config.layout.primary.width) * config.scale;
@@ -377,6 +404,11 @@ fn finish(s: &State) {
         if GetCapture() == s.hwnd.get() {
             let _ = ReleaseCapture();
         }
+        let mut point = POINT::default();
+        set_hovered(
+            s,
+            GetCursorPos(&mut point).is_ok() && WindowFromPoint(point) == s.hwnd.get(),
+        );
     }
     let config = s.config.borrow().clone();
     if let Some(config) = config {
@@ -455,6 +487,14 @@ unsafe extern "system" fn procedure(
             if let Some(scale) = scale {
                 move_to(s, cursor_x(s, lparam, scale));
             }
+            return LRESULT(0);
+        }
+        WM_MOUSEMOVE => {
+            set_hovered(s, true);
+            return LRESULT(0);
+        }
+        WM_MOUSELEAVE => {
+            set_hovered(s, false);
             return LRESULT(0);
         }
         WM_LBUTTONUP => {
@@ -568,7 +608,15 @@ mod tests {
         });
         let notifications = Rc::new(Cell::new(0));
         let count = notifications.clone();
-        let handle = SplitHandle::new(root.0, popup.0, move || count.set(count.get() + 1)).unwrap();
+        let hover_events = Rc::new(RefCell::new(Vec::new()));
+        let events = hover_events.clone();
+        let handle = SplitHandle::new(
+            root.0,
+            popup.0,
+            move || count.set(count.get() + 1),
+            move |hovered| events.borrow_mut().push(hovered),
+        )
+        .unwrap();
         let config = Config {
             id: "active".into(),
             other: "other".into(),
@@ -594,13 +642,15 @@ mod tests {
         };
         handle.configure(Some(config.clone())).unwrap();
         let point = |x: i16| LPARAM((100 << 16) | x as u16 as isize);
+        let hwnd = handle.state.hwnd.get();
         unsafe {
-            SendMessageW(
-                handle.state.hwnd.get(),
-                WM_LBUTTONDOWN,
-                None,
-                Some(point(1)),
-            );
+            SendMessageW(hwnd, WM_MOUSEMOVE, None, Some(point(1)));
+            SendMessageW(hwnd, WM_MOUSEMOVE, None, Some(point(2)));
+            SendMessageW(hwnd, WM_MOUSELEAVE, None, None);
+        }
+        assert_eq!(*hover_events.borrow(), [true, false]);
+        unsafe {
+            SendMessageW(hwnd, WM_LBUTTONDOWN, None, Some(point(1)));
         }
         assert!(handle.dragging());
         assert_eq!(unsafe { GetCapture() }, handle.state.hwnd.get());
@@ -669,7 +719,11 @@ mod tests {
         let final_update = handle.take_update().unwrap();
         assert!(!final_update.resizing);
         assert_eq!(final_update.layout.primary.width, 260.);
+        unsafe {
+            SendMessageW(hwnd, WM_MOUSEMOVE, None, Some(point(1)));
+        }
         handle.configure(None).unwrap();
+        assert_eq!(*hover_events.borrow(), [true, false, true, false]);
         assert!(!unsafe { IsWindowVisible(handle.state.hwnd.get()) }.as_bool());
     }
 }

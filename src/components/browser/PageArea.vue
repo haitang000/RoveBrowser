@@ -274,6 +274,7 @@ async function split(e: DragEvent) {
     <template v-if="other"
       ><div
         class="split-divider"
+        :class="{ 'is-hovered': b.splitHovered, 'is-dragging': resizing }"
         role="separator"
         aria-label="调整分屏比例"
         aria-orientation="vertical"

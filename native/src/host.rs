@@ -3566,12 +3566,17 @@ impl ApplicationHandler<Event> for App {
             self.caption = Some(caption);
             let proxy = self.proxy.clone();
             let pending_layout = self.pending_layout.clone();
+            let split_ui = ui.webview();
             self.split_handle = Some(crate::split::SplitHandle::new(
                 HWND(handle.hwnd.get() as *mut _),
                 self.popup.as_ref().unwrap().hwnd(),
                 move || {
                     pending_layout.take();
                     let _ = proxy.send_event(Event::SplitResize);
+                },
+                move |visible| {
+                    let event = json!({ "type": "splitHover", "visible": visible });
+                    let _ = unsafe { split_ui.PostWebMessageAsJson(&HSTRING::from(event.to_string())) };
                 },
             )?);
             self.ui = Some(ui);
