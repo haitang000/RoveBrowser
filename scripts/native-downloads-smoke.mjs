@@ -1,5 +1,5 @@
-// Downloads page against real WebView2: the panel reveals itself when a file
-// lands, progress/pause/resume/cancel follow the operation, Clear keeps
+// Downloads history against real WebView2: the panel opens on demand,
+// progress/pause/resume/cancel follow the operation, Clear keeps
 // unfinished rows, the two keyboard routes work, and the history survives a
 // restart. Playwright's CDP denies downloads by default, so the page session
 // restores WebView2's own behavior without choosing a destination.
@@ -122,6 +122,11 @@ async function realKeys(action, xFrac = 0.62, yFrac = 0.5) {
 const items = () => ui.evaluate(() => window.__lastDownloads || []);
 const panel = () => popup.locator('.downloads-panel');
 const rows = () => panel().locator('.download-row');
+async function openHistory() {
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
+  await panel().waitFor();
+}
 async function launch() {
   child = spawn(resolve(process.env.ERA_SMOKE_EXE || 'native/target/debug/rove.exe'), [], {
     env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) },
@@ -186,32 +191,29 @@ async function downloadSmall() {
 try {
   await launch();
 
-  // A download lands, saves to the configured folder and reveals the panel.
+  // A download lands in the configured folder and updates history.
   await downloadSmall();
-  await panel().waitFor();
+  assert.equal(await panel().count(), 0);
+  await openHistory();
   const first = (await items())[0];
   assert.equal(first.state, 'finished');
   assert.equal(first.total, Buffer.byteLength(smallText));
   assert.equal(await readFile(join(downloadsDir, 'small.txt'), 'utf8'), smallText);
   assert.equal(await rows().count(), 1);
   await popup.screenshot({ path: join(output, 'panel.png') });
-  checks.push('下载完成后自动展开面板，文件保存到设置中的下载文件夹');
+  checks.push('文件保存到设置中的下载文件夹，并写入可手动打开的下载记录');
 
   // The popup really covers the page HWND for outside clicks, then releases it
   // after the leave transition; CDP input alone cannot prove native hit testing.
   await realKeys('click-page');
   await waitFor(async () => (await panel().count()) === 0, 'native page click closes panel');
-  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
-  await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
-  await panel().waitFor();
+  await openHistory();
   await waitFor(() => ui.locator('.browser-menu-trigger').evaluate(element => element.classList.contains('active')), 'shared open state');
   checks.push('真实系统鼠标点击网页关闭浮窗，侧栏按钮与原生浮层开关状态同步');
   for (const [x, y] of [[0.08, 0.25], [0.4, 0.03]]) {
     await realKeys('click-page', x, y);
     await waitFor(async () => (await panel().count()) === 0, 'native sidebar/title click closes panel');
-    await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
-    await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
-    await panel().waitFor();
+    await openHistory();
   }
   checks.push('真实系统鼠标点击侧栏与标题栏空白也能关闭浮窗');
 
@@ -230,7 +232,6 @@ try {
   // Check both native state and the popup's actions, including zero-byte files.
   for (const selector of ['#fast', '#fast', '#fast', '#empty']) {
     const known = new Set((await items()).map((entry) => entry.id));
-    await panel().getByRole('button', { name: '关闭下载面板' }).click();
     await page.click(selector);
     const done = await waitFor(async () => (await items()).find(
       (entry) => !known.has(entry.id) && entry.state === 'finished',
@@ -240,16 +241,17 @@ try {
     assert.equal(done.received, done.total);
     assert.equal(done.exists, true);
     assert.equal(await readFile(done.path, 'utf8'), expected);
+    await openHistory();
     const row = panel().locator('.download-row', { hasText: done.filename });
     await row.getByRole('button', { name: '打开文件', exact: true }).waitFor();
     assert.equal(await row.locator('[role="progressbar"]').count(), 0);
     // A late click from an old row must not turn a completed download active.
     await send({ type: 'downloadAction', id: done.id, action: 'pause' });
     await waitFor(async () => (await items()).find((entry) => entry.id === done.id)?.state === 'finished', 'late pause preserves completion');
+    await panel().getByRole('button', { name: '关闭下载面板' }).click();
   }
   checks.push('连续快速下载和零字节文件均转为已完成，可打开文件且不残留进度条');
 
-  await panel().getByRole('button', { name: '关闭下载面板' }).click();
   await page.click('#exe');
   const exe = await waitFor(async () => (await items()).find(
     (entry) => entry.filename === 'fixture.exe' && entry.state === 'finished',
@@ -258,17 +260,20 @@ try {
   assert.equal(exe.total, executable.length);
   assert.equal(exe.exists, true);
   assert.deepEqual(await readFile(exe.path), executable);
+  await openHistory();
   const exeRow = panel().locator('.download-row', { hasText: 'fixture.exe' });
   await exeRow.getByRole('button', { name: '打开文件', exact: true }).waitFor();
   assert.equal(await exeRow.locator('[role="progressbar"]').count(), 0);
   checks.push('真实未签名 EXE 下载后转为已完成，字节内容一致且不残留进度条（不执行文件）');
 
   // Pause holds the received byte count, Resume continues it.
+  await panel().getByRole('button', { name: '关闭下载面板' }).click();
   await page.click('#slow');
   await waitFor(async () => {
     const item = (await items()).find((entry) => entry.filename === 'slow.bin');
     return item && item.received > 0;
   }, 'slow download progress');
+  await openHistory();
   const slow = () => items().then((list) => list.find((entry) => entry.filename === 'slow.bin'));
   await panel().locator('.download-row', { hasText: 'slow.bin' }).getByTitle('暂停下载').click();
   await waitFor(async () => (await slow()).state === 'paused', 'paused state');
@@ -296,6 +301,7 @@ try {
   assert.equal(complete.received, slowSize);
   assert.equal(complete.total, slowSize);
   assert.deepEqual(await readFile(complete.path), Buffer.alloc(slowSize, 7));
+  await openHistory();
   await panel().locator('.download-row.finished', { hasText: 'slow.bin' })
     .getByRole('button', { name: '打开文件', exact: true }).waitFor();
   checks.push('已知大小的大文件经过最后字节后进入已完成，文件内容完整');
@@ -332,9 +338,7 @@ try {
   await waitFor(async () => (await items()).some((entry) => entry.state === 'finished'), 'download before restart');
   await stop();
   await launch();
-  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
-  await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
-  await panel().waitFor();
+  await openHistory();
   await waitFor(async () =>
     (await rows().count()) === 1 &&
     (await rows().first().innerText()).includes('small'),

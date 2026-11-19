@@ -1,5 +1,5 @@
-// Verify that pending download details stay in Rove's popup while WebView2
-// owns the operation and decides when it has completed.
+// Verify that WebView2 opens its own download dialog immediately and can
+// reopen it from the history of a download that's still pending.
 import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
@@ -19,7 +19,7 @@ const server = createServer((req, res) => {
       'Content-Disposition': 'attachment; filename="review.exe"',
       'Content-Length': String(content.length),
     });
-    // Keep a real operation alive while checking Rove's dialog.
+    // Keep a real operation alive while checking the native dialog.
     res.write(content.subarray(0, -1));
     pendingResponse = res;
   } else {
@@ -48,11 +48,36 @@ async function waitFor(fn, label) {
 const send = command => ui.evaluate(value => window.ipc.postMessage(JSON.stringify(value)), command);
 const items = () => ui.evaluate(() => window.__downloads || []);
 
-async function isNativeDialogOpen() {
+async function nativeDialogContains(filename) {
   const browserSession = await pageBrowser.newBrowserCDPSession();
   try {
     const { targetInfos } = await browserSession.send('Target.getTargets');
-    return targetInfos.some(target => target.type === 'browser_ui' && target.url.startsWith('edge://downloads-hub'));
+    const target = targetInfos.find(target => target.type === 'browser_ui' && target.url.startsWith('edge://downloads-hub'));
+    if (!target) return false;
+    const { sessionId } = await browserSession.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+    let timer, onMessage;
+    const document = new Promise((resolve, reject) => {
+      onMessage = event => {
+        if (event.sessionId !== sessionId) return;
+        const message = JSON.parse(event.message);
+        if (message.id !== 1) return;
+        if (message.error) reject(Error(message.error.message));
+        else resolve(message.result);
+      };
+      browserSession.on('Target.receivedMessageFromTarget', onMessage);
+      timer = setTimeout(() => reject(Error('Native download dialog did not respond')), 3000);
+    });
+    try {
+      await browserSession.send('Target.sendMessageToTarget', {
+        sessionId,
+        message: JSON.stringify({ id: 1, method: 'DOM.getDocument', params: { depth: -1, pierce: true } }),
+      });
+      return JSON.stringify(await document).includes(filename);
+    } finally {
+      clearTimeout(timer);
+      browserSession.off('Target.receivedMessageFromTarget', onMessage);
+      await browserSession.send('Target.detachFromTarget', { sessionId }).catch(() => {});
+    }
   } finally { await browserSession.detach(); }
 }
 
@@ -87,6 +112,9 @@ try {
   await session.send('Browser.setDownloadBehavior', { behavior: 'default' });
   await page.click('#download');
   const download = await waitFor(async () => (await items()).find(item => item.received > 0), 'active executable download');
+  await waitFor(() => nativeDialogContains('review.exe'), 'native dialog opens without a review click');
+  assert.equal(await popup.locator('.downloads-panel').count(), 0);
+  checks.push('开始下载后直接显示带文件名的 WebView2 原生弹窗');
 
   // Present the full-byte waiting state in the popup only. The engine still
   // owns a live, unfinished transfer; this does not skip a security check.
@@ -98,31 +126,26 @@ try {
     };
   }, download.id);
   await send({ type: 'new', url: 'era://newtab' });
-  const active = await waitFor(async () => {
+  await waitFor(async () => {
     const id = await ui.evaluate(() => window.__browserState.activeTab);
     return id !== source && id;
   }, 'another tab is active');
+  await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
+  await popup.getByRole('menuitem', { name: '下载', exact: true }).click();
   const review = popup.getByRole('button', { name: '查看下载提示', exact: true });
-  const notice = popup.getByRole('dialog', { name: '正在等待下载结果' });
   await review.click();
-  await notice.getByText('review.exe', { exact: true }).waitFor();
-  assert.equal(await isNativeDialogOpen(), false);
-  assert.equal(await ui.evaluate(() => window.__browserState.activeTab), active);
+  await popup.locator('.downloads-panel').waitFor({ state: 'detached' });
+  await waitFor(async () => (await ui.evaluate(() => window.__browserState.activeTab)) === source, 'download source is active again');
+  await waitFor(() => nativeDialogContains('review.exe'), 'native dialog still shows the executable');
   assert.equal((await items())[0].state, 'inProgress');
-  await notice.getByRole('button', { name: '继续等待' }).click();
-  await notice.waitFor({ state: 'detached' });
-  await review.click();
-  await notice.waitFor();
-  checks.push('查看下载提示在 Rove 窗口内打开，可继续等待，且不会切换标签或打开原生弹窗');
+  checks.push('从下载记录可重新打开原生提示，等待中的文件仍显示为未完成');
 
   pendingResponse.end(content.subarray(-1));
   const complete = await waitFor(async () => (await items()).find(item => item.id === download.id && item.state === 'finished'), 'download finishes after its final byte');
-  await notice.waitFor({ state: 'detached' });
-  assert.equal(await isNativeDialogOpen(), false);
   assert.equal(complete.exists, true);
   assert.equal(complete.received, content.length);
   assert.deepEqual(await readFile(complete.path), content);
-  checks.push('WebView2 完成下载后自动收起提示，保存内容与源文件一致');
+  checks.push('WebView2 完成下载后更新记录，保存内容与源文件一致');
   const result = { passed: true, profile, checks };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result, null, 2));

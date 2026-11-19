@@ -161,7 +161,7 @@ fn polling_preserves_pause_and_detects_resume_and_failure() {
 }
 
 #[test]
-fn security_interrupts_publish_a_blocked_notice_once() {
+fn security_interrupts_are_retained_as_blocked_downloads() {
     for reason in [
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_MALICIOUS,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED_BY_POLICY,
@@ -178,11 +178,8 @@ fn security_interrupts_publish_a_blocked_notice_once() {
         assert_eq!(item.failure, Some(crate::downloads::interrupt_reason_text(reason)));
         assert!(!item.exists);
         assert!(fixture.ops.borrow().is_empty());
-        assert_eq!(std::mem::take(&mut fixture.downloads.borrow_mut().newly_blocked), ["file"]);
         assert!(!fixture.sync());
-        assert!(fixture.downloads.borrow().newly_blocked.is_empty());
         let restored = Downloads::load(vec![item]);
         assert_eq!(restored.get("file").unwrap().state, DownloadState::Blocked);
-        assert!(restored.newly_blocked.is_empty());
     }
 }

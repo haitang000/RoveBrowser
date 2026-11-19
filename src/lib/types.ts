@@ -172,10 +172,8 @@ declare global {
       asleep?: boolean;
       /** The pages asleep right now, sent when a UI renderer becomes ready. */
       ids?: string[];
-      /** The full downloads list, and the row a just-started download created. */
+      /** The full downloads list. */
       items?: DownloadItem[];
-      /** Download IDs blocked by the engine since the last list update. */
-      blockedIds?: string[];
     }) => void;
   }
 }

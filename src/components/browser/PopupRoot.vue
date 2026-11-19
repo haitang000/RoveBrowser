@@ -40,7 +40,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const modals = ".quit-scrim, .download-security-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer";
+  const modals = ".quit-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer";
   const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer`);
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
@@ -48,6 +48,7 @@ function report() {
   };
   // Keep the Peek hole covered until a leaving modal has painted its final frame.
   const modal = Boolean(document.querySelector(modals));
+  const downloads = Boolean(document.querySelector(".downloads-layer"));
   const content = document.querySelector<HTMLElement>(".peek-content");
   const cutout = !modal && b.peek && b.peekPhase === "open" && content ? { ...rect(content), corners: [12, 12, 12, 12] } : null;
   const regions = Array.from(surfaces, (element) => {
@@ -56,16 +57,16 @@ function report() {
     // room or the clip cuts it into a square-cornered halo.
     return surfaceRegion(bounds, element.classList.contains("reader-options-layer") ? 24 : shadowBleed(element.className));
   });
-  const next = JSON.stringify({ regions, cutout });
-  const active = b.quitOpen ? "quit" : b.downloadNotice ? "downloadSecurity" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
+  const next = JSON.stringify({ regions, cutout, downloads });
+  const active = b.quitOpen ? "quit" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
   const focus = Boolean(active && active !== focusKey);
   focusKey = active;
   if (next !== last || focus) {
     last = next;
-    b.send({ type: "popupLayer", regions, cutout, focus });
+    b.send({ type: "popupLayer", regions, cutout, focus, downloads });
   }
   if (focus) {
-    const selector = active === "quit" ? ".quit-dialog" : active === "downloadSecurity" ? ".download-security-dialog button[autofocus]" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : ".context-menu input, .context-menu button";
+    const selector = active === "quit" ? ".quit-dialog" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : ".context-menu input, .context-menu button";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }

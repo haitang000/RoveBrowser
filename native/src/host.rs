@@ -22,7 +22,7 @@ use webview2_com::{
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
         ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
-        ICoreWebView2_4,
+        ICoreWebView2_4, ICoreWebView2_9,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED,
@@ -145,8 +145,8 @@ enum Event {
     DownloadsChanged {
         persist: bool,
     },
-    /// A new download joined the list: the UI reveals the panel on it.
-    DownloadStarted(String),
+    /// A new download joined the list and needs its initial state published.
+    DownloadStarted,
     /// Zigzag `TabSleep`: every tick, background pages nobody has seen for a
     /// while give their memory back.
     SleepTick,
@@ -304,6 +304,7 @@ struct PageShared {
     downloads_open: Rc<Cell<bool>>,
     downloads: Rc<RefCell<Downloads>>,
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+    download_sources: Rc<RefCell<HashMap<String, String>>>,
     save_path: crate::page_output::SavePath,
 }
 /// Tabs removed together by Clear or Close Others/Below, with the active tab
@@ -350,8 +351,11 @@ struct App {
     downloads: Rc<RefCell<Downloads>>,
     /// Live WebView2 operations for pause/resume/cancel; dropped on completion.
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
+    download_sources: Rc<RefCell<HashMap<String, String>>>,
     next_download_poll: Option<Instant>,
     downloads_open: Rc<Cell<bool>>,
+    download_popup_visible: bool,
+    pending_download_review: Option<String>,
     popup: Option<WebView>,
     page_save: Option<crate::page_output::SaveRequest>,
     popup_state: serde_json::Map<String, serde_json::Value>,
@@ -499,8 +503,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         undo_batch: None,
         downloads,
         download_ops: Rc::new(RefCell::new(HashMap::new())),
+        download_sources: Rc::new(RefCell::new(HashMap::new())),
         next_download_poll: None,
         downloads_open: Rc::new(Cell::new(false)),
+        download_popup_visible: false,
+        pending_download_review: None,
         popup: None,
         popup_state: serde_json::Map::new(),
         page_save: None,
@@ -1192,11 +1199,10 @@ impl App {
         self.toast(&format!("已恢复 {count} 个标签"), None);
     }
     fn publish_downloads(&self) {
-        let (items, blocked_ids) = {
-            let mut downloads = self.downloads.borrow_mut();
-            (downloads.publish_items(), std::mem::take(&mut downloads.newly_blocked))
-        };
-        self.emit(json!({"type": "downloads", "items": items, "blockedIds": blocked_ids}));
+        self.download_sources.borrow_mut()
+            .retain(|id, _| self.download_ops.borrow().contains_key(id));
+        let items = self.downloads.borrow_mut().publish_items();
+        self.emit(json!({"type": "downloads", "items": items}));
     }
     fn save_downloads(&mut self) {
         let items = self.downloads.borrow().items.clone();
@@ -1250,6 +1256,40 @@ impl App {
             .and_then(|dirs| dirs.download_dir().map(|path| path.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."))
     }
+    fn review_download(&mut self, id: String) {
+        if self.download_popup_visible {
+            // Let the history panel release focus before opening the native dialog.
+            self.pending_download_review = Some(id);
+            return;
+        }
+        let source = self.download_sources.borrow().get(&id).cloned();
+        let Some(source) = source else {
+            self.error("这个下载已结束");
+            return;
+        };
+        if self.pages.contains_key(&source) {
+            self.state.activate(&source);
+            self.publish();
+            self.save();
+            if let Err(error) = self.sync() {
+                self.error(error);
+                return;
+            }
+        }
+        let view = self.pages.get(&source).map(|page| &page.view)
+            .or_else(|| self.peek.as_ref().filter(|peek| peek.tab.id == source).map(|peek| &peek.page.view))
+            .or_else(|| self.page());
+        let Some(view) = view else {
+            self.error("下载来源页面已关闭");
+            return;
+        };
+        let _ = view.focus();
+        if let Err(error) = unsafe {
+            view.webview().cast::<ICoreWebView2_9>().and_then(|view| view.OpenDefaultDownloadDialog())
+        } {
+            self.error(format!("无法显示下载提示：{error}"));
+        }
+    }
     fn download_action(&mut self, id: Option<String>, action: &str) {
         if action == "openFolder" {
             let folder = self.download_folder();
@@ -1275,6 +1315,7 @@ impl App {
         let Some(id) = id else { return };
         let operation = self.download_ops.borrow().get(&id).cloned();
         match action {
+            "review" => self.review_download(id),
             "pause" => {
                 if let Some(operation) = &operation {
                     if let Err(error) = unsafe { operation.Pause() } {
@@ -1402,6 +1443,7 @@ impl App {
             downloads_open: self.downloads_open.clone(),
             downloads: self.downloads.clone(),
             download_ops: self.download_ops.clone(),
+            download_sources: self.download_sources.clone(),
             save_path: Default::default(),
         };
         let save_path = shared.save_path.clone();
@@ -3061,8 +3103,9 @@ impl App {
                 }
                 return;
             }
-            Command::PopupLayer { regions, cutout, focus } => {
+            Command::PopupLayer { regions, cutout, focus, downloads } => {
                 if regions.len() > 16 || !regions.iter().all(|r| r.valid()) || cutout.is_some_and(|r| !r.valid()) { return; }
+                self.download_popup_visible = downloads;
                 if let (Some(popup), Some(window)) = (&self.popup, &self.window) {
                     let result = WindowClip::popup(popup.hwnd(), &regions, cutout, window.scale_factor());
                     if result.is_ok() && focus { let _ = popup.focus(); }
@@ -3074,6 +3117,11 @@ impl App {
                     }
                     else if let Some(page) = self.page() { let _ = page.focus(); }
                     else if let Some(ui) = &self.ui { let _ = ui.focus(); }
+                }
+                if !downloads {
+                    if let Some(id) = self.pending_download_review.take() {
+                        self.review_download(id);
+                    }
                 }
                 return;
             }
@@ -3751,12 +3799,11 @@ impl ApplicationHandler<Event> for App {
                 }
                 self.publish_downloads();
             }
-            Event::DownloadStarted(id) => {
+            Event::DownloadStarted => {
                 // A small/cached download may already be complete by the time
                 // its handlers are registered; events do not replay old states.
                 self.refresh_downloads();
                 self.save_downloads();
-                self.emit(json!({"type":"downloadStarted","id":id}));
             }
             Event::Command(c) => self.command(c, Some(event_loop)),
             Event::PeekRequest(source, url, point) => {
@@ -4095,14 +4142,16 @@ fn register_page_events(
     let mut token = 0;
     let download_downloads = shared.downloads.clone();
     let download_ops = shared.download_ops.clone();
+    let download_sources = shared.download_sources.clone();
+    let download_source = id.clone();
     let save_path = shared.save_path.clone();
     let download_proxy = proxy.clone();
     let download = DownloadStartingEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
             unsafe {
-                // Rove owns the download UI. WebView2 still decides whether
-                // the transfer is allowed to complete.
-                args.SetHandled(true)?;
+                // Wry sets Handled first. Allow WebView2 to show its own
+                // download dialog, including file safety decisions.
+                args.SetHandled(false)?;
                 let mut suggested = PWSTR::null();
                 args.ResultFilePath(&mut suggested)?;
                 let mut path = PathBuf::from(take_pwstr(suggested));
@@ -4121,8 +4170,7 @@ fn register_page_events(
                     args.SetResultFilePath(&HSTRING::from(destination.as_os_str()))?;
                     path = destination;
                 }
-                // Track every download Zigzag-style: a row appears at once and
-                // the panel is revealed; progress and state arrive by events.
+                // Keep the download history in sync with the native operation.
                 let operation = args.DownloadOperation()?;
                 let mut uri = PWSTR::null();
                 operation.Uri(&mut uri)?;
@@ -4150,14 +4198,15 @@ fn register_page_events(
                     exists: false,
                 });
                 download_ops.borrow_mut().insert(id.clone(), operation.clone());
+                download_sources.borrow_mut().insert(id.clone(), download_source.clone());
                 track_download(
                     &operation,
-                    id.clone(),
+                    id,
                     download_downloads.clone(),
                     download_ops.clone(),
                     download_proxy.clone(),
                 )?;
-                let _ = download_proxy.send_event(Event::DownloadStarted(id));
+                let _ = download_proxy.send_event(Event::DownloadStarted);
             }
         }
         Ok(())

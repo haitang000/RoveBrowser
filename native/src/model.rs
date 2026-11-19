@@ -416,6 +416,8 @@ pub enum Command {
     #[serde(rename = "popupLayer")]
     PopupLayer {
         regions: Vec<Rect>, cutout: Option<Rect>, focus: bool,
+        #[serde(default)]
+        downloads: bool,
     },
     #[serde(rename = "window")]
     Window { action: String },

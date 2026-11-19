@@ -77,7 +77,6 @@ test("the final bytes and engine completion have distinct states", async ({ page
   await expect(row.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "99");
   await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }), { ...pending, received: 1000 });
   await expect(row).toContainText("正在等待下载结果");
-  await expect(row.getByRole("button", { name: "查看下载提示", exact: true })).toBeVisible();
   await expect(row.getByRole("button", { name: "打开文件", exact: true })).toHaveCount(0);
   await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }),
     { ...pending, received: 1000, state: "finished", exists: true });
@@ -86,50 +85,30 @@ test("the final bytes and engine completion have distinct states", async ({ page
   await expect(row.getByRole("button", { name: "打开文件", exact: true })).toBeVisible();
 });
 
-test("a pending download can be reviewed and cancelled in the app", async ({ page }) => {
+test("a pending download can be cancelled from history", async ({ page }) => {
   const pending = download({ filename: "setup.exe", received: 1000, total: 1000 });
   await page.evaluate((item) => window.__ERA_RECEIVE__?.({ type: "downloads", items: [item] }), pending);
   await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
-  const review = panel.getByRole("button", { name: "查看下载提示", exact: true });
-  const notice = page.getByRole("dialog", { name: "正在等待下载结果" });
-  await review.click();
-  await expect(notice).toContainText("setup.exe");
-  await expect(notice.getByRole("button", { name: "继续等待" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(notice).toHaveCount(0);
   await expect(panel).toContainText("正在等待下载结果");
   await expect(panel.getByRole("button", { name: "打开文件", exact: true })).toHaveCount(0);
-  await review.click();
-  await notice.getByRole("button", { name: "取消下载" }).click();
-  await expect(notice).toHaveCount(0);
+  await panel.getByRole("button", { name: "取消下载" }).click();
   await expect(panel).toContainText("已取消");
 });
 
-test("security blocks automatically show the filename and reason, and remain reviewable", async ({ page }) => {
+test("security blocks update history without opening an app dialog", async ({ page }) => {
   const blocked = [
     download({ id: "blocked-1", filename: "<setup>.exe", state: "blocked", failure: "安全检查发现此文件可能有害" }),
     download({ id: "blocked-2", filename: "policy.zip", state: "blocked", failure: "被策略阻止" }),
   ];
-  await page.evaluate((items) => {
-    window.__ERA_RECEIVE__?.({ type: "downloads", items, blockedIds: items.map((item) => item.id) });
-    window.__ERA_RECEIVE__?.({ type: "downloads", items });
-  }, blocked);
-
-  const notice = page.getByRole("alertdialog", { name: "下载已被拦截" });
-  await expect(notice).toContainText("<setup>.exe");
-  await expect(notice).toContainText("安全检查发现此文件可能有害");
-  await expect(notice.getByRole("button")).toHaveCount(1);
-  await notice.getByRole("button", { name: "知道了" }).click();
-  await expect(notice).toContainText("policy.zip");
-  await expect(notice).toContainText("被策略阻止");
-  await page.keyboard.press("Escape");
-  await expect(notice).toHaveCount(0);
+  await page.evaluate((items) => window.__ERA_RECEIVE__?.({ type: "downloads", items }), blocked);
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "下载", exact: true })).toHaveCount(0);
   await chooseBrowserMenuItem(page, "下载");
   const panel = page.getByRole("dialog", { name: "下载" });
   await expect(panel.getByRole("button", { name: "打开文件" })).toHaveCount(0);
-  await panel.locator(".download-row", { hasText: "policy.zip" }).getByRole("button", { name: "查看下载提示" }).click();
-  await expect(notice).toContainText("policy.zip");
+  await expect(panel.locator(".download-row", { hasText: "<setup>.exe" })).toContainText("安全检查发现此文件可能有害");
+  await expect(panel.locator(".download-row", { hasText: "policy.zip" })).toContainText("被策略阻止");
 });
 
 test("downloads replace the command panel and the actions menu supports the keyboard", async ({ page }) => {
@@ -162,7 +141,7 @@ test("pause, resume and cancel follow Zigzag's rules", async ({ page }) => {
   await expect(active.getByTitle("从列表中移除")).toBeVisible();
 });
 
-test("Ctrl+J and Escape toggle the panel, and a new download reveals it", async ({
+test("Ctrl+J and Escape toggle history, and a new download only updates the list", async ({
   page,
 }) => {
   await page.keyboard.press("Control+j");
@@ -186,8 +165,9 @@ test("Ctrl+J and Escape toggle the panel, and a new download reveals it", async 
         },
       ],
     });
-    window.__ERA_RECEIVE__?.({ type: "downloadStarted", id: "fresh" });
   });
+  await expect(panel).toHaveCount(0);
+  await page.keyboard.press("Control+j");
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("fresh.bin");
 });

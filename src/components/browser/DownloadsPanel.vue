@@ -2,14 +2,12 @@
 // State/actions belong to the host; the surface also runs in the native popup.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { clearableDownloads, downloadFraction, downloadPercent, downloadStatus, hasDownloadNotice, isActiveDownload } from "../../lib/downloads";
+import { clearableDownloads, downloadFraction, downloadPercent, downloadStatus, isActiveDownload, isFinalizingDownload } from "../../lib/downloads";
 import Icon from "../common/Icon.vue";
 import DownloadFileIcon from "./DownloadFileIcon.vue";
-import DownloadSecurityDialog from "./DownloadSecurityDialog.vue";
 
 const b = useBrowser();
 const panel = ref<HTMLElement>();
-const list = ref<HTMLElement>();
 const search = ref<HTMLInputElement>();
 const more = ref<HTMLButtonElement>();
 const clear = ref<HTMLButtonElement>();
@@ -32,6 +30,7 @@ const position = computed(() => {
 function resize() { viewport.value = { width: innerWidth, height: innerHeight }; }
 function act(action: string, id?: string) {
   menuOpen.value = false;
+  if (action === "review") close();
   b.downloadAction(action, id);
 }
 function close() { b.closeDownloads(); }
@@ -53,7 +52,7 @@ async function toggleSearch() {
   else query.value = "";
 }
 function outside(event: PointerEvent) {
-  if (!b.downloadsOpen || b.downloadNotice) return;
+  if (!b.downloadsOpen) return;
   const target = event.target as Element | null;
   if (target && panel.value?.contains(target)) return;
   close();
@@ -71,11 +70,6 @@ watch(() => b.downloadsOpen, async (open) => {
   query.value = ""; searching.value = false; menuOpen.value = false;
   await nextTick();
   panel.value?.focus({ preventScroll: true });
-});
-watch(() => b.downloadsFocus, async () => {
-  query.value = "";
-  await nextTick();
-  list.value?.scrollTo({ top: 0 });
 });
 </script>
 <template>
@@ -107,9 +101,9 @@ watch(() => b.downloadsFocus, async () => {
         </div>
         <div v-if="!b.downloads.length" class="downloads-empty"><Icon name="download" :size="30" /><span>暂无下载</span></div>
         <div v-else-if="!filtered.length" class="downloads-empty"><Icon name="search" :size="28" /><span>未找到匹配的下载</span></div>
-        <div v-else ref="list" class="downloads-list" aria-label="下载文件">
+        <div v-else class="downloads-list" aria-label="下载文件">
           <article v-for="item in filtered" :key="item.id" class="download-row"
-            :class="[item.state, { focus: b.downloadsFocus === item.id, missing: item.state === 'finished' && !item.exists }]"
+            :class="[item.state, { missing: item.state === 'finished' && !item.exists }]"
           >
             <DownloadFileIcon :filename="item.filename" />
             <div class="download-body">
@@ -119,7 +113,7 @@ watch(() => b.downloadsFocus, async () => {
                 <span :style="{ transform: `scaleX(${item.total > 0 ? downloadFraction(item) : 0.3})` }" />
               </div>
               <span class="download-meta" :class="{ caution: item.state === 'failed' || item.state === 'blocked' }" :title="downloadStatus(item)">{{ downloadStatus(item) }}</span>
-              <button v-if="hasDownloadNotice(item)" class="download-open" @click="b.showDownloadNotice(item.id)">查看下载提示</button>
+              <button v-if="b.native && isFinalizingDownload(item)" class="download-open" @click="act('review', item.id)">查看下载提示</button>
               <button v-if="item.state === 'finished' && item.exists" class="download-open" @click="act('open', item.id)">打开文件</button>
             </div>
             <div class="download-actions">
@@ -137,6 +131,4 @@ watch(() => b.downloadsFocus, async () => {
       </section>
     </div>
   </Transition>
-  <DownloadSecurityDialog v-if="b.downloadNotice && !b.quitOpen" :key="b.downloadNotice.id"
-    :item="b.downloadNotice" @dismiss="b.dismissDownloadNotice" @cancel-download="act('cancel', $event)" />
 </template>

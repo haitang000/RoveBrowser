@@ -74,8 +74,6 @@ impl DownloadItem {
 #[derive(Default)]
 pub struct Downloads {
     pub items: Vec<DownloadItem>,
-    /// Transitions awaiting publication to the download UI.
-    pub newly_blocked: Vec<String>,
 }
 
 impl Downloads {
@@ -83,7 +81,7 @@ impl Downloads {
     /// cannot be resumed (WebView2 keeps no resume data across processes), so
     /// Zigzag's paused-with-resume data case becomes a plain interruption.
     pub fn load(items: Vec<DownloadItem>) -> Self {
-        let mut downloads = Self { items, ..Self::default() };
+        let mut downloads = Self { items };
         downloads.items.truncate(MAX_ITEMS);
         let now = crate::model::now_secs();
         for item in &mut downloads.items {
@@ -127,7 +125,6 @@ impl Downloads {
     pub fn finish(&mut self, id: &str, state: DownloadState, failure: Option<String>) -> bool {
         let now = crate::model::now_secs();
         if let Some(item) = self.get_mut(id) {
-            let newly_blocked = item.is_active() && state == DownloadState::Blocked;
             item.state = state;
             item.finished = Some(now);
             item.failure = failure;
@@ -136,9 +133,6 @@ impl Downloads {
                     item.received = item.total;
                 }
                 item.total = item.received;
-            }
-            if newly_blocked {
-                self.newly_blocked.push(id.into());
             }
             return true;
         }

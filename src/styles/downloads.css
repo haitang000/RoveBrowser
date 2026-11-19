@@ -108,7 +108,7 @@
   flex-shrink: 0;
   transition: background 120ms ease;
 }
-.download-row:hover, .download-row:focus-within, .download-row.focus { background: var(--separator); }
+.download-row:hover, .download-row:focus-within { background: var(--separator); }
 .download-icon { display: grid; place-items: center; width: 30px; height: 36px; flex-shrink: 0; color: #607a9a; }
 .download-icon.archive { color: #0b9b59; }
 .download-icon.media { color: #8865bd; }
