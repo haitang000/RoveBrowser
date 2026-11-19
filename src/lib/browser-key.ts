@@ -4,6 +4,11 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing) return;
   if (b.quitOpen) return;
   if (b.onboardingOpen) return;
+  if (e.key === "Escape" && b.splitControls) {
+    e.preventDefault();
+    b.splitControls = undefined;
+    return;
+  }
   if (e.key === "Escape" && b.browserMenuOpen) {
     e.preventDefault();
     b.browserMenuOpen = false;

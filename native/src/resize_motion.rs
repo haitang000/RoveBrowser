@@ -63,6 +63,21 @@ pub fn move_bounds(from: [i32; 4], to: [i32; 4], progress: f32) -> [i32; 4] {
     let t = t * t * t * (t * (t * 6. - 15.) + 10.);
     std::array::from_fn(|i| (from[i] as f64 + (to[i] as f64 - from[i] as f64) * t).round() as i32)
 }
+pub const SWAP_DURATION: f32 = 0.360;
+pub fn swap_frame(from: [i32; 4], to: [i32; 4], progress: f32, edge: f32, scale: f32) -> ([i32; 4], Sample) {
+    let t = progress.clamp(0., 1.);
+    let lift = if t > 0. && t < 1. { (std::f32::consts::PI * t).sin().powi(2) } else { 0. };
+    let mut bounds = move_bounds(from, to, t);
+    bounds[1] -= (edge * 24. * scale * lift).round() as i32;
+    (bounds, Sample {
+        pose: Pose { scale: 1. - 0.068 * lift, x: -edge * 0.13 * lift, y: 0. },
+        blend: 0.,
+        finished: t >= 1.,
+        opacity: 1.,
+        slide: 0.,
+        blur: lift * 0.45,
+    })
+}
 pub const PAINT_DELAY: f32 = 0.032;
 pub const PAINT_LIMIT: f32 = 0.240;
 fn ease_out(t: f32) -> f32 {

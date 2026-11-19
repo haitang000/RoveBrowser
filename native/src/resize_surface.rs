@@ -1,10 +1,11 @@
 //! Frozen WebView snapshots, projected and blended by DirectComposition.
 //! Chromium only receives the final size; no layout/paint runs on our drag clock.
 use crate::resize_motion::{
-    move_bounds, projection, Motion, MOVE_DURATION, PAINT_DELAY, PAINT_LIMIT,
+    move_bounds, projection, swap_frame, Motion, MOVE_DURATION, PAINT_DELAY, PAINT_LIMIT, SWAP_DURATION,
 };
 use std::{
     cell::{Cell, RefCell},
+    rc::Rc,
     sync::mpsc,
     time::Instant,
 };
@@ -127,15 +128,40 @@ enum Start {
     Blur(f32),
     Enter(f32),
     Staged(f32),
+    Swap,
 }
 type Completion = Box<dyn FnOnce() -> Result<()>>;
 struct Relocation {
     from: [i32; 4],
     to: [i32; 4],
+    swap: Option<(Rc<SwapClock>, f32)>,
     started: Option<f32>,
     commit: Option<Completion>,
     reveal: Option<Completion>,
     cancel: Option<Completion>,
+}
+pub struct SwapClock {
+    remaining: Cell<usize>,
+    requested: Instant,
+    started: Cell<Option<Instant>>,
+}
+impl SwapClock {
+    pub fn new(panes: usize) -> Rc<Self> {
+        Rc::new(Self { remaining: Cell::new(panes), requested: Instant::now(), started: Cell::new(None) })
+    }
+    fn ready(&self) {
+        self.remaining.set(self.remaining.get().saturating_sub(1));
+    }
+    fn progress(&self) -> Option<f32> {
+        match self.started.get() {
+            Some(start) => Some(start.elapsed().as_secs_f32() / SWAP_DURATION),
+            None if self.remaining.get() == 0 || self.requested.elapsed().as_secs_f32() >= 0.150 => {
+                self.started.set(Some(Instant::now()));
+                Some(0.)
+            }
+            None => None,
+        }
+    }
 }
 struct Layer {
     visual: IDCompositionVisual,
@@ -237,6 +263,7 @@ impl Surface {
             f.relocation.replace(Some(Relocation {
                 from: f.bounds.get(),
                 to,
+                swap: None,
                 started: None,
                 commit: Some(commit),
                 reveal: Some(reveal),
@@ -244,6 +271,25 @@ impl Surface {
             }));
             trace(serde_json::json!({"phase":"split-move", "from":f.bounds.get(), "to":to}));
         }
+    }
+    pub fn swap_to(
+        &self, from: [i32; 4], corners: [f64; 4], scale: f64,
+        to: [i32; 4], edge: f32, clock: Rc<SwapClock>, commit: Completion,
+    ) -> Result<()> {
+        self.enter_with(from, corners, scale, Start::Swap)?;
+        if let Some(frame) = self.frame.borrow().as_ref() {
+            frame.relocation.replace(Some(Relocation {
+                from,
+                to,
+                swap: Some((clock, edge)),
+                started: None,
+                commit: Some(commit),
+                reveal: None,
+                cancel: None,
+            }));
+            trace(serde_json::json!({"phase":"split-swap", "from":from, "to":to, "edge":edge}));
+        }
+        Ok(())
     }
     pub fn raise(&self) -> Result<()> {
         if let Some(f) = self.frame.borrow().as_ref().filter(|f| !f.restored.get()) {
@@ -740,7 +786,7 @@ impl Frame {
             let root_visual = device.CreateVisual()?;
             // Flat sidebar motion covers the entire viewport with opaque page
             // content. Its fluid backdrop would be invisible, even while blurred.
-            let background = if matches!(start, Start::Blur(_)) {
+            let background = if matches!(start, Start::Blur(_) | Start::Swap) {
                 None
             } else {
                 Some(FluidBackground::new(&device, appearance)?)
@@ -861,6 +907,7 @@ impl Frame {
             Start::Enter(edge) => motion.enter(edge),
             Start::Blur(amount) => motion = Motion::blur_only(motion.reduced, amount),
             Start::Staged(edge) => motion.stage(edge),
+            Start::Swap => (),
         }
         let frame = Box::new(Self {
             source,
@@ -913,7 +960,7 @@ impl Frame {
         frame.resize(bounds)?;
         // Entry already owns the final viewport. Keep it rendering under the
         // opaque snapshot, just as release() does after a resize.
-        let cloak = BOOL(frame.motion.borrow().dragging() as i32);
+        let cloak = BOOL((frame.motion.borrow().dragging() && !matches!(start, Start::Swap)) as i32);
         DwmSetWindowAttribute(source, DWMWA_CLOAK, &cloak as *const _ as _, 4)?;
         if !SetWindowSubclass(
             preview,
@@ -1077,7 +1124,11 @@ impl Frame {
             match (kind, pixels) {
                 (Capture::Before, Some(pixels)) if !self.paint_ready.get() => {
                     self.old.bitmap(&self.device, pixels)?;
-                    self.frozen.set(true);
+                    if !self.frozen.replace(true) {
+                        if let Some((clock, _)) = self.relocation.borrow().as_ref().and_then(|moving| moving.swap.as_ref()) {
+                            clock.ready();
+                        }
+                    }
                     trace(serde_json::json!({"phase":"frozen", "size":self.old.size.get()}));
                 }
                 (Capture::After, Some(pixels))
@@ -1106,6 +1157,33 @@ impl Frame {
                 }
                 _ => {}
             }
+        }
+        let swap = self.relocation.borrow().as_ref().and_then(|moving| {
+            moving.swap.as_ref().map(|(clock, edge)| (moving.from, moving.to, clock.clone(), *edge))
+        });
+        if let Some((from, to, clock, edge)) = swap {
+            let reduced = self.motion.borrow().reduced;
+            let Some(progress) = (if reduced { Some(1.) } else { clock.progress() }) else { return Ok(()); };
+            if let Some(moving) = self.relocation.borrow_mut().as_mut() {
+                if moving.started.is_none() {
+                    // Let Chromium capture its visible document first. Hide
+                    // it before the covering compositor window starts moving.
+                    let cloak = BOOL(1);
+                    DwmSetWindowAttribute(self.source, DWMWA_CLOAK, &cloak as *const _ as _, 4)?;
+                    moving.started = Some(now);
+                }
+            }
+            let (bounds, sample) = swap_frame(from, to, progress, edge, self.scale_factor);
+            self.position(bounds)?;
+            self.present(sample)?;
+            trace(serde_json::json!({"phase":"split-swap-frame", "bounds":bounds, "progress":progress,
+                "depth":sample.pose.x, "scale":sample.pose.scale, "reduced":reduced}));
+            if sample.finished {
+                // The live page stays cloaked until its single moving image
+                // is flat and fills the final slot. Restore commits and reveals it.
+                self.restore();
+            }
+            return Ok(());
         }
         let mut completed = None;
         {
@@ -1554,6 +1632,40 @@ mod tests {
                 }
                 surface.end();
             }
+            // While the images trade places, keep the live page cloaked even
+            // if its immutable pixels are already available.
+            let clock = SwapClock::new(2);
+            let from = [20, 20, 200, 150];
+            let to = [220, 20, 200, 150];
+            surface.swap_to(from, [8.; 4], 1., to, 1., clock.clone(), Box::new(|| Ok(())))?;
+            {
+                let frame = surface.frame.borrow();
+                let frame = frame.as_ref().unwrap();
+                frame.motion.borrow_mut().reduced = false;
+                frame.sender.send((Capture::Before, Some(Pixels {
+                    width: 200, height: 150, bgra: [160, 120, 80, 255].repeat(200 * 150),
+                }))).unwrap();
+                frame.tick()?;
+                assert_eq!(frame.bounds.get(), from);
+                assert_eq!(clock.remaining.get(), 1);
+                clock.ready();
+                let now = Instant::now();
+                clock.started.set(Some(now - std::time::Duration::from_millis(180)));
+                frame.tick()?;
+                assert!(frame.bounds.get()[0] > from[0] && frame.bounds.get()[0] < to[0]);
+                let mut cloaked = 0u32;
+                DwmGetWindowAttribute(source, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)?;
+                assert_ne!(cloaked, 0);
+                assert!(!frame.source_prepared.get());
+                clock.started.set(Some(now - std::time::Duration::from_secs(1)));
+                frame.tick()?;
+                assert_eq!(frame.bounds.get(), to);
+                assert!(frame.restored.get());
+                assert_eq!(frame.presented.get().unwrap().matrix, projection(crate::resize_motion::Pose::default(), 200., 150.));
+                DwmGetWindowAttribute(source, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)?;
+                assert_eq!(cloaked, 0);
+            }
+            surface.end();
             // Entry uses final bounds immediately and must keep Chromium
             // visible for capture. Cancelling it cannot retain a style/cloak.
             for edge in [1., -1.] {

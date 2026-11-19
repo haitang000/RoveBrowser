@@ -31,6 +31,8 @@ export const useBrowser = defineStore("browser", () => {
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
   const splitResize = ref<{ ratio: number; resizing: boolean }>();
   const splitHovered = ref(false);
+  const splitClick = ref(0);
+  const splitControls = ref<{ x: number; y: number; gap: number; id: string; other: string }>();
   const sidebarResize = ref<{ width: number; resizing: boolean; reset: boolean }>();
   const sidebarResizing = ref(false);
   const hoverPreview = ref<{ id: string; frame: Rect; opacity: number; phase: string; closing: boolean; ticket: number; instant: boolean }>();
@@ -572,6 +574,7 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
       splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
     if (e.type === "splitHover") splitHovered.value = Boolean(e.visible);
+    if (e.type === "splitClick") splitClick.value++;
     if (e.type === "tabPreviewPresented" && e.ticket !== undefined) previewPresentedTicket.value = e.ticket;
     if (e.type === "tabPreviewUnavailable" && e.id) previewFailures.value[e.id] = true;
     if (e.type === "tabPreviewHidden" && e.ticket !== undefined) previewHiddenTicket.value = e.ticket;
@@ -722,7 +725,7 @@ export const useBrowser = defineStore("browser", () => {
     if (surfaces.some(Boolean)) closeDownloads();
   });
   watch(() => peek.value?.id, (id) => { if (id) closeDownloads(); });
-  const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, browserMenuOpen, browserMenuAnchor, spaceCreation, spaceEditor, contextMenu, popupArea, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen };
+  const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, browserMenuOpen, browserMenuAnchor, spaceCreation, spaceEditor, contextMenu, popupArea, splitControls, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen };
   function receivePopup(patch: Record<string, unknown>) {
     receivingPopup = true;
     for (const [key, value] of Object.entries(patch)) {
@@ -770,6 +773,8 @@ export const useBrowser = defineStore("browser", () => {
     popupArea,
     splitResize,
     splitHovered,
+    splitClick,
+    splitControls,
     sidebarResize,
     sidebarResizing,
     hoverPreview,

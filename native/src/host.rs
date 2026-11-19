@@ -2321,6 +2321,62 @@ impl App {
         }
         if let Some(error) = update.error { self.error(error); }
     }
+    fn swap_split(&mut self, id: &str, other: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if self.state.active_tab != id || self.state.active().and_then(|tab| tab.split_with.as_deref()) != Some(other) {
+            return Ok(());
+        }
+        self.dismiss_tab_preview();
+        self.finish_split_resize();
+        let Some((window, secondary)) = self.window.as_ref().zip(self.secondary) else { return Ok(()); };
+        let scale = window.scale_factor();
+        let layout = crate::split::Layout { primary: self.primary, secondary };
+        let swapped = layout.swapped();
+        self.state.apply(&Command::SwapSplit { id: id.into(), other: other.into() })?;
+        if self.state.active_tab != other { return Ok(()); }
+        self.pending_layout.take();
+        self.primary = swapped.primary;
+        self.secondary = Some(swapped.secondary);
+        self.live_resize = false;
+        self.split_entry_pending = false;
+        self.presented_split = Some((other.into(), id.into()));
+
+        let animate = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let panes: Vec<_> = [(other, layout.secondary, swapped.primary, -1.), (id, layout.primary, swapped.secondary, 1.)]
+                .into_iter().filter_map(|(id, from, to, edge)| {
+                    let page = self.pages.get(id).filter(|page| page.visible.get())?;
+                    Some((page.split_pane(), page.bounds.get()?, from, to, edge))
+                }).collect();
+            let clock = crate::resize_surface::SwapClock::new(panes.len());
+            for (pane, bounds, from, to, edge) in panes {
+                let rect = self.bounds(to);
+                let position = rect.position.to_physical::<i32>(scale);
+                let size = rect.size.to_physical::<i32>(scale);
+                let destination = [position.x, position.y, size.width, size.height];
+                pane.surface.clone().swap_to(bounds, from.corners, scale, destination, edge, clock.clone(), Box::new(move || {
+                    unsafe {
+                        SetWindowPos(pane.hwnd, None, destination[0], destination[1], destination[2], destination[3], SWP_NOACTIVATE | SWP_NOZORDER)?;
+                        if pane.viewport.get() != Some([destination[2], destination[3]]) {
+                            pane.controller.SetBounds(RECT { left: 0, top: 0, right: destination[2], bottom: destination[3] })?;
+                            pane.viewport.set(Some([destination[2], destination[3]]));
+                        }
+                    }
+                    pane.bounds.set(Some(destination));
+                    pane.clip.apply(pane.hwnd, to.corners, scale)
+                }))?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = animate {
+            self.finish_split_resize();
+            self.error(error);
+        }
+        self.save();
+        self.emit(json!({"type":"splitResize", "ratio":swapped.ratio(), "resizing":false}));
+        self.publish();
+        self.sync_layout()?;
+        self.emit_active_zoom();
+        Ok(())
+    }
     fn animate_split_entry(&mut self) {
         if !self.split_entry_pending || self.live_resize || self.overlay || self.peek.is_some() { return; }
         self.split_entry_pending = false;
@@ -2724,6 +2780,7 @@ impl App {
                     | Command::Move { .. }
                     | Command::OpenSettings { .. }
                     | Command::Split { .. }
+                    | Command::SwapSplit { .. }
                     | Command::Unsplit
                     | Command::PeekOpen { .. }
                     | Command::PeekClose
@@ -3172,6 +3229,10 @@ impl App {
                 }
                 return;
             }
+            Command::SwapSplit { id, other } => {
+                if let Err(error) = self.swap_split(&id, &other) { self.error(error); }
+                return;
+            }
             Command::Suggest { query, ticket } => {
                 if !self.state.settings.search_suggestions || self.state.settings.search_engine != "google" { self.emit(json!({"type":"suggestions","ticket":ticket,"suggestions":[]})); return; }
                 let proxy = self.proxy.clone();
@@ -3574,8 +3635,11 @@ impl ApplicationHandler<Event> for App {
                     pending_layout.take();
                     let _ = proxy.send_event(Event::SplitResize);
                 },
-                move |visible| {
-                    let event = json!({ "type": "splitHover", "visible": visible });
+                move |guide| {
+                    let event = match guide {
+                        crate::split::Guide::Hover(visible) => json!({ "type": "splitHover", "visible": visible }),
+                        crate::split::Guide::Click => json!({ "type": "splitClick" }),
+                    };
                     let _ = unsafe { split_ui.PostWebMessageAsJson(&HSTRING::from(event.to_string())) };
                 },
             )?);

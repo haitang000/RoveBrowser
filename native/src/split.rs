@@ -25,6 +25,7 @@ use windows::{
 };
 const SUBCLASS: usize = 0x53504c54;
 pub const MINIMUM_PANE_WIDTH: f64 = 260.;
+const DRAG_THRESHOLD: f64 = 4.;
 
 /// Keep the visible edges and the renderer dimensions in one shared cache.
 /// The host's ordinary layout and the native input handler use the same values.
@@ -148,6 +149,16 @@ impl Layout {
     pub fn ratio(self) -> f64 {
         self.primary.width / self.width().max(1.)
     }
+    pub fn swapped(self) -> Self {
+        Self {
+            primary: Rect { width: self.secondary.width, ..self.primary },
+            secondary: Rect {
+                x: self.primary.x + self.secondary.width + self.gap(),
+                width: self.primary.width,
+                ..self.secondary
+            },
+        }
+    }
     /// Zigzag: a 20–80% share, at least 260 points per pane, equal halves when
     /// the available width cannot fit those minima. Round once, share the seam.
     fn resized(self, x: f64) -> Self {
@@ -189,6 +200,11 @@ pub struct Update {
     pub resizing: bool,
     pub error: Option<String>,
 }
+#[derive(Debug, PartialEq, Eq)]
+pub enum Guide {
+    Hover(bool),
+    Click,
+}
 struct State {
     root: HWND,
     popup: HWND,
@@ -196,8 +212,9 @@ struct State {
     config: RefCell<Option<Config>>,
     pending: RefCell<Option<Update>>,
     notify: Box<dyn Fn()>,
-    present_hover: Box<dyn Fn(bool)>,
+    guide: Box<dyn Fn(Guide)>,
     hovered: Cell<bool>,
+    pressed: Cell<Option<POINT>>,
     dragging: Cell<bool>,
     busy: Cell<bool>,
     grab_offset: Cell<f64>,
@@ -210,7 +227,7 @@ impl SplitHandle {
         root: HWND,
         popup: HWND,
         notify: impl Fn() + 'static,
-        present_hover: impl Fn(bool) + 'static,
+        guide: impl Fn(Guide) + 'static,
     ) -> Result<Self> {
         let state = Box::new(State {
             root,
@@ -219,8 +236,9 @@ impl SplitHandle {
             config: RefCell::new(None),
             pending: RefCell::new(None),
             notify: Box::new(notify),
-            present_hover: Box::new(present_hover),
+            guide: Box::new(guide),
             hovered: Cell::new(false),
+            pressed: Cell::new(None),
             dragging: Cell::new(false),
             busy: Cell::new(false),
             grab_offset: Cell::new(0.),
@@ -274,6 +292,7 @@ impl SplitHandle {
         if let Some(config) = self.state.config.borrow().as_ref() {
             place_handle(&self.state, config)?;
         } else {
+            finish(&self.state);
             set_hovered(&self.state, false);
             unsafe {
                 let _ = ShowWindow(self.state.hwnd.get(), SW_HIDE);
@@ -310,7 +329,7 @@ fn set_hovered(s: &State, hovered: bool) {
         };
         let _ = unsafe { TrackMouseEvent(&mut track) };
     }
-    (s.present_hover)(hovered);
+    (s.guide)(Guide::Hover(hovered));
 }
 fn place_handle(s: &State, config: &Config) -> Result<()> {
     let left = (config.layout.primary.x + config.layout.primary.width) * config.scale;
@@ -340,15 +359,18 @@ fn report(s: &State, config: &Config, resizing: bool, error: Option<String>) {
         (s.notify)();
     }
 }
-fn cursor_x(s: &State, lparam: LPARAM, scale: f64) -> f64 {
-    let mut point = [POINT {
+fn mouse_point(lparam: LPARAM) -> POINT {
+    POINT {
         x: lparam.0 as u16 as i16 as i32,
         y: (lparam.0 >> 16) as u16 as i16 as i32,
-    }];
+    }
+}
+fn root_point(s: &State, point: POINT) -> POINT {
+    let mut point = [point];
     unsafe {
         MapWindowPoints(Some(s.hwnd.get()), Some(s.root), &mut point);
     }
-    point[0].x as f64 / scale
+    point[0]
 }
 fn apply(s: &State, config: &Config) -> Result<()> {
     if let Some(pane) = &config.left {
@@ -382,24 +404,30 @@ fn move_to(s: &State, x: f64) {
     }
     s.busy.set(false);
 }
-fn point_previews(s: &State, lparam: LPARAM) {
-    let mut point = [POINT {
-        x: lparam.0 as u16 as i16 as i32,
-        y: (lparam.0 >> 16) as u16 as i16 as i32,
-    }];
-    unsafe {
-        MapWindowPoints(Some(s.hwnd.get()), Some(s.root), &mut point);
-    }
-    if let Some(c) = s.config.borrow().as_ref() {
-        for pane in [&c.left, &c.right].into_iter().flatten() {
-            pane.surface.pointer(point[0].x as f32, point[0].y as f32);
+fn drag(s: &State, point: POINT) {
+    let config = s.config.borrow().clone();
+    let Some(config) = config else { return; };
+    if !s.dragging.get() {
+        let Some(pressed) = s.pressed.get() else { return; };
+        if ((point.x - pressed.x).abs() as f64) < DRAG_THRESHOLD * config.scale { return; }
+        for (pane, rect) in [(&config.left, config.layout.primary), (&config.right, config.layout.secondary)] {
+            if let Some(pane) = pane { pane.begin_preview(rect, config.scale); }
         }
+        let x = root_point(s, pressed).x as f64 / config.scale;
+        s.grab_offset.set(x - config.layout.primary.x - config.layout.primary.width);
+        s.dragging.set(true);
+        report(s, &config, true, None);
     }
+    let point = root_point(s, point);
+    for pane in [&config.left, &config.right].into_iter().flatten() {
+        pane.surface.pointer(point.x as f32, point.y as f32);
+    }
+    move_to(s, point.x as f64 / config.scale);
 }
 fn finish(s: &State) {
-    if !s.dragging.replace(false) {
-        return;
-    }
+    let pressed = s.pressed.take().is_some();
+    let dragging = s.dragging.replace(false);
+    if !pressed && !dragging { return; }
     unsafe {
         if GetCapture() == s.hwnd.get() {
             let _ = ReleaseCapture();
@@ -410,6 +438,7 @@ fn finish(s: &State) {
             GetCursorPos(&mut point).is_ok() && WindowFromPoint(point) == s.hwnd.get(),
         );
     }
+    if !dragging { return; }
     let config = s.config.borrow().clone();
     if let Some(config) = config {
         let restore = || -> Result<()> {
@@ -462,31 +491,14 @@ unsafe extern "system" fn procedure(
             return LRESULT(0);
         }
         WM_LBUTTONDOWN => {
-            let config = s.config.borrow().clone();
-            if let Some(config) = config {
-                if let Some(pane) = &config.left {
-                    pane.begin_preview(config.layout.primary, config.scale);
-                }
-                if let Some(pane) = &config.right {
-                    pane.begin_preview(config.layout.secondary, config.scale);
-                }
-                point_previews(s, lparam);
-                let x = cursor_x(s, lparam, config.scale);
-                s.grab_offset
-                    .set(x - config.layout.primary.x - config.layout.primary.width);
-                s.dragging.set(true);
+            if s.config.borrow().is_some() {
+                s.pressed.set(Some(mouse_point(lparam)));
                 SetCapture(hwnd);
-                let error = apply(s, &config).err().map(|e| e.to_string());
-                report(s, &config, s.dragging.get(), error);
             }
             return LRESULT(0);
         }
-        WM_MOUSEMOVE if s.dragging.get() => {
-            point_previews(s, lparam);
-            let scale = s.config.borrow().as_ref().map(|c| c.scale);
-            if let Some(scale) = scale {
-                move_to(s, cursor_x(s, lparam, scale));
-            }
+        WM_MOUSEMOVE if s.pressed.get().is_some() => {
+            drag(s, mouse_point(lparam));
             return LRESULT(0);
         }
         WM_MOUSEMOVE => {
@@ -498,13 +510,14 @@ unsafe extern "system" fn procedure(
             return LRESULT(0);
         }
         WM_LBUTTONUP => {
-            if s.dragging.get() {
-                let scale = s.config.borrow().as_ref().map(|c| c.scale);
-                if let Some(scale) = scale {
-                    move_to(s, cursor_x(s, lparam, scale));
-                }
-            }
+            let point = mouse_point(lparam);
+            drag(s, point);
+            let clicked = !s.dragging.get() && s.pressed.get().is_some_and(|pressed| {
+                let threshold = s.config.borrow().as_ref().map_or(0., |c| DRAG_THRESHOLD * c.scale);
+                ((point.y - pressed.y).abs() as f64) < threshold
+            });
             finish(s);
+            if clicked { (s.guide)(Guide::Click); }
             return LRESULT(0);
         }
         WM_CAPTURECHANGED | WM_CANCELMODE => {
@@ -614,7 +627,7 @@ mod tests {
             root.0,
             popup.0,
             move || count.set(count.get() + 1),
-            move |hovered| events.borrow_mut().push(hovered),
+            move |guide| events.borrow_mut().push(guide),
         )
         .unwrap();
         let config = Config {
@@ -648,13 +661,19 @@ mod tests {
             SendMessageW(hwnd, WM_MOUSEMOVE, None, Some(point(2)));
             SendMessageW(hwnd, WM_MOUSELEAVE, None, None);
         }
-        assert_eq!(*hover_events.borrow(), [true, false]);
+        assert_eq!(*hover_events.borrow(), [Guide::Hover(true), Guide::Hover(false)]);
+        unsafe {
+            SendMessageW(hwnd, WM_LBUTTONDOWN, None, Some(point(1)));
+            SendMessageW(hwnd, WM_MOUSEMOVE, None, Some(point(2)));
+            SendMessageW(hwnd, WM_LBUTTONUP, None, Some(point(2)));
+        }
+        assert_eq!(hover_events.borrow().last(), Some(&Guide::Click));
+        assert_eq!(notifications.get(), 0);
         unsafe {
             SendMessageW(hwnd, WM_LBUTTONDOWN, None, Some(point(1)));
         }
-        assert!(handle.dragging());
+        assert!(!handle.dragging());
         assert_eq!(unsafe { GetCapture() }, handle.state.hwnd.get());
-        handle.take_update();
         unsafe {
             SendMessageW(
                 handle.state.hwnd.get(),
@@ -663,6 +682,8 @@ mod tests {
                 Some(point(100)),
             );
         }
+        assert!(handle.dragging());
+        assert!(handle.take_update().unwrap().resizing);
         // Config changed inside the mouse callback, before the app handles any
         // notification and without a UI renderer or IPC handler in this test.
         assert_eq!(
@@ -723,7 +744,7 @@ mod tests {
             SendMessageW(hwnd, WM_MOUSEMOVE, None, Some(point(1)));
         }
         handle.configure(None).unwrap();
-        assert_eq!(*hover_events.borrow(), [true, false, true, false]);
+        assert_eq!(*hover_events.borrow(), [Guide::Hover(true), Guide::Hover(false), Guide::Click, Guide::Hover(true), Guide::Hover(false)]);
         assert!(!unsafe { IsWindowVisible(handle.state.hwnd.get()) }.as_bool());
     }
 }

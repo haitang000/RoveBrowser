@@ -16,6 +16,7 @@ import ActionToast from "./ActionToast.vue";
 import DownloadsPanel from "./DownloadsPanel.vue";
 import BrowserMenu from "./BrowserMenu.vue";
 import QuitDialog from "./QuitDialog.vue";
+import SplitControls from "./SplitControls.vue";
 import { browserKey } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
 import { frameOf } from "../../lib/space-look";
@@ -41,7 +42,7 @@ function dismissPreview() {
 }
 function report() {
   const modals = ".quit-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer";
-  const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer`);
+  const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer, .split-controls, .split-controls-dismiss`);
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -58,7 +59,7 @@ function report() {
     return surfaceRegion(bounds, element.classList.contains("reader-options-layer") ? 24 : shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout, downloads });
-  const active = b.quitOpen ? "quit" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.findOpen ? "find" : "";
+  const active = b.quitOpen ? "quit" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.splitControls ? "splitControls" : b.findOpen ? "find" : "";
   const focus = Boolean(active && active !== focusKey);
   focusKey = active;
   if (next !== last || focus) {
@@ -66,7 +67,7 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus, downloads });
   }
   if (focus) {
-    const selector = active === "quit" ? ".quit-dialog" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : ".context-menu input, .context-menu button";
+    const selector = active === "quit" ? ".quit-dialog" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : ".context-menu input, .context-menu button";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }
@@ -96,5 +97,6 @@ onBeforeUnmount(() => {
   <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
   <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><BrowserMenu /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
   <ReaderControls />
+  <SplitControls />
   <QuitDialog v-if="b.quitOpen" />
 </template>

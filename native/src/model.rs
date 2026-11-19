@@ -382,6 +382,8 @@ pub enum Command {
     SidebarWidth { width: Option<f64> },
     #[serde(rename = "split")]
     Split { id: String, other: String },
+    #[serde(rename = "swapSplit")]
+    SwapSplit { id: String, other: String },
     #[serde(rename = "unsplit")]
     Unsplit,
     #[serde(rename = "back")]

@@ -106,3 +106,32 @@ test("spaces, dark mode, pinning and split container", async ({ page }) => {
   await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
   await expect(page.locator(".sidebar-track")).toHaveCSS("width", "240px");
 });
+
+test("split controls swap the panes and toggle the sidebar focus mode", async ({ page }) => {
+  await page.getByRole("tab", { name: "GitHub" }).click();
+  await page.getByRole("tab", { name: "Wikipedia" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "在当前网页旁分屏" }).click();
+  const divider = page.getByRole("separator", { name: "调整分屏比例" });
+  const controls = page.getByRole("group", { name: "分屏操作" });
+  await divider.press("ArrowRight");
+  await expect(divider).toHaveAttribute("aria-valuenow", "55");
+  await divider.click();
+  await expect(divider).toHaveClass(/is-expanded/);
+  await controls.getByRole("button", { name: "对调" }).click();
+  await expect(page.locator(".split .preview-page")).toHaveCount(2);
+  await expect(controls).toHaveCount(0);
+  await expect(divider).toHaveAttribute("aria-valuenow", "45");
+  await expect(page.getByRole("region", { name: "左侧窗格" }).locator(".address-field")).toHaveText("en.wikipedia.org");
+  await expect(page.getByRole("region", { name: "右侧窗格" }).locator(".address-field")).toHaveText("github.com");
+  await divider.press("Enter");
+  await controls.getByRole("button", { name: "全屏", exact: true }).click();
+  await expect(page.locator(".browser-shell")).toHaveClass(/sidebar-hidden/);
+  await expect(controls).toHaveCount(0);
+  await divider.press("Enter");
+  await controls.getByRole("button", { name: "退出全屏" }).click();
+  await expect(page.locator(".browser-shell")).not.toHaveClass(/sidebar-hidden/);
+  await expect(controls).toHaveCount(0);
+  await divider.press("Enter");
+  await page.keyboard.press("Escape");
+  await expect(controls).toHaveCount(0);
+});

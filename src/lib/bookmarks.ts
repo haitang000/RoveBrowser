@@ -175,6 +175,21 @@ export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string)
       if (a && b && a.id !== b.id && a.spaceId === b.spaceId) { a.splitWith = b.id; activateTab(s, a); }
       break;
     }
+    case "swapSplit": {
+      const left = s.tabs.findIndex((t) => t.id === s.activeTab && t.id === c.id && t.splitWith === c.other);
+      if (left < 0) break;
+      const a = s.tabs[left];
+      const right = s.tabs.findIndex((t) => t.id === c.other && t.spaceId === a.spaceId);
+      if (right < 0) break;
+      const b = s.tabs[right];
+      if (b.splitWith !== a.id) {
+        delete a.splitWith;
+        b.splitWith = a.id;
+        if (!a.bookmarkId && !b.bookmarkId) [s.tabs[left], s.tabs[right]] = [b, a];
+      }
+      activateTab(s, b);
+      break;
+    }
     case "unsplit": {
       const active = s.tabs.find((t) => t.id === s.activeTab);
       const other = active?.splitWith;

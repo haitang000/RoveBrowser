@@ -884,16 +884,77 @@ kbd {
 .split-divider::after {
   content: "";
   position: absolute;
-  inset: 8px 0;
+  inset: 0;
   width: 2px;
-  margin-inline: auto;
+  height: 200px;
+  max-height: calc(100% - 16px);
+  margin: auto;
   border-radius: 1px;
   background: var(--accent);
   opacity: 0;
   pointer-events: none;
+  transition: transform 180ms cubic-bezier(.2,.75,.27,1);
 }
-.split-divider:is(:hover, :focus-visible, .is-hovered, .is-dragging)::after {
+.split-divider:is(:hover, :focus-visible, .is-hovered, .is-dragging, .is-expanded)::after {
   opacity: 1;
+}
+.split-divider.is-expanded::after {
+  transform: scaleX(2);
+}
+.split-controls-dismiss {
+  position: fixed;
+  z-index: 49;
+  inset: 0;
+}
+.split-controls {
+  position: fixed;
+  z-index: 50;
+  translate: -50% -50%;
+}
+.split-controls-surface {
+  display: grid;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: 0 3px 14px var(--panel-shadow);
+}
+.split-controls .icon-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+.split-controls .icon-button:hover {
+  color: var(--accent);
+  background: var(--chosen);
+}
+.split-controls .icon-button:active {
+  transform: scale(.94);
+}
+.split-controls-enter-active,
+.split-controls-leave-active {
+  transition: opacity 130ms ease;
+}
+.split-controls-enter-active .split-controls-surface,
+.split-controls-leave-active .split-controls-surface {
+  transition: transform 130ms cubic-bezier(.2,.75,.27,1);
+}
+.split-controls-enter-from,
+.split-controls-leave-to {
+  opacity: 0;
+}
+.split-controls-enter-from .split-controls-surface,
+.split-controls-leave-to .split-controls-surface {
+  transform: scale(.25,.8);
+}
+.split-controls-leave-active { pointer-events: none; }
+:root[data-reduce-motion=true] .split-divider::after,
+:root[data-reduce-motion=true] .split-controls-surface {
+  transition: none;
+}
+:root[data-reduce-motion=true] .split-controls-surface {
+  transform: none;
 }
 .preview-page {
   height: 100%;

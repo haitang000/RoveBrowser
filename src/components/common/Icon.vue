@@ -30,6 +30,8 @@ const paths: Record<string, string> = {
   minimize: "M3 8h10",
   maximize: "M3 3h10v10H3z",
   expand: "M2 6V2h4M10 14h4v-4M2 2l4 4M14 14l-4-4",
+  contract: "M2 2l4 4M2 6h4V2M14 14l-4-4M14 10h-4v4",
+  swap: "M2 5h12m-3-3 3 3-3 3M14 11H2m3-3-3 3 3 3",
   restore: "M5 2h9v9M2 5h9v9H2z",
   arrow: "M3 8h10M9 4l4 4-4 4",
   chevron: "m5 6 3 3 3-3",

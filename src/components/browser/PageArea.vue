@@ -15,15 +15,20 @@ import Icon from "../common/Icon.vue";
 import Peek from "./Peek.vue";
 import NewTabPage from "./NewTabPage.vue";
 import PageToolbar from "./PageToolbar.vue";
+import SplitControls from "./SplitControls.vue";
 import { isSettingsUrl } from "../../lib/settings";
 import { pageDirection, type PageDirection } from "../../lib/page-motion";
 const SettingsPage = defineAsyncComponent(() => import("./SettingsPage.vue"));
 const b = useBrowser(),
   primary = ref<HTMLElement>(),
   secondary = ref<HTMLElement>(),
+  leftPane = ref<HTMLElement>(),
+  rightPane = ref<HTMLElement>(),
+  divider = ref<HTMLElement>(),
   container = ref<HTMLElement>(),
   ratio = ref(0.5),
   resizing = ref(false),
+  swapping = ref(false),
   sidebarMotion = ref(false),
   dropTarget = ref<HTMLElement>();
 const other = computed(() => b.splitPartner);
@@ -40,6 +45,7 @@ watch([dropTarget, () => dropTarget.value && b.popupArea], ([target]) => {
 }, { flush: "post" });
 let ro: ResizeObserver;
 let finishResize: (() => void) | undefined;
+let paneAnimations: Animation[] = [];
 let reported: { primary: Rect; secondary: Rect | null; sidebar: Rect | null } | undefined;
 // Zigzag's native ResizeHandle owns the real frames while dragging. This event
 // only keeps the shell headers and fallback content in step with native input.
@@ -48,10 +54,52 @@ watch(() => b.splitResize, (update) => {
   resizing.value = update.resizing;
   ratio.value = update.ratio;
 });
-watch([() => b.active?.id, () => b.active?.splitWith], () => {
+watch([() => b.active?.id, () => b.active?.splitWith], ([left, right], [previousLeft, previousRight]) => {
   finishResize?.();
   resizing.value = false;
+  b.splitControls = undefined;
+  const panes = [leftPane.value, rightPane.value];
+  const swap = Boolean(left && right && left === previousRight && right === previousLeft);
+  const from = swap && !b.native ? panes.map(pane => pane?.getBoundingClientRect()).reverse() : [];
+  paneAnimations.forEach(animation => animation.cancel());
+  paneAnimations = [];
+  swapping.value = swap;
+  if (!swap) return;
+  if (!b.native) ratio.value = 1 - ratio.value;
+  void nextTick(() => {
+    if (b.active?.id !== left || other.value?.id !== right) return;
+    swapping.value = false;
+    if (b.native || b.settings.reduceMotion || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    panes.forEach((pane, index) => {
+      const start = from[index];
+      if (!pane || !start) return;
+      const end = pane.getBoundingClientRect();
+      const x = start.x - end.x, y = start.y - end.y;
+      const side = Math.sign(x);
+      const frames = Array.from({ length: 13 }, (_, frame) => {
+        const t = frame / 12;
+        const slide = t ** 3 * (t * (6 * t - 15) + 10);
+        const lift = Math.sin(Math.PI * t) ** 2;
+        return { transform: `translate(${x * (1 - slide)}px, ${y * (1 - slide) + side * 24 * lift}px) perspective(900px) rotateY(${side * 9 * lift}deg) scale(${1 - 0.068 * lift})` };
+      });
+      paneAnimations.push(pane.animate(frames, { duration: 360 }));
+    });
+  });
 });
+watch([resizing, () => b.overlay, () => b.peek, () => b.sidebarResizing], ([dragging, overlay, peek, sidebar]) => {
+  if (dragging || overlay || peek || sidebar) b.splitControls = undefined;
+});
+watch(() => b.splitClick, toggleSplitControls);
+function positionSplitControls() {
+  if (!divider.value || !b.active || !other.value) return;
+  const { x, y, width, height } = divider.value.getBoundingClientRect();
+  const center = { x: x + width / 2, y: y + height / 2, gap: width, id: b.active.id, other: other.value.id };
+  if (b.splitControls?.x !== center.x || b.splitControls?.y !== center.y || b.splitControls?.gap !== width) b.splitControls = center;
+}
+function toggleSplitControls() {
+  if (b.splitControls) b.splitControls = undefined;
+  else if (!resizing.value && !b.overlay && !b.peek) positionSplitControls();
+}
 const primaryDir = ref<PageDirection>(0);
 const secondaryDir = ref<PageDirection>(0);
 const spaceTabs = () => b.state.tabs.filter((tab) => tab.spaceId === b.space.id);
@@ -85,6 +133,7 @@ function layout() {
   // changes only the shell; sending its intermediate bounds back creates a loop.
   if (b.sidebarResize?.resizing) return;
   if (!primary.value || !container.value) return;
+  if (b.splitControls) positionSplitControls();
   const card = container.value.getBoundingClientRect();
   const popup = { x: card.x + container.value.clientLeft, y: card.y + container.value.clientTop, width: container.value.clientWidth, height: container.value.clientHeight };
   if (popup.x !== b.popupArea.x || popup.y !== b.popupArea.y || popup.width !== b.popupArea.width || popup.height !== b.popupArea.height)
@@ -163,6 +212,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   sidebarGeneration++;
   finishResize?.();
+  paneAnimations.forEach(animation => animation.cancel());
   ro?.disconnect();
   window.removeEventListener("resize", layout);
 });
@@ -180,12 +230,14 @@ function resize(e: PointerEvent) {
   const width = area.clientWidth - gap;
   const rect = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height, corners: [0, 0, 0, 0] });
   handle.setPointerCapture(e.pointerId);
-  resizing.value = true;
-  layout();
   // Pointer capture keeps dragging over native pages without covering them.
   // Only the live viewport bounds change; no overlay or thumbnail is needed.
   handle.onpointermove = (ev) => {
     if (width <= 0) return;
+    if (!resizing.value) {
+      if (Math.abs(ev.clientX - e.clientX) < 4) return;
+      resizing.value = true;
+    }
     const floor = Math.max(0.2, 260 / width), ceiling = Math.min(0.8, 1 - floor);
     const next = (ev.clientX - card.x - area.clientLeft - grabOffset) / width;
     // Match Zigzag's minimumPaneWidth and floor the shared edge once.
@@ -210,7 +262,11 @@ function resize(e: PointerEvent) {
     if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
   };
   finishResize = finish;
-  handle.onpointerup = finish;
+  handle.onpointerup = (ev) => {
+    const click = !resizing.value && Math.abs(ev.clientX - e.clientX) < 4 && Math.abs(ev.clientY - e.clientY) < 4;
+    finish();
+    if (click) toggleSplitControls();
+  };
   handle.onpointercancel = finish;
   handle.onlostpointercapture = finish;
 }
@@ -243,7 +299,7 @@ async function split(e: DragEvent) {
     @dragover="allowTabDrop"
     @drop="split"
   >
-    <div class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? '左侧窗格' : undefined">
+    <div ref="leftPane" class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? '左侧窗格' : undefined">
       <PageToolbar v-if="other && b.active" :pane="b.active" data-chrome-motion="left-pane">
         <button
           class="icon-button"
@@ -255,7 +311,7 @@ async function split(e: DragEvent) {
         </button>
       </PageToolbar>
       <div ref="primary" class="webview-slot" :data-page-dir="primaryDir">
-        <Transition name="page">
+        <Transition name="page" :css="!swapping">
         <SettingsPage v-if="b.active && isSettingsUrl(b.active.url)" :key="`settings:${b.active.id}`" :tab-id="b.active.id" :url="b.active.url" />
         <NewTabPage
           v-else-if="b.active?.url === 'era://newtab' || !b.active"
@@ -273,18 +329,22 @@ async function split(e: DragEvent) {
     </div>
     <template v-if="other"
       ><div
+        ref="divider"
         class="split-divider"
-        :class="{ 'is-hovered': b.splitHovered, 'is-dragging': resizing }"
+        :class="{ 'is-hovered': b.splitHovered, 'is-dragging': resizing, 'is-expanded': b.splitControls }"
         role="separator"
         aria-label="调整分屏比例"
         aria-orientation="vertical"
         :aria-valuenow="Math.round(ratio * 100)"
         tabindex="0"
+        title="拖动调整比例，单击显示分屏操作"
+        @keydown.enter.prevent="toggleSplitControls"
+        @keydown.space.prevent="toggleSplitControls"
         @pointerdown="resize"
         @keydown.left.prevent="ratio = Math.max(0.2, ratio - 0.05)"
         @keydown.right.prevent="ratio = Math.min(0.8, ratio + 0.05)"
       />
-      <div class="page-pane" role="region" aria-label="右侧窗格">
+      <div ref="rightPane" class="page-pane" role="region" aria-label="右侧窗格">
         <PageToolbar :pane="other" data-chrome-motion="right-pane">
           <button
             class="icon-button"
@@ -296,7 +356,7 @@ async function split(e: DragEvent) {
           </button>
         </PageToolbar>
         <div ref="secondary" class="webview-slot" :data-page-dir="secondaryDir">
-          <Transition name="page">
+          <Transition name="page" :css="!swapping">
           <SettingsPage v-if="isSettingsUrl(other.url)" :key="`settings:${other.id}`" :tab-id="other.id" :url="other.url" />
           <NewTabPage v-else-if="other.url === 'era://newtab'" :key="`newtab:${other.id}`" :tab-id="other.id" />
           <div
@@ -312,6 +372,7 @@ async function split(e: DragEvent) {
         </div>
       </div></template
     >
+    <SplitControls v-if="!b.native" />
     <div v-if="canDrop" ref="dropTarget" class="split-drop-target">
       <Icon name="split" :size="24" /><span>拖到这里，打开左右分屏</span>
     </div>

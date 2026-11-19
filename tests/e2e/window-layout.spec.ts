@@ -566,17 +566,20 @@ test("split dragging updates both live pane bounds without opening an overlay", 
   // Grab the edge rather than the center: the first move must not jump.
   await page.mouse.move(start.x + 1, start.y + 100);
   await page.mouse.down();
+  await page.mouse.move(start.x + 2, start.y + 100);
+  await expect(page.locator('.page-area')).toHaveCSS('border-radius', '8px');
+  await page.mouse.move(start.x + 8, start.y + 100);
   await expect(page.locator('.page-area')).toHaveCSS('border-radius', '0px');
   await expect(page.locator('.page-area')).toHaveCSS('box-shadow', 'none');
   await expect.poll(() => page.evaluate(() => (window.__windowTest.layout as Layout & { liveResize: boolean })?.liveResize)).toBe(true);
-  for (const delta of [1, 160, -220, 1200, -1200, 80]) {
+  for (const delta of [7, 160, -220, 1200, -1200, 80]) {
     await page.mouse.move(start.x + 1 + delta, start.y + 100, { steps: 4 });
     const widths = await page.locator(".webview-slot").evaluateAll(slots => slots.map(s => s.getBoundingClientRect().width));
     await expect.poll(() => page.evaluate((widths) => {
       const layout = window.__windowTest.layout!;
       return Math.max(Math.abs(layout.primary.width - widths[0]!), Math.abs(layout.secondary!.width - widths[1]!));
     }, widths)).toBeLessThan(0.1);
-    if (delta === 1) expect(Math.abs(widths[0]! - before[0]! - 1)).toBeLessThan(1);
+    if (delta === 7) expect(Math.abs(widths[0]! - before[0]! - 7)).toBeLessThan(1);
     expect(Number(await divider.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(20);
     expect(Number(await divider.getAttribute("aria-valuenow"))).toBeLessThanOrEqual(80);
     expect(await page.evaluate(() => window.__windowTest.overlays)).toEqual([]);
@@ -632,6 +635,7 @@ test("native split feedback updates the shell without sending a resize back whil
   await expect.poll(guideOpacity).toBe('0');
   await divider.hover();
   await expect.poll(guideOpacity).toBe('1');
+  expect(await divider.evaluate(node => getComputedStyle(node, '::after').height)).toBe('200px');
   await page.mouse.move(0, 0);
   await expect.poll(guideOpacity).toBe('0');
   await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitHover', visible: true }));

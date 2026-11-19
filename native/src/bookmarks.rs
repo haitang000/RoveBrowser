@@ -506,6 +506,23 @@ impl State {
                     }
                 }
             }
+            Command::SwapSplit { id, other } => {
+                if self.active_tab != *id || self.active().and_then(|tab| tab.split_with.as_ref()) != Some(other) {
+                    return Ok(true);
+                }
+                let left = self.tabs.iter().position(|tab| &tab.id == id).unwrap();
+                let Some(right) = self.tabs.iter().position(|tab| &tab.id == other && tab.space_id == self.tabs[left].space_id) else {
+                    return Ok(true);
+                };
+                if self.tabs[right].split_with.as_ref() != Some(id) {
+                    self.tabs[left].split_with = None;
+                    self.tabs[right].split_with = Some(id.clone());
+                    if self.tabs[left].bookmark_id.is_none() && self.tabs[right].bookmark_id.is_none() {
+                        self.tabs.swap(left, right);
+                    }
+                }
+                self.activate(other);
+            }
             Command::Unsplit => {
                 let active = self.active_tab.clone();
                 let other = self.active().and_then(|t| t.split_with.clone());
