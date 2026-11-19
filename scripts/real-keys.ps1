@@ -1,8 +1,10 @@
 param(
   [Parameter(Mandatory = $true)][int]$ProcessId,
-  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'ctrl-r', 'f5', 'ctrl-shift-f', 'ctrl-alt-r', 'ctrl-0', 'escape', 'ctrl-wheel-up', 'ctrl-wheel-down', 'wheel-down')][string]$Action,
+  [Parameter(Mandatory = $true)][ValidateSet('click-page', 'ctrl-j', 'ctrl-r', 'f5', 'ctrl-shift-f', 'ctrl-alt-r', 'ctrl-0', 'escape', 'ctrl-wheel-up', 'ctrl-wheel-down', 'wheel-down', 'drag-tab', 'cancel-tab-drag')][string]$Action,
   [double]$xFrac = 0.62,
-  [double]$yFrac = 0.5
+  [double]$yFrac = 0.5,
+  [double]$FromXFrac,
+  [double]$FromYFrac
 )
 # Sends trusted OS input to a Rove test window. CDP-injected keys bypass
 # WebView2's AcceleratorKeyPressed, so native smoke tests that exercise page
@@ -37,6 +39,37 @@ $cursor = New-Object Native.Win+POINT
 $oldX = $cursor.X; $oldY = $cursor.Y
 $x = [int]($rect.Left + ($rect.Right - $rect.Left) * $xFrac)
 $y = [int]($rect.Top + ($rect.Bottom - $rect.Top) * $yFrac)
+if ($Action -in 'drag-tab', 'cancel-tab-drag') {
+  if ([Native.Win]::GetForegroundWindow() -ne $handle) {
+    [Native.Win]::SetWindowPos($handle, [IntPtr](-2), 0, 0, 0, 0, 0x0013) | Out-Null
+    throw 'The Rove test window did not receive foreground focus.'
+  }
+  $fromX = [int]($rect.Left + ($rect.Right - $rect.Left) * $FromXFrac)
+  $fromY = [int]($rect.Top + ($rect.Bottom - $rect.Top) * $FromYFrac)
+  [Native.Win]::SetCursorPos($fromX, $fromY) | Out-Null
+  [Native.Win]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+  try {
+    Start-Sleep -Milliseconds 80
+    [Native.Win]::SetCursorPos(($fromX + 12), $fromY) | Out-Null
+    Start-Sleep -Milliseconds 160
+    for ($step = 1; $step -le 12; $step++) {
+      [Native.Win]::SetCursorPos([int]($fromX + ($x - $fromX) * $step / 12), [int]($fromY + ($y - $fromY) * $step / 12)) | Out-Null
+      Start-Sleep -Milliseconds 16
+    }
+    Start-Sleep -Milliseconds 250
+    if ($Action -eq 'cancel-tab-drag') {
+      [Native.Win]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)
+      [Native.Win]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 60
+    }
+  } finally {
+    [Native.Win]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    [Native.Win]::SetCursorPos($oldX, $oldY) | Out-Null
+    [Native.Win]::SetWindowPos($handle, [IntPtr](-2), 0, 0, 0, 0, 0x0013) | Out-Null
+  }
+  Write-Output "action=$Action targetPid=$ProcessId from=$fromX,$fromY to=$x,$y"
+  exit
+}
 # Click into the page so the page WebView owns keyboard focus.
 [Native.Win]::SetCursorPos($x, $y) | Out-Null
 [Native.Win]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)

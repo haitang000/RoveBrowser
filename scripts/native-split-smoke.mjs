@@ -2,11 +2,12 @@
 import assert from 'node:assert/strict';
 import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { access, mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { checkSplitResize } from './native-split-checks.mjs';
 
 const profile = await mkdtemp(join(tmpdir(), 'rove-split-'));
@@ -15,6 +16,7 @@ const port = Number(process.env.ERA_SMOKE_PORT || 19876);
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-split');
 await mkdir(output, { recursive: true });
 const hits = {};
+const input = promisify(execFile);
 const server = createServer((req, res) => {
   hits[req.url] = (hits[req.url] || 0) + 1;
   const right = req.url === '/right';
@@ -57,8 +59,36 @@ try {
   const rightId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
   await send({ type: 'activate', id: leftId });
   await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id')) === leftId, 'primary activation');
-  await send({ type: 'split', id: leftId, other: rightId });
-  await ui.locator('.split-divider').waitFor();
+  const from = await ui.locator(`.tab-list [data-tab-id="${rightId}"]`).boundingBox();
+  const area = await ui.locator('.page-area').boundingBox();
+  const viewport = await ui.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  const tabDropInput = action => input('powershell.exe', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve('scripts/real-keys.ps1'),
+    '-ProcessId', String(child.pid), '-Action', action,
+    '-FromXFrac', String((from.x + 45) / viewport.width), '-FromYFrac', String((from.y + from.height / 2) / viewport.height),
+    '-xFrac', String((area.x + area.width * 0.75) / viewport.width), '-yFrac', String((area.y + area.height / 2) / viewport.height),
+  ], { windowsHide: true, timeout: 15000 });
+  await left.evaluate(() => {
+    window.tabDropClicks = 0;
+    window.tabDropMarker = crypto.randomUUID();
+    addEventListener('pointerdown', () => window.tabDropClicks++);
+  });
+  const marker = await left.evaluate(() => window.tabDropMarker);
+  const cancelled = tabDropInput('cancel-tab-drag');
+  try {
+    await ui.locator('.split-drop-target').waitFor({ timeout: 5000 });
+    assert.equal(await left.evaluate(() => document.visibilityState), 'visible');
+  } finally {
+    await cancelled;
+  }
+  await ui.locator('.split-drop-target').waitFor({ state: 'detached' });
+  assert.equal(await ui.locator('.split-divider').count(), 0, 'Esc cancels the drop');
+  await tabDropInput('click-page');
+  await waitFor(() => left.evaluate(() => window.tabDropClicks === 1), 'live page receives clicks after cancelling');
+  await tabDropInput('drag-tab');
+  await ui.locator('.split-divider').waitFor({ timeout: 5000 });
+  await ui.locator('.split-drop-target').waitFor({ state: 'detached' });
+  assert.equal(await left.evaluate(() => window.tabDropMarker), marker, 'dragging keeps the live page document');
   const widths = await ui.locator('.webview-slot').evaluateAll(slots => slots.map(slot => slot.getBoundingClientRect().width));
   await waitFor(async () => {
     const viewports = await Promise.all([left, right].map(page => page.evaluate(() => innerWidth)));

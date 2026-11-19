@@ -409,6 +409,8 @@ pub enum Command {
         #[serde(default)]
         command: bool,
     },
+    #[serde(rename = "tabDropTarget")]
+    TabDropTarget { rect: Option<Rect> },
     #[serde(rename = "popupReady")]
     PopupReady,
     #[serde(rename = "popupState")]

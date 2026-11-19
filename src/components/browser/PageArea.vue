@@ -2,6 +2,7 @@
 import {
   computed,
   defineAsyncComponent,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -24,8 +25,19 @@ const b = useBrowser(),
   ratio = ref(0.5),
   resizing = ref(false),
   sidebarMotion = ref(false),
-  drop = ref(false);
+  dropTarget = ref<HTMLElement>();
 const other = computed(() => b.splitPartner);
+const canDrop = computed(() => b.dragging && !!b.active && !b.spaceFormOpen && !b.peek);
+watch([dropTarget, () => dropTarget.value && b.popupArea], ([target]) => {
+  if (!b.native) return;
+  if (!target) {
+    b.send({ type: "tabDropTarget", rect: null });
+    return;
+  }
+  const { x, y, width, height } = target.getBoundingClientRect();
+  const radius = parseFloat(getComputedStyle(target).borderTopLeftRadius);
+  b.send({ type: "tabDropTarget", rect: { x, y, width, height, corners: [radius, radius, radius, radius] } });
+}, { flush: "post" });
 let ro: ResizeObserver;
 let finishResize: (() => void) | undefined;
 let reported: { primary: Rect; secondary: Rect | null; sidebar: Rect | null } | undefined;
@@ -202,11 +214,22 @@ function resize(e: PointerEvent) {
   handle.onpointercancel = finish;
   handle.onlostpointercapture = finish;
 }
-function split(e: DragEvent) {
-  drop.value = false;
+function allowTabDrop(e: DragEvent) {
+  if (!canDrop.value || !e.dataTransfer?.types.includes("text/era-tab")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+}
+async function split(e: DragEvent) {
+  if (!canDrop.value) return;
   const id = e.dataTransfer?.getData("text/era-tab");
-  if (id) b.send({ type: "split", id: b.state.activeTab, other: id });
+  const active = b.active;
+  if (!id || !active) return;
+  e.preventDefault();
   b.dragging = false;
+  if (id === active.id || id === active.bookmarkId) return;
+  // Restore the live page region before the host captures its split entrance.
+  await nextTick();
+  b.send({ type: "split", id: active.id, other: id });
 }
 </script>
 <template>
@@ -215,11 +238,10 @@ function split(e: DragEvent) {
     class="page-area"
     :inert="b.spaceFormOpen"
     :aria-hidden="b.spaceFormOpen ? true : undefined"
-    :class="{ split: other, dropping: drop, resizing: resizing || b.sidebarResizing, 'sidebar-motion-preview': sidebarMotion && !b.native }"
+    :class="{ split: other, resizing: resizing || b.sidebarResizing, 'sidebar-motion-preview': sidebarMotion && !b.native }"
     :style="{ '--split-ratio': ratio }"
-    @dragover.prevent="drop = true"
-    @dragleave.self="drop = false"
-    @drop.prevent="split"
+    @dragover="allowTabDrop"
+    @drop="split"
   >
     <div class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? '左侧窗格' : undefined">
       <PageToolbar v-if="other && b.active" :pane="b.active" data-chrome-motion="left-pane">
@@ -289,7 +311,7 @@ function split(e: DragEvent) {
         </div>
       </div></template
     >
-    <div v-if="b.dragging" class="split-drop-target">
+    <div v-if="canDrop" ref="dropTarget" class="split-drop-target">
       <Icon name="split" :size="24" /><span>拖到这里，打开左右分屏</span>
     </div>
     <Peek v-if="!b.native" />

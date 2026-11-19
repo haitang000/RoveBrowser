@@ -263,6 +263,7 @@ export const useBrowser = defineStore("browser", () => {
         "history",
         "suggest",
         "overlay",
+        "tabDropTarget",
         "thumbnails",
         "tabPreview",
         "tabPreviewRefresh",

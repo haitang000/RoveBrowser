@@ -101,6 +101,17 @@ test("crossing the fixed area opens one gap, leaving removes it and dropping con
   await expect(page.locator(".tab-drag-item, .tab-drag-source, .tab-drag-gap")).toHaveCount(0);
 });
 
+test("dragging a tab to the page creates a split and removes the drag affordances", async ({ page }) => {
+  await setup(page);
+  await row(page, "alpha").click();
+  const area = page.locator(".page-area");
+  const { width, height } = (await area.boundingBox())!;
+  await row(page, "beta").dragTo(area, { targetPosition: { x: width * 0.75, y: height / 2 } });
+  await expect(page.getByRole("region", { name: "左侧窗格" }).locator(".address-field")).toHaveText("alpha.example");
+  await expect(page.getByRole("region", { name: "右侧窗格" }).locator(".address-field")).toHaveText("beta.example");
+  await expect(page.locator(".split-drop-target, .tab-drag-item")).toHaveCount(0);
+});
+
 test("holding a dragged tab over the browser menu reveals workspace drop targets", async ({ page }) => {
   await setup(page);
   const from = (await row(page, "alpha").boundingBox())!;
