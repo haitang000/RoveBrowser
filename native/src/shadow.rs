@@ -150,6 +150,10 @@ impl Shadow {
             updating: Cell::new(false),
         })
     }
+    pub fn hide(&self) {
+        unsafe { let _ = ShowWindow(self.window, SW_HIDE); }
+    }
+
     pub fn refresh(&self, scale: f64, radius: f64) -> Result<()> {
         // Positioning the sibling can synchronously notify the root again.
         if self.updating.replace(true) {
@@ -165,7 +169,7 @@ impl Shadow {
                 || IsIconic(self.root).as_bool()
                 || IsZoomed(self.root).as_bool()
             {
-                let _ = ShowWindow(self.window, SW_HIDE);
+                self.hide();
                 return Ok(());
             }
             let mut bounds = RECT::default();

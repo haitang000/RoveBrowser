@@ -17,7 +17,7 @@ use std::{
 };
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler, DOMContentLoadedEventHandler,
-    DownloadStartingEventHandler, FaviconChangedEventHandler,
+    ContainsFullScreenElementChangedEventHandler, DownloadStartingEventHandler, FaviconChangedEventHandler,
     IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
@@ -50,12 +50,12 @@ use windows::{
 };
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalPosition, LogicalSize},
+    dpi::{LogicalPosition, LogicalSize, PhysicalPosition},
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     platform::windows::WindowAttributesExtWindows,
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
-    window::{Icon, Window, WindowId},
+    window::{Fullscreen, Icon, Window, WindowId},
 };
 use wry::{
     PageLoadEvent, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows,
@@ -109,6 +109,7 @@ enum Event {
     Title(String, String),
     Load(String, String, bool),
     Source(String, String),
+    PageFullscreen(String, isize, bool),
     Favicon(String, String, String),
     /// Icon links the loaded page declares, for the sharper fetch that follows.
     FaviconLinks(String, String, Vec<crate::favicon::Link>),
@@ -192,6 +193,9 @@ struct NavigationPolicy {
     host_navigation: Cell<bool>,
 }
 impl Page {
+    fn exit_fullscreen(&self) -> wry::Result<()> {
+        self.view.evaluate_script("if (document.fullscreenElement) document.exitFullscreen()")
+    }
     fn split_pane(&self) -> crate::split::Pane {
         crate::split::Pane { hwnd: self.view.hwnd(), controller: self.view.controller(),
             surface: self.resize_surface.clone(),
@@ -339,6 +343,7 @@ struct App {
     split_exit: Option<SplitExit>,
     split_exit_ticket: u64,
     pages: HashMap<String, Page>,
+    fullscreen_page: Option<(String, isize)>,
     reader: Option<ReaderSession>,
     reader_available: HashMap<String, bool>,
     reader_request: Option<(String, String, u64)>,
@@ -501,6 +506,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
         pages: HashMap::new(),
+        fullscreen_page: None,
         reader: None,
         reader_available: HashMap::new(),
         reader_request: None,
@@ -566,7 +572,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
 }
 impl App {
     fn permission_pane(&self, request: &permissions::Request) -> Option<Rect> {
-        if self.quit_pending || self.overlay || self.downloads_open.get() || self.space_form_open() || !self.state.onboarding.completed {
+        if self.fullscreen_page.is_some() || self.quit_pending || self.overlay || self.downloads_open.get() || self.space_form_open() || !self.state.onboarding.completed {
             return None;
         }
         let (page, rect) = if let Some(peek) = &self.peek {
@@ -657,6 +663,11 @@ impl App {
     fn confirm_quit(&mut self) -> bool {
         if self.quit_pending { return false; }
         if !self.state.settings.ask_before_quit { return true; }
+        if self.fullscreen_page.is_some() {
+            if let Err(error) = self.restore_page_window(true).and_then(|_| self.sync_layout()) {
+                self.error(error);
+            }
+        }
         self.finish_split_resize();
         self.dismiss_tab_preview();
         self.quit_pending = true;
@@ -823,10 +834,76 @@ impl App {
         });
     }
     fn page(&self) -> Option<&WebView> {
+        if let Some((id, hwnd)) = &self.fullscreen_page {
+            if let Some(page) = self.page_with_handle(id, *hwnd) {
+                return Some(&page.view);
+            }
+        }
         self.peek
             .as_ref()
             .map(|p| &p.page.view)
             .or_else(|| self.pages.get(&self.state.active_tab).map(|p| &p.view))
+    }
+    fn page_with_handle(&self, id: &str, hwnd: isize) -> Option<&Page> {
+        self.peek.as_ref().filter(|peek| peek.tab.id == id).map(|peek| &peek.page)
+            .or_else(|| self.pages.get(id))
+            .filter(|page| page.view.hwnd().0 as isize == hwnd)
+    }
+    fn can_present_fullscreen(&self, id: &str, hwnd: isize) -> bool {
+        self.page_with_handle(id, hwnd).is_some_and(|page| page.visible.get())
+            && self.state.onboarding.completed && !self.space_form_open()
+            && !self.overlay && !self.quit_pending
+            && self.peek.as_ref().map_or_else(
+                || self.state.visible_tab(id),
+                |peek| peek.tab.id == id && peek.phase == PeekPhase::Open,
+            )
+    }
+    fn page_fullscreen_changed(&mut self, id: String, hwnd: isize, entered: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let source = (id, hwnd);
+        if !entered {
+            if self.fullscreen_page.as_ref() == Some(&source) {
+                self.restore_page_window(false)?;
+                self.sync_layout()?;
+            }
+            return Ok(());
+        }
+        if self.fullscreen_page.as_ref() == Some(&source) { return Ok(()); }
+        if self.fullscreen_page.is_some() || !self.can_present_fullscreen(&source.0, hwnd) {
+            if let Some(page) = self.page_with_handle(&source.0, hwnd) { page.exit_fullscreen()?; }
+            return Ok(());
+        }
+        self.finish_split_resize();
+        self.dismiss_tab_preview();
+        if let Some(handle) = &self.split_handle { handle.configure(None)?; }
+        if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
+        let Some(window) = &self.window else { return Ok(()); };
+        self.fullscreen_page = Some(source);
+        if let Some(caption) = &self.caption { caption.set_fullscreen(true); }
+        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+        self.sync_layout()?;
+        if let Some(view) = self.page() { view.focus()?; }
+        Ok(())
+    }
+    fn restore_page_window(&mut self, exit_element: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let Some((id, hwnd)) = self.fullscreen_page.take() else { return Ok(()); };
+        if exit_element {
+            if let Some(page) = self.page_with_handle(&id, hwnd) { let _ = page.exit_fullscreen(); }
+        }
+        if let Some(caption) = &self.caption { caption.set_fullscreen(false); }
+        if let Some(window) = &self.window {
+            window.set_fullscreen(None);
+            if let Some(caption) = &self.caption {
+                caption.restore_maximized_bounds()?;
+                caption.refresh(window.scale_factor())?;
+            }
+        }
+        Ok(())
+    }
+    fn reconcile_page_fullscreen(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.fullscreen_page.as_ref().is_some_and(|(id, hwnd)| !self.can_present_fullscreen(id, *hwnd)) {
+            self.restore_page_window(true)?;
+        }
+        Ok(())
     }
     fn page_output_target(&self, print: bool) -> Option<&Page> {
         if self.quit_pending || self.space_form_open() {
@@ -1032,7 +1109,7 @@ impl App {
             Ok(())
         }));
         unsafe { view.webview().cast::<ICoreWebView2_2>()?.add_DOMContentLoaded(&handler, &mut 0)?; }
-        register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.live_settings.clone(), true)?;
+        register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.live_settings.clone(), None)?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
             permission_document: Default::default(),
@@ -2174,6 +2251,7 @@ impl App {
         if self.window.is_none() {
             return Ok(());
         }
+        self.reconcile_page_fullscreen()?;
         if !self.state.onboarding.completed { return self.sync_layout(); }
         if self.reader.as_ref().is_some_and(|r| !self.state.visible_tab(&r.id) || !self.state.tabs.iter().any(|t| t.id == r.id && t.url == r.url)) {
             self.close_reader();
@@ -2267,6 +2345,20 @@ impl App {
     // Layout messages arrive every frame during sidebar motion. They must not
     // create/navigate pages, touch profile settings, or repeat ShowWindow calls.
     fn sync_page_bounds(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        if let Some((id, hwnd)) = &self.fullscreen_page {
+            if let (Some(window), Some(page)) = (&self.window, self.page_with_handle(id, *hwnd)) {
+                let size = window.inner_size();
+                if size.width > 0 && size.height > 0 {
+                    page.clip.clear(page.view.hwnd())?;
+                    page.set_window_bounds(wry::Rect {
+                        position: PhysicalPosition::new(0, 0).into(),
+                        size: size.into(),
+                    }, window.scale_factor())?;
+                    page.sync_viewport()?;
+                }
+            }
+            return Ok(false);
+        }
         if self.split_exit.is_some() { return Ok(false); }
         if self.split_entry_pending && self.overlay { return Ok(false); }
         if self.split_handle.as_ref().is_some_and(|handle| handle.dragging())
@@ -2491,14 +2583,14 @@ impl App {
         Ok(())
     }
     fn animate_split_entry(&mut self) {
-        if !self.split_entry_pending || self.live_resize || self.overlay || self.peek.is_some() { return; }
+        if !self.split_entry_pending || self.live_resize || self.overlay || self.peek.is_some() || self.fullscreen_page.is_some() { return; }
         self.split_entry_pending = false;
         let current = self.state.active().and_then(|tab| tab.split_with.as_ref())
             .map(|other| (self.state.active_tab.clone(), other.clone()));
         if current != self.presented_split { return; }
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
             let Some(window) = &self.window else { return Ok(()); };
-            let Some((left, right)) = self.presented_split.as_ref() else { return Ok(()); };
+            let Some((left, right)) = current.as_ref() else { return Ok(()); };
             let scale = window.scale_factor();
             let incoming = self.pages.get(right).map(|page| page.resize_surface.clone());
             let mut outgoing = None;
@@ -2556,6 +2648,7 @@ impl App {
         }
     }
     fn begin_split_exit(&mut self, command: &Command) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.fullscreen_page.is_some() { return Ok(false); }
         let Some(active) = self.state.active() else { return Ok(false); };
         let Some(other) = active.split_with.as_ref() else { return Ok(false); };
         let left = active.id.clone();
@@ -2680,9 +2773,17 @@ impl App {
         }
         if let Some(error) = update.error { self.error(error); }
     }
-    fn sync_layout(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn sync_layout(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.reconcile_page_fullscreen()?;
         if self.reader.is_some() { self.publish_reader(); }
         self.sync_page_bounds()?;
+        if let Some((id, hwnd)) = &self.fullscreen_page {
+            if let Some(page) = self.page_with_handle(id, *hwnd) {
+                unsafe { SetWindowPos(page.view.hwnd(), Some(HWND_TOP), 0, 0, 0, 0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
+            }
+            return Ok(());
+        }
         // Stacking changes on page/overlay transitions, not on every drag frame.
         let watched = self.tab_preview.as_ref()
             .and_then(|(id, _)| self.preview_tabs(id)).unwrap_or_default();
@@ -2742,6 +2843,11 @@ impl App {
     fn shortcut(&mut self, key: String, shift: bool) {
         if self.quit_pending { return; }
         if !self.state.onboarding.completed { return; }
+        if self.fullscreen_page.is_some() {
+            if let Err(error) = self.restore_page_window(true).and_then(|_| self.sync_layout()) {
+                self.error(error);
+            }
+        }
         if let Some(index) = key.strip_prefix("space:").and_then(|i| i.parse::<usize>().ok()) {
             if let Some(space) = self.state.spaces.get(index) { self.command(Command::SwitchSpace { id: space.id.clone() }, None); }
             return;
@@ -3332,7 +3438,7 @@ impl App {
                 self.download_popup_visible = downloads;
                 if let (Some(popup), Some(window)) = (&self.popup, &self.window) {
                     let result = WindowClip::popup(popup.hwnd(), &regions, cutout, window.scale_factor());
-                    if result.is_ok() && focus { let _ = popup.focus(); }
+                    if result.is_ok() && focus && self.fullscreen_page.is_none() { let _ = popup.focus(); }
                     if let Err(e) = result { self.error(e); }
                 }
                 if regions.is_empty() {
@@ -3856,6 +3962,12 @@ impl ApplicationHandler<Event> for App {
             Event::Layout => {
                 if let Some(layout) = self.pending_layout.take() {
                     self.command(Command::Layout { primary: layout.primary, secondary: layout.secondary, sidebar: layout.sidebar, viewport: layout.viewport, live_resize: layout.live_resize, sidebar_motion: layout.sidebar_motion }, Some(event_loop));
+                }
+            }
+            Event::PageFullscreen(id, hwnd, entered) => {
+                if let Err(error) = self.page_fullscreen_changed(id, hwnd, entered) {
+                    let _ = self.restore_page_window(true).and_then(|_| self.sync_layout());
+                    self.error(error);
                 }
             }
             Event::DataCleared(kind, ok) => {
@@ -4410,8 +4522,22 @@ fn register_page_events(
     navigation: Rc<NavigationPolicy>,
     settings: Rc<RefCell<crate::settings::Settings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    register_accelerators(view, proxy.clone(), shared.find_open.clone(), shared.peek_visible.clone(), shared.downloads_open.clone(), settings.clone(), false)?;
+    let fullscreen = Rc::new(Cell::new(false));
+    register_accelerators(view, proxy.clone(), shared.find_open.clone(), shared.peek_visible.clone(), shared.downloads_open.clone(), settings.clone(), Some(fullscreen.clone()))?;
     let mut token = 0;
+    let fullscreen_id = id.clone();
+    let fullscreen_hwnd = view.hwnd().0 as isize;
+    let fullscreen_proxy = proxy.clone();
+    let fullscreen_changed = ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
+        if let Some(sender) = sender {
+            let mut entered = BOOL::default();
+            unsafe { sender.ContainsFullScreenElement(&mut entered)?; }
+            fullscreen.set(entered.as_bool());
+            let _ = fullscreen_proxy.send_event(Event::PageFullscreen(fullscreen_id.clone(), fullscreen_hwnd, entered.as_bool()));
+        }
+        Ok(())
+    }));
+    unsafe { view.webview().add_ContainsFullScreenElementChanged(&fullscreen_changed, &mut token)?; }
     let download_downloads = shared.downloads.clone();
     let download_ops = shared.download_ops.clone();
     let download_sources = shared.download_sources.clone();
@@ -4816,10 +4942,11 @@ mod motion_tests {
 fn register_accelerators(
     view: &WebView, proxy: EventLoopProxy<Event>, find_open: Rc<Cell<bool>>,
     peek_visible: Rc<Cell<bool>>, downloads_open: Rc<Cell<bool>>,
-    settings: Rc<RefCell<crate::settings::Settings>>, reader: bool,
+    settings: Rc<RefCell<crate::settings::Settings>>, page_fullscreen: Option<Rc<Cell<bool>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let p = proxy.clone();
     let shortcut_settings = settings;
+    let reader = page_fullscreen.is_none();
     let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
             unsafe {
@@ -4836,6 +4963,8 @@ fn register_accelerators(
                 let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
                 let alt = GetKeyState(VK_MENU.0 as i32) < 0;
                 let action = if key == 27 && !ctrl && !alt && !shift {
+                    // WebView2 handles Escape for its fullscreen element first.
+                    if page_fullscreen.as_ref().is_some_and(|fullscreen| fullscreen.get()) { return Ok(()); }
                     // Esc closes the downloads panel first, then the find bar,
                     // then Peek.
                     if downloads_open.get() { Some("downloadsEscape".into()) }

@@ -353,8 +353,39 @@ impl Caption {
         });
         self.refresh(scale)
     }
+    pub fn set_fullscreen(&self, fullscreen: bool) {
+        self.state.frame.set_fullscreen(self.root, fullscreen);
+        if fullscreen {
+            self.state.hot.set(None);
+            self.state.pressed.set(None);
+            unsafe { position_surface(self.root, &self.state); }
+        }
+    }
+
+    pub fn restore_maximized_bounds(&self) -> Result<()> {
+        // Winit restores the maximized client area, but Windows can keep the
+        // fullscreen outer bounds if the window still has WS_MAXIMIZE.
+        if unsafe { IsZoomed(self.root) }.as_bool() {
+            if let Some(monitor) = monitor_info(self.root) {
+                let work = monitor.rcWork;
+                let mut bounds = RECT::default();
+                unsafe {
+                    GetWindowRect(self.root, &mut bounds)?;
+                    if bounds != work {
+                        SetWindowPos(self.root, None, work.left, work.top,
+                            work.right - work.left, work.bottom - work.top,
+                            SWP_NOACTIVATE | SWP_NOZORDER)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn refresh(&self, scale: f64) -> Result<()> {
+        self.state.scale.set(scale);
         self.state.frame.refresh(self.root, scale)?;
+        if self.state.frame.is_fullscreen() { return Ok(()); }
         let mut client = RECT::default();
         unsafe {
             GetClientRect(self.ui, &mut client)?;
@@ -381,7 +412,6 @@ impl Caption {
             (RESIZE_BORDER * scale).round() as i32
         };
         self.state.rect.set(rect);
-        self.state.scale.set(scale);
         let key = [
             client.right,
             client.bottom,
@@ -515,6 +545,15 @@ unsafe fn issue_button(root: HWND, button: Button) {
     let command = button.command(IsZoomed(root).as_bool());
     let _ = PostMessageW(Some(root), WM_SYSCOMMAND, WPARAM(command as usize), LPARAM(0));
 }
+fn monitor_info(hwnd: HWND) -> Option<MONITORINFO> {
+    let mut monitor = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    unsafe { GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor) }
+        .as_bool().then_some(monitor)
+}
+
 unsafe extern "system" fn procedure(
     hwnd: HWND,
     msg: u32,
@@ -526,22 +565,21 @@ unsafe extern "system" fn procedure(
     // SAFETY: this pointer comes from Caption::new and is removed before Box drop.
     let s = &*(data as *const State);
     match msg {
+        WM_NCCALCSIZE if hwnd != s.surface.get() && s.frame.is_fullscreen() => {
+            // A previously maximized window may still carry WS_MAXIMIZE.
+            // Its fullscreen client must use the monitor bounds including the taskbar area.
+            return LRESULT(0);
+        }
+        WM_NCHITTEST if hwnd != s.surface.get() && s.frame.is_fullscreen() => {
+            return LRESULT(HTCLIENT as isize);
+        }
         WM_GETMINMAXINFO if hwnd != s.surface.get() && lparam.0 != 0 => {
             // Keep winit's minimum/maximum tracking sizes, then constrain the
             // outer HWND as well as its client area. Without WS_CAPTION,
             // USER32 otherwise maximizes over the taskbar; winit only adjusts
             // the client rectangle in WM_NCCALCSIZE, leaving a black frame there.
             let result = DefSubclassProc(hwnd, msg, wparam, lparam);
-            let mut monitor = MONITORINFO {
-                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-                ..Default::default()
-            };
-            if GetMonitorInfoW(
-                MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
-                &mut monitor,
-            )
-            .as_bool()
-            {
+            if let Some(monitor) = monitor_info(hwnd) {
                 let limits = &mut *(lparam.0 as *mut MINMAXINFO);
                 limits.ptMaxPosition = POINT {
                     x: monitor.rcWork.left - monitor.rcMonitor.left,
@@ -938,7 +976,7 @@ unsafe fn paint_layered(hwnd: HWND, bounds: RECT, s: &State, maximized: bool) ->
     Ok(())
 }
 unsafe fn position_surface(root: HWND, s: &State) {
-    if !IsWindowVisible(root).as_bool() || IsIconic(root).as_bool() {
+    if s.frame.is_fullscreen() || !IsWindowVisible(root).as_bool() || IsIconic(root).as_bool() {
         let _ = ShowWindow(s.surface.get(), SW_HIDE);
     } else {
         let mut bounds = RECT::default();

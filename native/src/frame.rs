@@ -7,7 +7,7 @@ use windows::{
         Foundation::HWND,
         Graphics::Dwm::{
             DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
-            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
         },
         UI::WindowsAndMessaging::IsZoomed,
     },
@@ -15,6 +15,7 @@ use windows::{
 
 pub struct WindowFrame {
     fallback: Option<(WindowClip, Shadow)>,
+    fullscreen: Cell<bool>,
     updating: Cell<bool>,
 }
 impl WindowFrame {
@@ -42,6 +43,7 @@ impl WindowFrame {
             } else {
                 Some((WindowClip::default(), Shadow::new(hwnd)?))
             },
+            fullscreen: Cell::new(false),
             updating: Cell::new(false),
         })
     }
@@ -54,6 +56,19 @@ impl WindowFrame {
         }
     }
 
+    pub fn is_fullscreen(&self) -> bool {
+        self.fullscreen.get()
+    }
+
+    pub fn set_fullscreen(&self, hwnd: HWND, fullscreen: bool) {
+        if self.fullscreen.replace(fullscreen) != fullscreen && self.fallback.is_none() {
+            let corners = if fullscreen { DWMWCP_DONOTROUND } else { DWMWCP_ROUND };
+            unsafe {
+                let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners as *const _ as _, 4);
+            }
+        }
+    }
+
     pub fn refresh(&self, hwnd: HWND, scale: f64) -> Result<()> {
         // SetWindowRgn and the fallback shadow can synchronously notify the
         // root's subclass again before their geometry caches have been updated.
@@ -62,10 +77,13 @@ impl WindowFrame {
         }
         let result = (|| {
             if let Some((clip, shadow)) = &self.fallback {
-                clip.apply_window(hwnd, self.radius(), scale, unsafe {
-                    IsZoomed(hwnd).as_bool()
-                })?;
-                shadow.refresh(scale, self.radius())?;
+                if self.is_fullscreen() {
+                    clip.clear(hwnd)?;
+                    shadow.hide();
+                } else {
+                    clip.apply_window(hwnd, self.radius(), scale, unsafe { IsZoomed(hwnd).as_bool() })?;
+                    shadow.refresh(scale, self.radius())?;
+                }
             }
             Ok(())
         })();
@@ -126,6 +144,7 @@ mod tests {
             // Exercise Windows 10's actual GDI path even on a Windows 11 runner.
             let fallback = WindowFrame {
                 fallback: Some((WindowClip::default(), Shadow::new(hwnd)?)),
+                fullscreen: Cell::new(false),
                 updating: Cell::new(false),
             };
             let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
