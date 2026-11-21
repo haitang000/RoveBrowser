@@ -139,6 +139,7 @@ declare global {
       reader?: import("./reader").ReaderState;
       importSources?: import("./import").ImportSource[];
       importBusy?: boolean;
+      extensions?: import("./extensions").ExtensionsState;
       defaultBrowser?: { http: boolean; https: boolean };
       ratio?: number;
       width?: number;

@@ -2386,6 +2386,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "url",
  "uuid",
  "webview2-com",

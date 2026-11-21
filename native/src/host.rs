@@ -1,6 +1,7 @@
 use crate::{
     clip::WindowClip,
     downloads::{DownloadItem, DownloadState, Downloads},
+    extensions,
     model::{self, Command, PeekPhase, Point, Rect, State, Tab},
     permissions,
     storage::Storage,
@@ -94,11 +95,17 @@ fn browser_args(ui: bool) -> String {
     let _ = ui;
     args
 }
+fn browsing_webview(context: &mut WebContext) -> WebViewBuilder<'_> {
+    WebViewBuilder::new_with_web_context(context)
+        .with_additional_browser_args(browser_args(false))
+        .with_browser_extensions_enabled(true)
+}
 #[derive(Debug)]
 enum Event {
     ExternalUrls(Vec<String>),
     ImportSources(Vec<crate::import::Source>),
     ImportRead(Vec<crate::import::Batch>),
+    ExtensionPrepared(Result<extensions::Prepared, String>),
     Layout,
     SplitResize,
     SidebarResize,
@@ -333,6 +340,9 @@ struct App {
     external_urls: Vec<String>,
     import_sources: Vec<crate::import::Source>,
     import_busy: bool,
+    extensions_root: PathBuf,
+    extension_candidate: Option<extensions::Prepared>,
+    extension_busy: bool,
     // Drop child controllers before their parent HWND and shared context.
     split_handle: Option<crate::split::SplitHandle>,
     sidebar_handle: Option<crate::sidebar::SidebarHandle>,
@@ -496,6 +506,9 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         external_urls,
         import_sources: vec![],
         import_busy: false,
+        extensions_root: std::path::absolute(data.join("Extensions"))?,
+        extension_candidate: None,
+        extension_busy: false,
         split_handle: None,
         sidebar_handle: None,
         resize_appearance: crate::resize_surface::Appearance::default(),
@@ -1073,10 +1086,9 @@ impl App {
         let reader_id = id.clone();
         let initial_document = Cell::new(true);
         let ticket = self.reader_epoch;
-        let view = WebViewBuilder::new_with_web_context(&mut self.context)
+        let view = browsing_webview(&mut self.context)
             .with_visible(false).with_focused(false).with_javascript_disabled()
             .with_transparent(true)
-            .with_additional_browser_args(browser_args(false))
             .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
             .with_navigation_handler(move |target| {
                 // wry turns with_html into one data: document on Windows. Only
@@ -1593,11 +1605,10 @@ impl App {
         let id = tab.id.clone();
         let p2 = p.clone();
         let id2 = id.clone();
-        let view = WebViewBuilder::new_with_web_context(&mut self.context)
+        let view = browsing_webview(&mut self.context)
             .with_visible(false)
             .with_focused(false)
             .with_background_color(surface_color(self.state.theme == "dark"))
-            .with_additional_browser_args(browser_args(false))
             .with_theme(if self.state.theme == "dark" {
                 wry::Theme::Dark
             } else {
@@ -1765,11 +1776,10 @@ impl App {
             let epoch = self.preview_epoch;
             let key = tab.id.clone();
             let proxy = self.proxy.clone();
-            let view = WebViewBuilder::new_with_web_context(&mut self.context)
+            let view = browsing_webview(&mut self.context)
                 .with_visible(false).with_focused(false)
                 .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
                 .with_background_color(surface_color(self.state.theme == "dark"))
-                .with_additional_browser_args(browser_args(false))
                 .with_navigation_handler(|url| model::is_web(&url) || url == "about:blank")
                 .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
                 .with_download_started_handler(|_, _| false)
@@ -2900,6 +2910,107 @@ impl App {
             _ => {}
         }
     }
+    fn emit_extensions(&self, items: Option<Vec<extensions::Item>>, error: Option<String>) {
+        self.emit(json!({
+            "type": "extensionsState",
+            "extensions": {
+                "items": items,
+                "review": self.extension_candidate.as_ref().map(|extension| &extension.review),
+                "busy": self.extension_busy,
+                "error": error,
+            }
+        }));
+    }
+
+    fn extension_profile<T>(
+        &mut self,
+        run: impl FnOnce(extensions::Profile, &FilePath) -> Result<T, Box<dyn std::error::Error>>,
+    ) -> Result<T, Box<dyn std::error::Error>> {
+        if let Some(page) = self.pages.values().next() {
+            return run(extensions::Profile::new(&page.view)?, &self.extensions_root);
+        }
+        // Settings can be the only open tab. Use the browsing profile without
+        // keeping an extra WebView that extensions would see as a tab.
+        let window = self.window.as_ref().ok_or("窗口尚未就绪")?;
+        let view = browsing_webview(&mut self.context)
+            .with_url("about:blank")
+            .with_visible(false)
+            .with_focused(false)
+            .build_as_child(window)?;
+        run(extensions::Profile::new(&view)?, &self.extensions_root)
+    }
+
+    fn extension_command(&mut self, command: Command) {
+        if self.extension_busy { return; }
+        let result = match command {
+            Command::ChooseExtension => {
+                let owner = self.window.as_ref().and_then(|window| window.window_handle().ok())
+                    .and_then(|handle| match handle.as_raw() {
+                        RawWindowHandle::Win32(handle) => Some(HWND(handle.hwnd.get() as *mut _)),
+                        _ => None,
+                    });
+                let Some(owner) = owner else {
+                    self.emit_extensions(None, Some("无法打开扩展目录选择窗口".into()));
+                    return;
+                };
+                self.extension_candidate = None;
+                self.extension_busy = true;
+                self.emit_extensions(None, None);
+                match extensions::choose_folder(owner) {
+                    Ok(Some(path)) => {
+                        let root = self.extensions_root.clone();
+                        let proxy = self.proxy.clone();
+                        std::thread::spawn(move || {
+                            let prepared = extensions::prepare(&root, &path).map_err(|error| error.to_string());
+                            let _ = proxy.send_event(Event::ExtensionPrepared(prepared));
+                        });
+                    }
+                    result => {
+                        self.extension_busy = false;
+                        self.emit_extensions(None, result.err().map(|error| format!("无法选择扩展目录：{error}")));
+                    }
+                }
+                return;
+            }
+            Command::ListExtensions => self.extension_profile(|profile, root| profile.list(root)),
+            Command::ReviewExtension { ticket, install } => {
+                if !self.extension_candidate.as_ref().is_some_and(|candidate| candidate.matches(&ticket)) {
+                    self.emit_extensions(None, Some("这次安装确认已失效，请重新选择目录".into()));
+                    return;
+                }
+                let candidate = self.extension_candidate.take().unwrap();
+                if !install {
+                    self.emit_extensions(None, None);
+                    return;
+                }
+                self.extension_profile(|profile, root| {
+                    profile.install(root, candidate)?;
+                    profile.list(root)
+                })
+            }
+            Command::EnableExtension { id, enabled } => self.extension_profile(|profile, root| {
+                profile.enable(root, &id, enabled)?;
+                profile.list(root)
+            }),
+            Command::RemoveExtension { id } => {
+                let result = self.extension_profile(|profile, root| {
+                    let removed = profile.remove(root, &id);
+                    Ok((profile.list(root)?, removed.err()))
+                });
+                match result {
+                    Ok((items, error)) => self.emit_extensions(Some(items), error.map(|error| error.to_string())),
+                    Err(error) => self.emit_extensions(None, Some(format!("卸载扩展失败：{error}"))),
+                }
+                return;
+            }
+            _ => return,
+        };
+        match result {
+            Ok(items) => self.emit_extensions(Some(items), None),
+            Err(error) => self.emit_extensions(None, Some(format!("扩展操作失败：{error}"))),
+        }
+    }
+
     fn command(&mut self, mut c: Command, event_loop: Option<&ActiveEventLoop>) {
         if let Command::ResizeAppearance { appearance } = &c {
             if appearance.angle.is_finite() {
@@ -2989,6 +3100,11 @@ impl App {
             | Command::Layout { .. } | Command::Glass { .. } | Command::PopupReady
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
         ) { return; }
+        if matches!(c, Command::ListExtensions | Command::ChooseExtension | Command::ReviewExtension { .. }
+            | Command::EnableExtension { .. } | Command::RemoveExtension { .. }) {
+            self.extension_command(c);
+            return;
+        }
         if let Command::UpdateSettings { settings } = &mut c {
             if self.updating {
                 settings.update_channel.clone_from(&self.state.settings.update_channel);
@@ -3105,7 +3221,7 @@ impl App {
                 } else if kind == "cache" || kind == "siteData" {
                     if self.data_clear_view.is_some() { self.error("正在清除浏览数据，请稍候"); return; }
                     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-                        let view = WebViewBuilder::new_with_web_context(&mut self.context).with_url("about:blank").with_visible(false).with_focused(false).with_additional_browser_args(browser_args(false)).build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+                        let view = browsing_webview(&mut self.context).with_url("about:blank").with_visible(false).with_focused(false).build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
                         let proxy = self.proxy.clone(); let action = kind.clone();
                         crate::web_settings::clear(&view, &kind, move |ok| { let _ = proxy.send_event(Event::DataCleared(action.clone(), ok)); })?;
                         self.data_clear_view = Some(view);
@@ -3947,6 +4063,16 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::ExtensionPrepared(result) => {
+                self.extension_busy = false;
+                match result {
+                    Ok(prepared) => {
+                        self.extension_candidate = Some(prepared);
+                        self.emit_extensions(None, None);
+                    }
+                    Err(error) => self.emit_extensions(None, Some(format!("无法读取扩展目录：{error}"))),
+                }
+            }
             Event::PermissionsChanged => {}, // Wake the event loop so about_to_wait reconciles once.
             Event::ExternalUrls(urls) => {
                 self.external_urls.extend(urls.into_iter().take(32usize.saturating_sub(self.external_urls.len())));

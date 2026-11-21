@@ -231,6 +231,16 @@ pub enum Command {
     OpenSettings { pane: Option<String> },
     #[serde(rename = "settingsUpdate")]
     UpdateSettings { settings: crate::settings::Settings },
+    #[serde(rename = "extensionsList")]
+    ListExtensions,
+    #[serde(rename = "extensionsChoose")]
+    ChooseExtension,
+    #[serde(rename = "extensionsReview")]
+    ReviewExtension { ticket: String, install: bool },
+    #[serde(rename = "extensionsEnable")]
+    EnableExtension { id: String, enabled: bool },
+    #[serde(rename = "extensionsRemove")]
+    RemoveExtension { id: String },
     #[serde(rename = "updateCheck")]
     UpdateCheck,
     #[serde(rename = "updateInstall")]

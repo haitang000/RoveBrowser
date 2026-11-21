@@ -27,6 +27,7 @@ import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } f
 import { paneDirection } from "../../lib/page-motion";
 import { permissions, type PermissionScope } from "../../lib/permissions";
 import SettingsAbout from "./SettingsAbout.vue";
+import SettingsExtensions from "./SettingsExtensions.vue";
 const props = defineProps<{ tabId: string; url: string }>();
 const b = useBrowser(),
   query = ref(""),
@@ -315,20 +316,6 @@ const groups = computed<Group[]>(() => [
       },
     ],
   },
-  {
-    pane: "extensions",
-    title: "浏览器扩展",
-    rows: [
-      {
-        id: "extensions",
-        title: "扩展",
-        detail: "Rove 尚未提供扩展安装和管理功能。",
-        kind: "status",
-        action: "暂未提供",
-        keywords: "extensions plugins 插件",
-      },
-    ],
-  },
 ]);
 const visibleGroups = computed(() =>
   groups.value.flatMap((group) => {
@@ -375,13 +362,18 @@ const aboutSummary = "当前版本、软件更新、更新通道和欢迎引导�
 const showAboutResult = computed(() =>
   searching.value && matches(aboutPane.title, aboutSummary, aboutPane.keywords),
 );
+const extensionSummary = "加载本地 Chrome 扩展，管理启用状态与卸载。";
+const showExtensionsResult = computed(() =>
+  searching.value && matches("扩展", extensionSummary, "extension plugin 插件 Manifest V3"),
+);
 const noResults = computed(
   () =>
     searching.value &&
     !visibleGroups.value.length &&
     !showSpaces.value &&
     !showShortcuts.value &&
-    !showAboutResult.value,
+    !showAboutResult.value &&
+    !showExtensionsResult.value,
 );
 function pick(id: SettingsPane) {
   query.value = "";
@@ -581,6 +573,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
           <Transition name="settings-pane">
           <div :key="pane" class="settings-content">
             <SettingsAbout v-if="pane === 'about' && !searching" :tab-id="tabId" @confirm-update="askToUpdate" />
+            <SettingsExtensions v-if="pane === 'extensions' && !searching" />
+            <button v-if="showExtensionsResult" class="about-search-result" @click="pick('extensions')">
+              <Icon name="extension" />
+              <span class="setting-description">
+                <strong><SearchHighlight text="扩展" :words="words" /></strong>
+                <span class="about-search-summary"><SearchHighlight :text="extensionSummary" :words="words" /></span>
+              </span>
+              <Icon name="forward" :size="13" />
+            </button>
             <button v-if="showAboutResult" class="about-search-result" @click="pick('about')">
               <Icon name="info" />
               <span class="setting-description">

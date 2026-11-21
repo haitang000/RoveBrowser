@@ -6,6 +6,7 @@ mod clipboard;
 mod clip;
 mod downloads;
 mod error_page;
+mod extensions;
 mod default_browser;
 mod favicon;
 mod find;

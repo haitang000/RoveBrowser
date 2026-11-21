@@ -14,6 +14,7 @@ import type {
 import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
 import type { ReaderState } from "../lib/reader";
+import type { ExtensionsState } from "../lib/extensions";
 import type { PermissionPrompt, PermissionRule } from "../lib/permissions";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
@@ -180,6 +181,7 @@ export const useBrowser = defineStore("browser", () => {
   }, { flush: "sync" });
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
+  const extensions = ref<ExtensionsState>({ items: null, review: null, busy: false, error: null });
   const defaultBrowser = ref<{ http: boolean; https: boolean }>();
   const importPhase = ref("checking");
   function scanImports() { importPhase.value = "checking"; if (native) send({ type: "importScan" }); }
@@ -680,6 +682,9 @@ export const useBrowser = defineStore("browser", () => {
       if (typeof e.importBusy === "boolean") importBusy.value = e.importBusy;
       if (e.importSources) importSources.value = e.importSources;
     }
+    if (e.type === "extensionsState" && e.extensions) {
+      extensions.value = { ...e.extensions, items: e.extensions.items ?? extensions.value.items };
+    }
     if (e.type === "defaultBrowser" && e.defaultBrowser) defaultBrowser.value = e.defaultBrowser;
     if (e.type === "updateStatus" && typeof e.message === "string" && (e.channel === "canary" || e.channel === "preview")) {
       const phase = updatePhases.find(phase => phase === e.phase) ?? "error";
@@ -821,7 +826,7 @@ export const useBrowser = defineStore("browser", () => {
   send({ type: popupWindow ? "popupReady" : "ready" });
   return {
     canOutputPage, pageOutputShortcut, outputPage,
-    importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser,
+    importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser, extensions,
     onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,
     native,
     popupWindow,
