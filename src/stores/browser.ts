@@ -26,6 +26,7 @@ import type { ImportRequest, ImportSource } from "../lib/import";
 import { NEW_TAB_STORAGE_KEY, newTabSettings, type NewTabSettings } from "../lib/new-tab";
 import { interfaceLanguage, LANGUAGE_STORAGE_KEY, translate } from "../lib/language";
 import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from "../lib/state-snapshot";
+import { useNowPlaying } from "../lib/now-playing";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const popupWindow = Boolean(window.__ERA_POPUP__);
@@ -141,6 +142,12 @@ export const useBrowser = defineStore("browser", () => {
   }
   const splitPartner = computed(() =>
     state.value.tabs.find((tab) => tab.id === active.value?.splitWith),
+  );
+  const nowPlaying = useNowPlaying(
+    () => state.value.tabs,
+    (id) => Boolean(audio.value[id]),
+    () => [state.value.activeTab || undefined, splitPartner.value?.id, peek.value?.id],
+    send,
   );
   const space = computed(
     () =>
@@ -352,6 +359,7 @@ export const useBrowser = defineStore("browser", () => {
         "thumbnails",
         "tabPreview",
         "tabPreviewRefresh",
+        "nowPlayingDetails",
         "windowChrome",
         "resizeAppearance",
         "popupState",
@@ -789,6 +797,10 @@ export const useBrowser = defineStore("browser", () => {
     }
     if (e.type === "audio" && e.id && typeof e.playing === "boolean")
       audio.value = { ...audio.value, [e.id]: e.playing };
+    if (e.type === "mediaResult" && e.id && typeof e.ticket === "number" && e.mediaOutcome)
+      nowPlaying.complete(e.id, e.ticket, e.mediaOutcome);
+    if (e.type === "nowPlayingDetails" && e.id && typeof e.ticket === "number")
+      nowPlaying.receiveDetails(e.id, e.ticket, e.mediaDetails);
     if (e.type === "sleep" && e.id && typeof e.asleep === "boolean")
       asleep.value = { ...asleep.value, [e.id]: e.asleep };
     if (e.type === "sleepState" && Array.isArray(e.ids))
@@ -934,6 +946,13 @@ export const useBrowser = defineStore("browser", () => {
     pageZoom,
     reader,
     audio,
+    nowPlayingCards: nowPlaying.cards,
+    nowPlayingDetails: nowPlaying.details,
+    requestNowPlayingDetails: nowPlaying.requestDetails,
+    toggleMedia: nowPlaying.toggle,
+    hideMedia: nowPlaying.hide,
+    mediaPaused: nowPlaying.paused,
+    mediaPending: nowPlaying.pending,
     asleep,
     zoomNotice,
     zoom,

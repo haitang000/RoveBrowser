@@ -201,6 +201,13 @@ pub enum PeekPhase {
     Open,
     Closing,
 }
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MediaAction {
+    Play,
+    Pause,
+}
+
 impl Rect {
     pub fn valid(&self) -> bool {
         [self.x, self.y, self.width, self.height]
@@ -580,7 +587,14 @@ pub enum Command {
     },
     /// Play or pause HTML audio/video elements on a tab, as requested by Now Playing.
     #[serde(rename = "mediaControl")]
-    MediaControl { id: String, action: String },
+    MediaControl {
+        id: String,
+        url: String,
+        action: MediaAction,
+        ticket: u64,
+    },
+    #[serde(rename = "nowPlayingDetails")]
+    NowPlayingDetails { id: String, url: String, ticket: u64 },
     #[serde(rename = "peekOpen")]
     PeekOpen { url: String, origin: Option<Point> },
     #[serde(rename = "peekClose")]

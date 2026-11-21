@@ -14,6 +14,8 @@ import assert from 'node:assert/strict';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
+const mediaTitle = '日落电台 · 横穿城市之后的最后一场雨与漫长告别';
+const nextMediaTitle = '海岸';
 
 function toneWav() {
   const rate = 8000, seconds = 1, samples = rate * seconds;
@@ -35,22 +37,48 @@ function toneWav() {
     buffer.writeInt16LE(Math.round(Math.sin((i / rate) * 2 * Math.PI * 440) * 8000), 44 + i * 2);
   return buffer;
 }
-const server = createServer((req, res) => {
+function fixture(req, res) {
   if (req.url === '/tone.wav') {
     res.setHeader('Content-Type', 'audio/wav');
     res.end(toneWav());
     return;
   }
+  if (req.url === '/cover-sunset.svg' || req.url === '/cover-ocean.svg') {
+    const colors = req.url === '/cover-sunset.svg' ? ['#ef4655', '#5232aa', '#ffb348'] : ['#10a38b', '#0f55d9', '#52d9f2'];
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.end(`<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160">${colors.map((color, i) =>
+      `<rect x="${i * 54}" width="54" height="160" fill="${color}"/>`).join('')}</svg>`);
+    return;
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  if (req.url === '/media' || req.url === '/media-next') {
+    const player = req.url === '/media' ? 'frame' : 'frame-plain';
+    res.end(`<!doctype html><title>Embedded player</title>
+<iframe title="Player" width="460" height="240" src="http://127.0.0.1:${embeddedServer.address().port}/${player}"></iframe>`);
+    return;
+  }
   const name = req.url === '/b' ? 'B' : 'A';
   res.end(`<!doctype html><title>${name} fixture</title>
 <style>html{background:#164e63;color:white;font:16px/1.6 sans-serif}body{min-height:200vh}</style>
 <h1>${name} site controls fixture</h1>
 <audio id="music" src="/tone.wav" loop></audio>
+<audio id="idle" src="/tone.wav" preload="none"></audio>
 <button id="play" onclick="document.getElementById('music').play()">play</button>
-<button id="stop" onclick="document.getElementById('music').pause()">stop</button>`);
-});
-await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+<button id="stop" onclick="document.getElementById('music').pause()">stop</button>
+${req.url === '/frame' ? `<script>
+function setTrack(title, cover) {
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title, artwork: [{ src: 'http://127.0.0.1:${server.address().port}/cover-' + cover + '.svg', sizes: '160x160' }]
+  });
+}
+setTrack(${JSON.stringify(mediaTitle)}, 'sunset');
+</script>` : ''}`);
+}
+const server = createServer(fixture);
+const embeddedServer = createServer(fixture);
+await Promise.all([server, embeddedServer].map((listener) =>
+  new Promise((resolveListen) => listener.listen(0, '127.0.0.1', resolveListen))));
 
 const hostPort = server.address().port;
 const siteA = `http://127.0.0.1:${hostPort}/a`;
@@ -331,6 +359,94 @@ try {
   await expectCount('.tab-row.selected .tab-audio', 0, 'speaker hides when sound stops');
   checks.push('声音停止后喇叭消失');
 
+  const mediaUrl = `http://127.0.0.1:${hostPort}/media`;
+  const mediaNextUrl = `${mediaUrl}-next`;
+  const card = ui.locator('.now-playing-card');
+  const toggle = card.locator('.now-playing-toggle');
+  const paused = (frame) => frame.locator('#music').evaluate((media) => media.paused);
+  await send({ type: 'new', url: mediaUrl });
+  const embedded = await pageAt(mediaUrl);
+  const embeddedFrame = embedded.frameLocator('iframe');
+  await embeddedFrame.locator('#play').click();
+  await waitFor(() => paused(embeddedFrame).then((value) => !value), 'embedded audio starts');
+  await send({ type: 'activate', id: activeId });
+  await card.waitFor();
+  const embeddedId = (await lastState()).tabs.find((tab) => tab.url === mediaUrl).id;
+  assert.equal((await lastState()).activeTab, activeId);
+  const titleLine = card.locator('.now-playing-title-text');
+  const glow = card.locator('.now-playing-glow');
+  const palette = () => glow.evaluate((element) => ['one', 'two', 'three']
+    .map((channel) => element.style.getPropertyValue(`--playing-glow-${channel}`)).join(' '));
+  const artworkShadow = () => glow.evaluate(async (element) => {
+    const style = getComputedStyle(element);
+    const initialShadow = style.boxShadow;
+    const transitions = element.getAnimations()
+      .filter((animation) => animation instanceof CSSTransition && animation.transitionProperty.startsWith('--playing-glow-'));
+    if (!transitions.length) return initialShadow;
+    await Promise.all(transitions.map((animation) => animation.finished.catch(() => {})));
+    return style.boxShadow;
+  });
+  await waitFor(() => palette().then((value) => value.includes('239 70 85')), 'the card samples the cover supplied by a cross-origin iframe');
+  const sunsetShadow = await artworkShadow();
+  assert.notEqual(sunsetShadow, 'none', 'the cover adds a shadow');
+  assert.equal(await titleLine.innerText(), mediaTitle);
+  assert.deepEqual(await card.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return [style.height, style.borderRadius];
+  }), ['40px', '10px']);
+  await waitFor(() => titleLine.evaluate((element) => element.getAnimations().length === 1), 'the overflowing title scrolls');
+  assert.ok(await titleLine.evaluate((element) => {
+    const [animation] = element.getAnimations();
+    animation.currentTime = 1800;
+    const movedHorizontally = new DOMMatrixReadOnly(getComputedStyle(element).transform).m41 < 0;
+    animation.currentTime = 0;
+    return movedHorizontally;
+  }), 'the title actually moves along the horizontal axis');
+  await ui.screenshot({ path: join(output, 'now-playing-artwork.png') });
+  const beforeMotion = (await lastState()).settings;
+  await send({ type: 'settingsUpdate', settings: { ...beforeMotion, reduceMotion: true } });
+  await waitFor(() => titleLine.evaluate((element) => element.getAnimations().length === 0), 'reduce motion stops the title');
+  assert.equal(await glow.evaluate((element) => getComputedStyle(element, '::before').animationName), 'none');
+  await send({ type: 'settingsUpdate', settings: beforeMotion });
+  await embeddedFrame.locator('body').evaluate((_, title) => window.setTrack(title, 'ocean'), nextMediaTitle);
+  await waitFor(() => palette().then((value) => value.includes('16 163 139')), 'cover colors refresh when the track changes');
+  assert.notEqual(await artworkShadow(), sunsetShadow, 'the shadow follows the new cover colors');
+  assert.equal(await titleLine.innerText(), nextMediaTitle);
+  assert.equal(await titleLine.evaluate((element) => element.getAnimations().length), 0, 'a short title stays still');
+  checks.push('跨源内嵌播放器的封面渐变、彩色阴影和曲目名称随换曲更新，长标题滚动并遵循减少动态效果设置');
+  await toggle.click();
+  await waitFor(() => paused(embeddedFrame), 'the card pauses cross-origin iframe audio');
+  await waitFor(async () => /继续播放|Resume playback/.test(await toggle.getAttribute('aria-label')), 'the paused card offers resume');
+  await toggle.click();
+  await waitFor(() => paused(embeddedFrame).then((value) => !value), 'the card resumes cross-origin iframe audio');
+  assert.equal(await embeddedFrame.locator('#idle').evaluate((media) => media.paused), true, 'unrelated player stays paused');
+  const mute = card.getByRole('button', { name: /^(静音标签页|Mute tab)$/ });
+  await mute.click();
+  await waitFor(async () => (await lastState()).tabs.find((tab) => tab.id === embeddedId)?.muted === true, 'mute from the card');
+  await card.getByRole('button', { name: /^(取消静音标签页|Unmute tab)$/ }).click();
+  await waitFor(async () => (await lastState()).tabs.find((tab) => tab.id === embeddedId)?.muted === false, 'unmute from the card');
+  await ui.screenshot({ path: join(output, 'now-playing.png') });
+  await card.locator('.now-playing-title').click();
+  await expectCount('.now-playing-card', 0, 'the foreground tab has no card');
+  await send({ type: 'activate', id: activeId });
+  await card.getByRole('button', { name: /^(隐藏播放卡片|Hide Now Playing card)$/ }).press('Enter');
+  await expectCount('.now-playing-card', 0, 'hidden card is removed');
+  assert.equal(await paused(embeddedFrame), false, 'hiding leaves audio playing');
+  await embedded.evaluate(() => { location.hash = 'chapter'; });
+  await waitFor(async () => (await lastState()).tabs.find((tab) => tab.id === embeddedId)?.url.endsWith('#chapter'), 'fragment navigation');
+  await expectCount('.now-playing-card', 0, 'fragment navigation keeps the card hidden');
+  await send({ type: 'activate', id: embeddedId });
+  await send({ type: 'navigate', id: embeddedId, url: mediaNextUrl });
+  const nextEmbedded = await pageAt(mediaNextUrl);
+  await nextEmbedded.frameLocator('iframe').locator('#play').click();
+  await send({ type: 'activate', id: activeId });
+  await card.waitFor();
+  assert.equal(await card.getAttribute('aria-label'), 'Embedded player');
+  assert.doesNotMatch(await card.getAttribute('class'), /has-artwork/, 'a new page without artwork uses the default surface');
+  await send({ type: 'close', id: embeddedId });
+  await expectCount('.now-playing-card', 0, 'closing forgets the card');
+  checks.push('后台播放卡片可跳转、暂停和继续跨站内嵌播放器、静音和隐藏，换页后恢复显示');
+
   // The zoom percentage toast slides in from above and exits the same way.
   await popup.evaluate(() => {
     window.__toastTransitions = [];
@@ -414,6 +530,7 @@ try {
   await pageBrowser?.close().catch(() => {});
   await uiBrowser?.close().catch(() => {});
   if (child && !child.killed) child.kill();
+  embeddedServer.close();
   server.close();
 }
 

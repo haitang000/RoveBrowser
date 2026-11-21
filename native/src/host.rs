@@ -167,6 +167,8 @@ enum Event {
     Zoom(String, isize, f64),
     /// A page started or stopped playing sound.
     Audio(String, bool),
+    MediaControlFinished(String, u64, crate::site::MediaOutcome),
+    NowPlayingDetails(String, u64, Option<crate::site::NowPlayingDetails>),
     /// The download list changed; persist only for starts and state changes,
     /// not for every bytes tick.
     DownloadsChanged {
@@ -187,6 +189,7 @@ enum Event {
 }
 struct Page {
     permission_document: Rc<permissions::Document>,
+    media: Rc<crate::site::MediaPlayback>,
     view: WebView,
     save_path: crate::page_output::SavePath,
     resize_surface: Rc<crate::resize_surface::Surface>,
@@ -1182,6 +1185,7 @@ impl App {
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
             permission_document: Default::default(),
+            media: Rc::default(),
             resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
             view, url: url.clone(), clip: Rc::new(WindowClip::default()), save_path: Default::default(),
             thumbnail_version: 0, thumbnail_attempt: None, thumbnail_pending: false,
@@ -1772,8 +1776,11 @@ impl App {
         permissions::register(&view, tab.id.clone(), &permission_document, self.permissions.inbox.clone(), move || {
             let _ = proxy.send_event(Event::PermissionsChanged);
         })?;
+        let media = Rc::new(crate::site::MediaPlayback::default());
+        media.install(&view)?;
         let page = Page {
             permission_document,
+            media,
             resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
             view,
             save_path,
@@ -4290,20 +4297,37 @@ impl App {
                 }
                 return;
             }
-            Command::MediaControl { id, action } => {
-                if !matches!(action.as_str(), "play" | "pause") {
-                    return;
-                }
-                let resumed = if let Some(page) = self.pages.get(&id) {
+            Command::MediaControl { id, url, action, ticket } => {
+                if let Some(page) = self.pages.get(&id).filter(|page| {
+                    page.navigation.current.borrow().split('#').next() == Some(url.as_str())
+                }) {
                     let was_sleeping = page.sleeping.get();
                     page.wake();
-                    crate::site::control_media(&page.view, &action);
-                    was_sleeping
+                    let target = id.clone();
+                    let proxy = self.proxy.clone();
+                    page.media.control(&page.view, action, &url, move |outcome| {
+                        let _ = proxy.send_event(Event::MediaControlFinished(target.clone(), ticket, outcome));
+                    });
+                    if was_sleeping {
+                        self.emit(json!({"type":"sleep","id":id,"asleep":false}));
+                    }
                 } else {
-                    false
-                };
-                if resumed {
-                    self.emit(json!({"type":"sleep","id":id,"asleep":false}));
+                    self.emit(json!({"type":"mediaResult","id":id,"ticket":ticket,"mediaOutcome":"cancelled"}));
+                }
+                return;
+            }
+            Command::NowPlayingDetails { id, url, ticket } => {
+                if let Some(page) = self.pages.get(&id).filter(|page| {
+                    page.navigation.current.borrow().split('#').next() == Some(url.as_str())
+                        && (self.playing.contains(&id)
+                            || crate::site::is_playing_audio(&page.view).unwrap_or(false))
+                }) {
+                    let proxy = self.proxy.clone();
+                    page.media.details(&page.view, move |details| {
+                        let _ = proxy.send_event(Event::NowPlayingDetails(id.clone(), ticket, details));
+                    });
+                } else {
+                    self.emit(json!({"type":"nowPlayingDetails","id":id,"ticket":ticket}));
                 }
                 return;
             }
@@ -4929,6 +4953,23 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::Zoom(id, hwnd, factor) => self.page_zoom_changed(&id, hwnd, factor),
+            Event::MediaControlFinished(id, ticket, outcome) => {
+                self.emit(json!({"type":"mediaResult","id":id,"ticket":ticket,"mediaOutcome":outcome}));
+                if matches!(
+                    outcome,
+                    crate::site::MediaOutcome::Unavailable | crate::site::MediaOutcome::Blocked
+                ) {
+                    let message = match self.state.settings.language.as_str() {
+                        "en" => "This player couldn’t be controlled from the sidebar",
+                        "zh-TW" => "無法從側欄控制此播放器",
+                        _ => "无法从侧栏控制此播放器",
+                    };
+                    self.toast(message, None);
+                }
+            }
+            Event::NowPlayingDetails(id, ticket, details) => {
+                self.emit(json!({"type":"nowPlayingDetails","id":id,"ticket":ticket,"mediaDetails":details}));
+            }
             Event::Audio(id, playing) => {
                 if playing {
                     self.playing.insert(id.clone());

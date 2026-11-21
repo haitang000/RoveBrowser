@@ -187,6 +187,8 @@ declare global {
       /** Page zoom factor, and whether a page is playing sound. */
       factor?: number;
       playing?: boolean;
+      mediaOutcome?: import("./now-playing").MediaOutcome;
+      mediaDetails?: import("./now-playing").NowPlayingDetails | null;
       /** A background page went to sleep (true) or woke up (false). */
       asleep?: boolean;
       /** The pages asleep right now, sent when a UI renderer becomes ready. */
