@@ -148,7 +148,7 @@ declare global {
       entries?: HistoryEntry[];
       suggestions?: string[];
       message?: string;
-      phase?: string;
+      phase?: string | null;
       channel?: string;
       version?: string;
       action?: string;
@@ -158,7 +158,6 @@ declare global {
       backgrounds?: (string | null)[] | null;
       backgroundReady?: boolean;
       pane?: number;
-      phase?: PeekPhase;
       ticket?: number;
       origin?: Point | null;
       surface?: string | null;

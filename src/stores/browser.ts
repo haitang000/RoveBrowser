@@ -644,7 +644,7 @@ export const useBrowser = defineStore("browser", () => {
         peekSurface.value = null;
         peekMoving.value = 0;
       }
-      peekPhase.value = e.phase || "open";
+      peekPhase.value = e.phase === "opening" || e.phase === "closing" ? e.phase : "open";
       peekTicket.value = e.ticket || 0;
       peekOrigin.value = e.origin || null;
       peek.value = e.peek ?? null;
