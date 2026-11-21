@@ -7,8 +7,9 @@ use crate::update_install::{PackageKind, PreparedUpdate};
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use url::Url;
+use uuid::Uuid;
 use windows::{
     core::{w, PCWSTR},
     Win32::{
@@ -144,48 +145,68 @@ impl Report {
     }
 }
 
-pub fn prepare(
-    channel: Channel,
-    progress: impl Fn(Report),
-) -> Result<(PreparedUpdate, Report), Report> {
+#[derive(Debug)]
+pub struct Offer {
+    pub id: String,
+    pub channel: Channel,
+    pub report: Report,
+    target: PathBuf,
+    kind: PackageKind,
+    release: Release,
+}
+
+pub fn check(channel: Channel) -> Result<Offer, Report> {
     let target = std::env::current_exe()
         .map_err(|_| Report::new(channel, "error", "无法定位当前的 Rove 程序。"))?;
     let kind = PackageKind::for_executable(&target);
-    let release = match lookup(channel, kind) {
-        Ok(Outcome::Available(release)) => release,
-        other => return Err(report(channel, other)),
-    };
-    let mut status = report(channel, Ok(Outcome::Available(release.clone())));
-    status.phase = "downloading";
-    status.message = format!("{} 正在下载并校验更新包…", status.message);
-    progress(status.clone());
-    let result = (|| {
-        let update = PreparedUpdate::new(target, kind)?;
-        download(channel, &release, &update.package())?;
-        if kind == PackageKind::Portable {
-            let mut extracting = status.clone();
-            extracting.phase = "extracting";
-            extracting.message = "正在解压更新包…".into();
-            progress(extracting);
-        }
-        update.stage()?;
-        Ok(update)
-    })();
-    match result {
-        Ok(update) => {
-            status.phase = "installing";
-            status.message = "正在安装更新，Rove 将自动重启…".into();
-            Ok((update, status))
-        }
-        Err(message) => {
-            status.phase = "error";
-            status.message = message;
-            Err(status)
+    let outcome = lookup(channel, kind);
+    let report = report(channel, outcome.as_ref().map_err(String::as_str));
+    match outcome {
+        Ok(Outcome::Available(release)) => Ok(Offer {
+            id: Uuid::new_v4().to_string(),
+            channel,
+            report,
+            target,
+            kind,
+            release,
+        }),
+        _ => Err(report),
+    }
+}
+
+impl Offer {
+    pub fn prepare(self, progress: impl Fn(Report)) -> Result<(PreparedUpdate, Report), Report> {
+        let Self { channel, mut report, target, kind, release, .. } = self;
+        report.phase = "downloading";
+        report.message = "正在下载并校验更新包。".into();
+        progress(report.clone());
+        let result = (|| {
+            let update = PreparedUpdate::new(target, kind)?;
+            download(channel, &release, &update.package())?;
+            if kind == PackageKind::Portable {
+                report.phase = "extracting";
+                report.message = "正在解压更新包。".into();
+                progress(report.clone());
+            }
+            update.stage()?;
+            Ok(update)
+        })();
+        match result {
+            Ok(update) => {
+                report.phase = "installing";
+                report.message = "正在安装更新，Rove 即将重启。".into();
+                Ok((update, report))
+            }
+            Err(message) => {
+                report.phase = "error";
+                report.message = message;
+                Err(report)
+            }
         }
     }
 }
 
-fn report(channel: Channel, outcome: Result<Outcome, String>) -> Report {
+fn report(channel: Channel, outcome: Result<&Outcome, &str>) -> Report {
     if channel == Channel::Canary {
         return canary_report(outcome);
     }
@@ -209,12 +230,12 @@ fn report(channel: Channel, outcome: Result<Outcome, String>) -> Report {
             } else {
                 format!("发现新版本 {}。{notes}", release.version_text)
             };
-            Report { phase: "available", channel: channel.as_str(), version: release.version_text, message }
+            Report { phase: "available", channel: channel.as_str(), version: release.version_text.clone(), message }
         }
-        Err(message) => Report { phase: "error", channel: channel.as_str(), version: String::new(), message },
+        Err(message) => Report::new(channel, "error", message),
     }
 }
-fn canary_report(outcome: Result<Outcome, String>) -> Report {
+fn canary_report(outcome: Result<&Outcome, &str>) -> Report {
     match outcome {
         Ok(Outcome::Current) => {
             let sha = running_commit().map(short_sha).unwrap_or_else(|| "未知".into());
@@ -232,10 +253,10 @@ fn canary_report(outcome: Result<Outcome, String>) -> Report {
         Ok(Outcome::Ahead { remote }) => Report {
             phase: "ahead",
             channel: "canary",
-            version: remote,
+            version: remote.clone(),
             message: "Canary 构建还没有新的安装包。".into(),
         },
-        Err(message) => Report { phase: "error", channel: "canary", version: String::new(), message },
+        Err(message) => Report::new(Channel::Canary, "error", message),
     }
 }
 fn lookup(channel: Channel, kind: PackageKind) -> Result<Outcome, String> {

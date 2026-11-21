@@ -139,6 +139,19 @@ try {
   );
   checks.push("设置以内部标签页展示、复用，分类地址由 Rust 保存");
   await ui.screenshot({ path: join(output, "native-settings-privacy.png") });
+  await ui.getByRole("button", { name: "关于 Rove", exact: true }).click();
+  await waitFor(
+    async () => (await state()).tabs.find((t) => t.id === id).url === "rove://settings/about",
+    "about settings address",
+  );
+  await ui.getByRole("region", { name: "版本与软件更新" }).waitFor();
+  await ui.screenshot({ path: join(output, "native-settings-about.png"), animations: "disabled" });
+  await ui.getByRole("button", { name: "隐私", exact: true }).click();
+  await waitFor(
+    async () => (await state()).tabs.find((t) => t.id === id).url === "rove://settings/privacy",
+    "return to privacy settings",
+  );
+  checks.push("关于页在原生设置标签中拥有独立地址和更新面板");
   await send({ type: "new", url: "native 中文 & query" });
   await waitFor(async () => {
     const s = await state();

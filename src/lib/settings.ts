@@ -5,7 +5,7 @@ export const SETTINGS_PANES = [
     id: "general",
     title: "通用",
     icon: "settings",
-    keywords: "general 搜索 外观 窗口 下载 更新",
+    keywords: "general 搜索 外观 窗口 下载",
   },
   {
     id: "spaces",
@@ -42,6 +42,12 @@ export const SETTINGS_PANES = [
     title: "快捷键",
     icon: "keyboard",
     keywords: "shortcuts keyboard 键盘",
+  },
+  {
+    id: "about",
+    title: "关于 Rove",
+    icon: "info",
+    keywords: "about version check for updates preview canary github gitlab onboarding welcome 关于 版本 软件更新 检查更新 更新通道 欢迎引导",
   },
 ] as const;
 export type SettingsPane = (typeof SETTINGS_PANES)[number]["id"];

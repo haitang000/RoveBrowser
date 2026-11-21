@@ -154,23 +154,30 @@ export const useBrowser = defineStore("browser", () => {
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedBookmarks.value.get(active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
-  const updatePhases = ["idle", "checking", "current", "ahead", "downloading", "extracting", "installing", "error"] as const;
+  const updatePhases = ["idle", "checking", "current", "ahead", "available", "downloading", "extracting", "installing", "error"] as const;
   type UpdatePhase = (typeof updatePhases)[number];
-  const updateStatus = ref<{ phase: UpdatePhase; channel?: UpdateChannel; version?: string; message: string }>({ phase: "idle", message: "" });
+  type UpdateStatus = { phase: UpdatePhase; channel?: UpdateChannel; version?: string; message: string; offerId?: string };
+  const idleUpdate: UpdateStatus = { phase: "idle", message: "" };
+  const reportedUpdate = ref<UpdateStatus>(idleUpdate);
+  const updateStatus = computed(() =>
+    reportedUpdate.value.channel === settings.value.updateChannel ? reportedUpdate.value : idleUpdate,
+  );
   const updating = computed(() => ["checking", "downloading", "extracting", "installing"].includes(updateStatus.value.phase));
   function checkUpdates() {
     if (updating.value) return;
-    const channel = settings.value.updateChannel;
     if (!native) {
-      updateStatus.value = { phase: "error", channel, message: "请在 Rove 桌面版中检查更新。" };
+      reportedUpdate.value = { phase: "error", channel: settings.value.updateChannel, message: "请在 Rove 桌面版中检查更新。" };
       return;
     }
-    updateStatus.value = { phase: "checking", channel, message: "正在检查更新…" };
     send({ type: "updateCheck" });
   }
-  watch(() => settings.value.updateChannel, (next, previous) => {
-    if (next !== previous && !updating.value) updateStatus.value = { phase: "idle", message: "" };
-  });
+  function installUpdate(offerId: string) {
+    if (native && updateStatus.value.phase === "available" && updateStatus.value.offerId === offerId)
+      send({ type: "updateInstall", offerId });
+  }
+  watch(() => settings.value.updateChannel, (channel) => {
+    if (reportedUpdate.value.channel !== channel) reportedUpdate.value = idleUpdate;
+  }, { flush: "sync" });
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
   const defaultBrowser = ref<{ http: boolean; https: boolean }>();
@@ -674,10 +681,15 @@ export const useBrowser = defineStore("browser", () => {
       if (e.importSources) importSources.value = e.importSources;
     }
     if (e.type === "defaultBrowser" && e.defaultBrowser) defaultBrowser.value = e.defaultBrowser;
-    if (e.type === "updateStatus" && typeof e.message === "string") {
+    if (e.type === "updateStatus" && typeof e.message === "string" && (e.channel === "canary" || e.channel === "preview")) {
       const phase = updatePhases.find(phase => phase === e.phase) ?? "error";
-      const channel = e.channel === "canary" || e.channel === "preview" ? e.channel : settings.value.updateChannel;
-      if (channel === settings.value.updateChannel) updateStatus.value = { phase, channel, version: e.version || "", message: e.message };
+      reportedUpdate.value = {
+        phase,
+        channel: e.channel,
+        version: e.version,
+        message: e.message,
+        offerId: phase === "available" ? e.offerId ?? undefined : undefined,
+      };
     }
     if (e.type === "state" && e.state) {
       const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
@@ -845,6 +857,7 @@ export const useBrowser = defineStore("browser", () => {
     updateStatus,
     updating,
     checkUpdates,
+    installUpdate,
     shortcutLabel,
     shortcutTitle,
     dataStatus,

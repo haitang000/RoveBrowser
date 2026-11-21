@@ -192,6 +192,7 @@ test("existing sessions reopen the welcome without losing tabs or custom search"
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await page.getByRole("combobox", { name: "搜索引擎", exact: true }).selectOption("baidu");
   const originalTabs = await page.getByRole("tab").count();
+  await page.getByRole("button", { name: "关于 Rove", exact: true }).click();
   await page.getByRole("button", { name: "打开欢迎引导", exact: true }).click();
   await page.getByRole("button", { name: "开始使用", exact: true }).click();
   await page.screenshot({ path: "test-results/onboarding-dark.png", animations: "disabled" });
@@ -206,5 +207,6 @@ test("existing sessions reopen the welcome without losing tabs or custom search"
   await expect(page.getByRole("tab")).toHaveCount(originalTabs);
   await expect(page.locator(".favorites .favorite-tile")).toHaveCount(8);
   await chooseBrowserMenuItem(page, "设置");
+  await page.getByRole("button", { name: "通用", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "搜索引擎", exact: true })).toHaveValue("baidu");
 });

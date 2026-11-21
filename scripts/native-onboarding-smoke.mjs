@@ -108,6 +108,7 @@ try {
   const popup = await waitFor(() => ui.context().pages().find(p => p.url().endsWith('?popup')), 'popup renderer');
   await ui.getByRole('button', { name: '浏览器菜单', exact: true }).click();
   await popup.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await ui.getByRole("button", { name: "关于 Rove", exact: true }).click();
   await ui.getByRole("button", { name: "打开欢迎引导", exact: true }).click();
   await ui.getByRole("button", { name: "开始使用", exact: true }).click();
   await ui.getByRole("button", { name: "跳过", exact: true }).click();

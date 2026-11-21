@@ -156,11 +156,9 @@ enum Event {
     SleepDone(String, bool),
     StorageWriteError(String),
     PermissionsChanged,
+    UpdateChecked(Result<crate::updates::Offer, crate::updates::Report>),
     UpdateProgress(crate::updates::Report),
-    UpdatePrepared {
-        channel: crate::updates::Channel,
-        result: Result<(crate::update_install::PreparedUpdate, crate::updates::Report), crate::updates::Report>,
-    },
+    UpdatePrepared(Result<(crate::update_install::PreparedUpdate, crate::updates::Report), crate::updates::Report>),
 }
 struct Page {
     permission_document: Rc<permissions::Document>,
@@ -330,6 +328,7 @@ struct UndoBatch {
 struct App {
     _instance: crate::instance::Instance,
     updating: bool,
+    update_offer: Option<crate::updates::Offer>,
     update_message: Option<String>,
     external_urls: Vec<String>,
     import_sources: Vec<crate::import::Source>,
@@ -492,6 +491,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
     let mut app = App {
         _instance: instance,
         updating: false,
+        update_offer: None,
         update_message,
         external_urls,
         import_sources: vec![],
@@ -759,7 +759,8 @@ impl App {
         true
     }
     fn publish_update(&self, report: crate::updates::Report) {
-        self.emit(json!({"type":"updateStatus","phase":report.phase,"channel":report.channel,"version":report.version,"message":report.message}));
+        let offer_id = self.update_offer.as_ref().map(|offer| &offer.id);
+        self.emit(json!({"type":"updateStatus","phase":report.phase,"channel":report.channel,"version":report.version,"message":report.message,"offerId":offer_id}));
     }
     /// One-time: replace icons an older build enlarged to 64 pixels. Each saved
     /// site is asked for its own icon in the background and the replacements
@@ -2899,7 +2900,7 @@ impl App {
             _ => {}
         }
     }
-    fn command(&mut self, c: Command, event_loop: Option<&ActiveEventLoop>) {
+    fn command(&mut self, mut c: Command, event_loop: Option<&ActiveEventLoop>) {
         if let Command::ResizeAppearance { appearance } = &c {
             if appearance.angle.is_finite() {
                 self.resize_appearance = *appearance;
@@ -2988,6 +2989,11 @@ impl App {
             | Command::Layout { .. } | Command::Glass { .. } | Command::PopupReady
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
         ) { return; }
+        if let Command::UpdateSettings { settings } = &mut c {
+            if self.updating {
+                settings.update_channel.clone_from(&self.state.settings.update_channel);
+            }
+        }
         // A find session lives on one page. Switching, closing, splitting or
         // opening a new tab ends it, so the bar never highlights a hidden page.
         if (self.find.is_some() || self.find_open.get())
@@ -3049,15 +3055,30 @@ impl App {
         match c {
             Command::UpdateCheck => {
                 if self.updating { return; }
+                self.update_offer = None;
                 self.updating = true;
                 let channel = crate::updates::Channel::parse(&self.state.settings.update_channel);
                 self.publish_update(crate::updates::Report::new(channel, "checking", "正在检查更新…"));
                 let proxy = self.proxy.clone();
                 std::thread::spawn(move || {
-                    let result = crate::updates::prepare(channel, |report| {
+                    let _ = proxy.send_event(Event::UpdateChecked(crate::updates::check(channel)));
+                });
+                return;
+            }
+            Command::UpdateInstall { offer_id } => {
+                if self.updating { return; }
+                let channel = crate::updates::Channel::parse(&self.state.settings.update_channel);
+                // Consume the exact offer once, before any package is downloaded.
+                let Some(offer) = self.update_offer.take_if(|offer| offer.id == offer_id && offer.channel == channel) else {
+                    return;
+                };
+                self.updating = true;
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let result = offer.prepare(|report| {
                         let _ = proxy.send_event(Event::UpdateProgress(report));
                     });
-                    let _ = proxy.send_event(Event::UpdatePrepared { channel, result });
+                    let _ = proxy.send_event(Event::UpdatePrepared(result));
                 });
                 return;
             }
@@ -3752,6 +3773,9 @@ impl App {
                 self.playing.retain(|id| self.state.tabs.iter().any(|tab| &tab.id == id));
                 *self.live_settings.borrow_mut() = self.state.settings.clone();
                 if matches!(c, Command::UpdateSettings { .. }) {
+                    if self.update_offer.as_ref().is_some_and(|offer| offer.channel.as_str() != self.state.settings.update_channel) {
+                        self.update_offer = None;
+                    }
                     let mut errors = vec![];
                     for view in self.pages.values().map(|p| &p.view).chain(self.peek.iter().map(|p| &p.page.view)).chain(self.preview_renders.values().map(|p| &p.view)) {
                         if let Err(e) = crate::web_settings::apply(view, &self.state.settings) { errors.push(e); }
@@ -3974,14 +3998,20 @@ impl ApplicationHandler<Event> for App {
                 self.data_clear_view = None;
                 self.emit(json!({"type":"dataCleared","action":kind,"message":if ok { "已清除浏览数据" } else { "清除失败，请重试" }}));
             }
-            Event::UpdateProgress(report) => self.publish_update(report),
-            Event::UpdatePrepared { channel, result } => {
+            Event::UpdateChecked(result) => {
                 self.updating = false;
-                let active = crate::updates::Channel::parse(&self.state.settings.update_channel);
-                if channel != active {
-                    self.publish_update(crate::updates::Report::new(active, "idle", ""));
-                    return;
-                }
+                let report = match result {
+                    Ok(offer) => {
+                        let report = offer.report.clone();
+                        self.update_offer = Some(offer);
+                        report
+                    }
+                    Err(report) => report,
+                };
+                self.publish_update(report);
+            }
+            Event::UpdateProgress(report) => self.publish_update(report),
+            Event::UpdatePrepared(result) => {
                 let report = match result {
                     Ok((update, mut report)) => {
                         let started = if self.flush_session() {
@@ -4004,6 +4034,7 @@ impl ApplicationHandler<Event> for App {
                     }
                     Err(report) => report,
                 };
+                self.updating = false;
                 self.publish_update(report);
             }
             Event::HistoryCleared(ok) => {

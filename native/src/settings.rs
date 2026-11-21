@@ -105,7 +105,7 @@ pub fn normalize_settings_url(value: &str) -> Option<String> {
 pub fn settings_url(pane: Option<&str>) -> String {
     match pane {
         Some(
-            p @ ("spaces" | "passwords" | "privacy" | "translation" | "extensions" | "shortcuts"),
+            p @ ("spaces" | "passwords" | "privacy" | "translation" | "extensions" | "shortcuts" | "about"),
         ) => format!("rove://settings/{p}"),
         _ => "rove://settings".into(),
     }

@@ -151,6 +151,7 @@ declare global {
       phase?: string | null;
       channel?: string;
       version?: string;
+      offerId?: string | null;
       action?: string;
       peek?: Tab | null;
       id?: string;

@@ -7,9 +7,7 @@ import {
   SETTINGS_PANES,
   SEARCH_ENGINES,
   SHORTCUTS,
-  UPDATE_CHANNELS,
   settingsPane,
-  updateChannelDetail,
   shortcutFor,
   shortcutText,
   shortcutFromEvent,
@@ -28,6 +26,7 @@ import SpaceLookEditor from "./SpaceLookEditor.vue";
 import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } from "../../lib/space-look";
 import { paneDirection } from "../../lib/page-motion";
 import { permissions, type PermissionScope } from "../../lib/permissions";
+import SettingsAbout from "./SettingsAbout.vue";
 const props = defineProps<{ tabId: string; url: string }>();
 const b = useBrowser(),
   query = ref(""),
@@ -56,7 +55,10 @@ watch(
       previousFocus = document.activeElement as HTMLElement;
       await nextTick();
       modal.value?.querySelector<HTMLElement>("input,button")?.focus();
-    } else previousFocus?.focus();
+    } else {
+      await nextTick();
+      previousFocus?.focus();
+    }
   },
 );
 function trapFocus(event: KeyboardEvent) {
@@ -239,44 +241,6 @@ const groups = computed<Group[]>(() => [
     ],
   },
   {
-    pane: "general",
-    title: "更新",
-    rows: [
-      {
-        id: "channel",
-        title: "更新通道",
-        detail: updateChannelDetail(b.settings.updateChannel),
-        kind: "select",
-        setting: "updateChannel",
-        options: UPDATE_CHANNELS,
-        keywords: "update channel preview canary github gitlab 更新 通道",
-      },
-      {
-        id: "updates",
-        title: "检查更新",
-        detail: b.updateStatus.message || `当前版本 ${__APP_VERSION__}。发现新版本时会自动安装并重启 Rove。`,
-        kind: "button",
-        action: "检查更新",
-        keywords: "check for updates 检查更新 安装",
-      },
-    ],
-  },
-  {
-    pane: "general",
-    title: "关于",
-    rows: [
-      {
-        id: "version",
-        title: "Rove",
-        detail: `版本 ${__APP_VERSION__} · Windows / WebView2`,
-        kind: "status",
-        action: "浏览器",
-        keywords: "version about 版本",
-      },
-      { id: "onboarding", title: "欢迎引导", detail: "重新选择常用网站，或了解首次使用流程。", kind: "button", action: "打开", keywords: "onboarding welcome 新手" },
-    ],
-  },
-  {
     pane: "passwords",
     title: "自动填充",
     rows: [
@@ -406,12 +370,18 @@ const showShortcuts = computed(
     (searching.value || pane.value === "shortcuts") &&
     !!visibleShortcuts.value.length,
 );
+const aboutPane = SETTINGS_PANES.find((item) => item.id === "about")!;
+const aboutSummary = "当前版本、软件更新、更新通道和欢迎引导。";
+const showAboutResult = computed(() =>
+  searching.value && matches(aboutPane.title, aboutSummary, aboutPane.keywords),
+);
 const noResults = computed(
   () =>
     searching.value &&
     !visibleGroups.value.length &&
     !showSpaces.value &&
-    !showShortcuts.value,
+    !showShortcuts.value &&
+    !showAboutResult.value,
 );
 function pick(id: SettingsPane) {
   query.value = "";
@@ -452,11 +422,6 @@ function saveInput(id: string) {
   } else update("downloadFolder", folder.value.trim());
 }
 function action(row: Row) {
-  if (row.id === "updates") {
-    b.checkUpdates();
-    return;
-  }
-  if (row.id === "onboarding") { b.openOnboarding(); return; }
   if (row.id === "default") {
     if (!b.native) { notice.value = "请在 Rove 桌面版中设置默认浏览器。"; return; }
     b.send({ type: "systemSettings" });
@@ -499,11 +464,27 @@ function dropSpace(event: DragEvent, before: string) {
   const id = event.dataTransfer?.getData("text/era-space");
   if (id) b.send({ type: "spaceReorder", id, before });
 }
+function askToUpdate(offerId: string) {
+  const { channel, version } = b.updateStatus;
+  const name = channel === "canary" ? `Canary 构建 ${version}` : `版本 ${version}`;
+  pending.value = {
+    kind: "update",
+    id: offerId,
+    title: "更新并重启 Rove？",
+    detail: `Rove 将下载 ${name} 并保存浏览会话，然后关闭窗口、安装更新并重新打开。`,
+  };
+}
+watch(() => b.updateStatus.offerId, (offerId) => {
+  if (pending.value?.kind === "update" && pending.value.id !== offerId)
+    pending.value = undefined;
+});
 function confirm() {
   if (!pending.value) return;
   if (pending.value.kind === "space")
     b.send({ type: "spaceDelete", id: pending.value.id });
-  else if (b.native) {
+  else if (pending.value.kind === "update") {
+    if (pending.value.id) b.installUpdate(pending.value.id);
+  } else if (b.native) {
     b.dataStatus = "正在清除…";
     b.send({ type: "clearBrowsingData", kind: pending.value.kind });
   } else notice.value = "界面预览不保存真实浏览数据；请在 Windows 应用中清除。";
@@ -599,8 +580,17 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
         <div ref="scroll" class="settings-scroll" :data-page-dir="paneDir">
           <Transition name="settings-pane">
           <div :key="pane" class="settings-content">
+            <SettingsAbout v-if="pane === 'about' && !searching" :tab-id="tabId" @confirm-update="askToUpdate" />
+            <button v-if="showAboutResult" class="about-search-result" @click="pick('about')">
+              <Icon name="info" />
+              <span class="setting-description">
+                <strong><SearchHighlight :text="aboutPane.title" :words="words" /></strong>
+                <span class="about-search-summary"><SearchHighlight :text="aboutSummary" :words="words" /></span>
+              </span>
+              <Icon name="forward" :size="13" />
+            </button>
             <p
-              v-if="notice || b.dataStatus"
+              v-if="(pane !== 'about' || searching) && (notice || b.dataStatus)"
               class="settings-feedback"
               role="status"
             >
@@ -639,7 +629,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   v-else-if="row.kind === 'select'"
                   :id="`setting-${row.id}-${tabId}`"
                   :aria-label="row.title"
-                  :disabled="row.id === 'channel' && b.updating"
                   :value="value(row)"
                   @change="select(row, $event)"
                 >
@@ -677,8 +666,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   v-else-if="row.kind === 'button'"
                   :id="`setting-${row.id}-${tabId}`"
                   class="setting-button"
-                  :disabled="(row.id === 'default' && !b.native) || (row.id === 'updates' && b.updating)"
-                  :aria-label="row.id === 'default' || row.id === 'updates' ? row.action : `${row.action}${row.title}`"
+                  :disabled="row.id === 'default' && !b.native"
+                  :aria-label="row.id === 'default' ? row.action : `${row.action}${row.title}`"
                   @click="action(row)"
                 >
                   <SearchHighlight :text="row.action!" :words="words" />
@@ -900,14 +889,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
         role="alertdialog"
         aria-modal="true"
         :aria-label="pending.title"
+        :aria-describedby="`settings-confirm-detail-${tabId}`"
       >
         <h2>{{ pending.title }}</h2>
-        <p>{{ pending.detail }}</p>
+        <p :id="`settings-confirm-detail-${tabId}`">{{ pending.detail }}</p>
         <footer>
           <button class="setting-button" @click="pending = undefined">
             取消</button
           ><button class="primary-button" @click="confirm">
-            {{ pending.kind === "space" ? "删除工作区" : "确认清除" }}
+            {{ pending.kind === "update" ? "确认更新并重启" : pending.kind === "space" ? "删除工作区" : "确认清除" }}
           </button>
         </footer>
       </section>

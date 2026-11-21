@@ -1,5 +1,6 @@
 import { chooseBrowserMenuItem } from "./browser-menu";
 import { expect, test } from "@playwright/test";
+import type { Command } from "../../src/lib/types";
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/favicon.ico", (route) => route.abort());
@@ -276,8 +277,13 @@ test("sidebar Space editor uses the shared form and preserves the theme on renam
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("研究空间");
 });
 
-test("update channel switches between Preview and Canary", async ({ page }) => {
+test("about is a separate, searchable settings pane with both update channels", async ({ page }) => {
   const channel = page.getByRole("combobox", { name: "更新通道", exact: true });
+  await expect(channel).toHaveCount(0);
+  await page.getByRole("searchbox", { name: "查找设置" }).fill("更新通道");
+  await page.getByRole("button", { name: /^关于 Rove.*更新通道/ }).click();
+  await expect(page.getByRole("heading", { name: "关于 Rove" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "设置", exact: true })).toHaveAttribute("title", "rove://settings/about");
   await expect(channel).toHaveValue("preview");
   await expect(page.locator(".settings-page")).toContainText("GitHub");
   await channel.selectOption("canary");
@@ -285,6 +291,62 @@ test("update channel switches between Preview and Canary", async ({ page }) => {
   await expect(page.locator(".settings-page")).toContainText("windows-installer");
   await page.getByRole("button", { name: "检查更新", exact: true }).click();
   await expect(page.locator(".settings-page")).toContainText("请在 Rove 桌面版中检查更新");
+  await page.setViewportSize({ width: 480, height: 640 });
+  expect(await page.locator(".settings-scroll").evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+});
+
+test("an available update waits for explicit confirmation and sends the displayed offer only once", async ({ page }) => {
+  type UpdateTestWindow = Window & { updateCommands: Command[] };
+  await page.addInitScript(() => {
+    const w = window as UpdateTestWindow;
+    w.__ERA_NATIVE__ = true;
+    w.__ERA_INITIAL_STATE__ = {
+      spaces: [{ id: "personal", name: "Personal", color: "sky" }],
+      activeSpace: "personal", activeTab: "settings",
+      tabs: [{ id: "settings", spaceId: "personal", title: "设置", url: "rove://settings/about", pinned: false }],
+      favorites: [], pins: [], theme: "dark", sidebarCollapsed: false, closed: [],
+    };
+    w.updateCommands = [];
+    w.ipc = { postMessage(text) { w.updateCommands.push(JSON.parse(text)); } };
+  });
+  await page.reload();
+  const offerId = "6c5f6e5b-3602-4dd7-bf84-e06d2a887a6c";
+  const commands = () => page.evaluate(() => (window as UpdateTestWindow).updateCommands.filter((c) => c.type.startsWith("update")));
+  const status = (phase: string, message: string) => page.evaluate(
+    (event) => window.__ERA_RECEIVE__?.(event),
+    { type: "updateStatus", phase, channel: "preview", message, version: "1.2.3", offerId },
+  );
+  const check = page.getByRole("button", { name: "检查更新", exact: true });
+  const channel = page.getByRole("combobox", { name: "更新通道" });
+  await check.click();
+  await status("checking", "正在检查更新…");
+  await expect(check).toBeDisabled();
+  await expect(channel).toBeDisabled();
+  await status("available", "发现新版本 1.2.3。");
+  await expect(page.getByRole("status")).toHaveText("发现新版本 1.2.3。");
+  expect(await commands()).toEqual([{ type: "updateCheck" }]);
+
+  const update = page.getByRole("button", { name: "更新并重启…", exact: true });
+  const dialog = page.getByRole("alertdialog", { name: "更新并重启 Rove？" });
+  const cancel = dialog.getByRole("button", { name: "取消" });
+  await update.click();
+  await expect(dialog).toContainText("1.2.3");
+  await expect(cancel).toBeFocused();
+  await cancel.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(update).toBeFocused();
+  expect(await commands()).toEqual([{ type: "updateCheck" }]);
+
+  await update.click();
+  await dialog.getByRole("button", { name: "确认更新并重启" }).click();
+  expect(await commands()).toEqual([{ type: "updateCheck" }, { type: "updateInstall", offerId }]);
+  await status("downloading", "正在下载并校验更新包。");
+  await expect(page.getByRole("status")).toHaveText("正在下载并校验更新包。");
+  await expect(update).toHaveCount(0);
+  await status("error", "更新包校验失败，已取消安装。");
+  await expect(page.getByRole("status")).toHaveText("更新包校验失败，已取消安装。");
+  await expect(check).toBeEnabled();
+  await expect(channel).toBeEnabled();
 });
 
 test("settings adapt to narrow panes without horizontal overflow", async ({
