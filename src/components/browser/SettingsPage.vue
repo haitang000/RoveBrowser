@@ -169,7 +169,7 @@ const groups = computed<Group[]>(() => [
         kind: "select",
         setting: "language",
         options: INTERFACE_LANGUAGES,
-        keywords: "language locale 界面语言 简体中文 English",
+        keywords: "language locale 界面语言 简体中文 繁體中文 介面語言 English",
       },
       {
         id: "theme",

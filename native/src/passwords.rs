@@ -98,17 +98,23 @@ pub fn choose_csv(owner: Option<HWND>) -> Result<Option<std::path::PathBuf>, Str
         }
     }
 }
-pub fn fill_script(origin: &str, logins: &[Login]) -> String {
+pub fn fill_script(origin: &str, logins: &[Login], language: &str) -> String {
     let accounts: Vec<_> = logins
         .iter()
         .take(30)
         .map(|l| serde_json::json!({"username":l.username,"password":l.password}))
         .collect();
+    let (prompt, empty) = match language {
+        "zh-TW" => ("Rove · 填寫登入資訊", "無使用者名稱的登入資訊"),
+        "en" => ("Rove · Fill sign-in", "Sign-in without a username"),
+        _ => ("Rove · 填写登录信息", "无用户名的登录信息"),
+    };
     format!(
-        "({})({}, {})",
+        "({})({}, {}, {})",
         include_str!("password-fill.js"),
         serde_json::to_string(origin).unwrap(),
-        serde_json::to_string(&accounts).unwrap()
+        serde_json::to_string(&accounts).unwrap(),
+        serde_json::json!({ "prompt": prompt, "empty": empty })
     )
 }
 
@@ -131,5 +137,19 @@ mod tests {
         assert_eq!(decoded.username, login.username);
         assert_eq!(decoded.password, login.password);
         assert!(unprotect(b"broken").is_err());
+    }
+    #[test]
+    fn fill_script_follows_interface_language() {
+        let logins = [Login {
+            username: String::new(),
+            password: "secret".into(),
+            notes: String::new(),
+            otp: String::new(),
+        }];
+        let traditional = fill_script("https://example.com", &logins, "zh-TW");
+        assert!(traditional.contains("Rove · 填寫登入資訊"));
+        assert!(traditional.contains("無使用者名稱的登入資訊"));
+        assert!(fill_script("https://example.com", &logins, "en").contains("Rove · Fill sign-in"));
+        assert!(fill_script("https://example.com", &logins, "zh-CN").contains("Rove · 填写登录信息"));
     }
 }

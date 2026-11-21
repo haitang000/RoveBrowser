@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { interfaceLanguage, translate } from "../src/lib/language";
+import { english } from "../src/lib/locales/en";
+import { traditionalChinese } from "../src/lib/locales/zh-TW";
 import { initialState, reduce } from "../src/lib/preview";
 import { address } from "../src/lib/address";
 import { urlFrom } from "../src/lib/command";
@@ -23,10 +25,21 @@ describe("Zigzag settings port", () => {
   it("keeps Chinese for old or invalid settings and interpolates translated labels", () => {
     expect(settingsFor().language).toBe("zh-CN");
     expect(settingsFor({ language: "en" }).language).toBe("en");
+    expect(settingsFor({ language: "zh-TW" }).language).toBe("zh-TW");
+    expect(interfaceLanguage("zh-TW")).toBe("zh-TW");
     expect(interfaceLanguage("fr")).toBe("zh-CN");
+    expect(translate("zh-TW", "设置")).toBe("設定");
+    expect(translate("zh-TW", "标签页")).toBe("分頁");
+    expect(translate("zh-TW", "编辑 {name}", { name: "项目 {name}" })).toBe("編輯 项目 {name}");
     expect(translate("en", "编辑 {name}", { name: "项目 {name}" })).toBe("Edit 项目 {name}");
     expect(translate("en", "未知文案")).toBe("未知文案");
     expect(translate("en", "toString")).toBe("toString");
+    expect(Object.keys(traditionalChinese).sort()).toEqual(Object.keys(english).sort());
+    for (const [source, message] of Object.entries(traditionalChinese)) {
+      for (const token of source.match(/\{(?:\w+)\}|%s/g) ?? []) expect(message, source).toContain(token);
+      expect(message.split("\n").length, source).toBe(source.split("\n").length);
+      expect(message, source).not.toMatch(/设置|标签|下载|默认|软件|网络|文件夹|扩展|简体|窗口|用户|链接|内存|缓存|许可權|小元件|便籤/);
+    }
   });
   it("keeps background tab sleeping on by default", () => {
     expect(defaultSettings().sleepTabs).toBe(true);

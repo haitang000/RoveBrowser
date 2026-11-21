@@ -31,6 +31,9 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
+:root[lang="zh-TW"] {
+  font-family: "Inter Variable", "Microsoft JhengHei UI", "Microsoft JhengHei", "Segoe UI", sans-serif;
+}
 input::placeholder {
   color: var(--tertiary);
 }

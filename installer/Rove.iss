@@ -43,12 +43,15 @@ SetupLogging=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
+Name: "chinesetraditional"; MessagesFile: "ChineseTraditional.isl"
 
 [CustomMessages]
 english.InstallWebView2=Installing Microsoft Edge WebView2 Runtime...
 english.WebView2Failed=WebView2 Runtime could not be installed (exit code %1). Connect to the internet and retry, or install the runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and run Setup again.
 chinesesimplified.InstallWebView2=正在安装 Microsoft Edge WebView2 运行时……
 chinesesimplified.WebView2Failed=无法安装 WebView2 运行时（退出代码 %1）。请连接网络后重试，或从 https://developer.microsoft.com/microsoft-edge/webview2/ 安装运行时后重新运行安装程序。
+chinesetraditional.InstallWebView2=正在安裝 Microsoft Edge WebView2 執行階段……
+chinesetraditional.WebView2Failed=無法安裝 WebView2 執行階段（結束代碼 %1）。請連接網路後重試，或從 https://developer.microsoft.com/microsoft-edge/webview2/ 安裝執行階段後重新執行安裝程式。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

@@ -11,11 +11,11 @@ test.beforeEach(async ({ page }) => {
 test("interface language updates live, works in settings search and survives a reload", async ({ page }) => {
   const html = page.locator("html");
   const search = page.getByRole("searchbox", { name: /查找设置|Search settings/ });
-  const selector = page.getByRole("combobox", { name: /^(界面语言|Interface language)$/ });
+  const selector = page.getByRole("combobox", { name: /^(界面语言|介面語言|Interface language)$/ });
   await expect(html).toHaveAttribute("lang", "zh-CN");
   await search.fill("界面语言");
   await expect(selector).toHaveValue("zh-CN");
-  await expect(selector.locator("option")).toHaveText(["简体中文", "English"]);
+  await expect(selector.locator("option")).toHaveText(["简体中文", "繁體中文", "English"]);
   await selector.selectOption("en");
   await expect(html).toHaveAttribute("lang", "en");
   await expect(selector).toHaveValue("en");
@@ -31,6 +31,12 @@ test("interface language updates live, works in settings search and survives a r
   await page.setViewportSize({ width: 480, height: 640 });
   await expect(selector).toBeVisible();
   expect(await page.locator(".settings-scroll").evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+
+  await selector.selectOption("zh-TW");
+  await expect(html).toHaveAttribute("lang", "zh-TW");
+  await expect(selector).toHaveValue("zh-TW");
+  await expect(page.getByRole("tab", { name: "設定", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "一般", exact: true })).toBeVisible();
 
   await selector.selectOption("zh-CN");
   await expect(html).toHaveAttribute("lang", "zh-CN");

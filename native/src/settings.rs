@@ -153,7 +153,7 @@ impl Settings {
         }
     }
     fn normalize_choices(&mut self) {
-        if !matches!(self.language.as_str(), "zh-CN" | "en") {
+        if !matches!(self.language.as_str(), "zh-CN" | "zh-TW" | "en") {
             self.language = "zh-CN".into();
         }
         if self.update_channel != "preview" && self.update_channel != "canary" {
@@ -272,6 +272,9 @@ mod tests {
         let mut restored: State = serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
         restored.repair();
         assert_eq!(restored.settings.language, "en");
+        restored.settings.language = "zh-TW".into();
+        restored.repair();
+        assert_eq!(restored.settings.language, "zh-TW");
 
         restored.settings.language = "invalid".into();
         restored.repair();

@@ -4592,7 +4592,7 @@ impl ApplicationHandler<Event> for App {
                         if let Some(page) = self.pages.get(&id) {
                             if let Some(origin) = crate::import::origin(&page.url) {
                                 let logins = self.storage.imported_logins(&origin);
-                                if !logins.is_empty() { let _ = page.view.evaluate_script(&crate::passwords::fill_script(&origin, &logins)); }
+                                if !logins.is_empty() { let _ = page.view.evaluate_script(&crate::passwords::fill_script(&origin, &logins, &self.state.settings.language)); }
                             }
                         }
                     }
