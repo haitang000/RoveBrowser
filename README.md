@@ -1,8 +1,8 @@
 # Rove
 
-Rove 是一款面向 Windows 10/11 的浏览器，使用 WebView2 加载网页，以工作区、侧栏标签和分屏组织浏览。界面与部分交互参考并移植自 Zigzag，当前正式版本为 **0.1.3**。
+Rove 是一款面向 Windows 10/11 的浏览器，使用 WebView2 加载网页，以工作区、侧栏标签和分屏组织浏览。界面与部分交互参考并移植自 Zigzag，当前正式版本为 **0.1.4**。
 
-[下载发行版](https://github.com/haitang000/RoveBrowser/releases/latest) · [0.1.3 更新说明](docs/releases/0.1.3.md) · [反馈问题](https://github.com/haitang000/RoveBrowser/issues) · [验证记录](docs/VALIDATION.md)
+[下载发行版](https://github.com/haitang000/RoveBrowser/releases/latest) · [0.1.4 更新说明](docs/releases/0.1.4.md) · [反馈问题](https://github.com/haitang000/RoveBrowser/issues) · [验证记录](docs/VALIDATION.md)
 
 ## 功能概览
 
