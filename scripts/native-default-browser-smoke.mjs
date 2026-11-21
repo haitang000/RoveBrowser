@@ -65,9 +65,12 @@ try {
   await forward(['--',second]);
   assert.equal((await state()).tabs.some(t=>t.url===first),false);
   await ui.getByRole('button',{name:'开始使用',exact:true}).click();
-  for(let i=0;i<3;i++) await ui.getByRole('button',{name:'跳过',exact:true}).click();
-  await ui.getByRole('button',{name:'暂时不用',exact:true}).click();
+  await ui.getByRole('button',{name:'跳过',exact:true}).click();
+  for(let i=0;i<2;i++) await ui.getByRole('button',{name:'继续',exact:true}).click();
+  await ui.getByRole('button',{name:'暂时跳过',exact:true}).click();
+  await ui.getByRole('radio',{name:'暂时不用',exact:true}).check();
   await ui.getByRole('button',{name:'开始浏览',exact:true}).click();
+  await ui.locator('.onboarding-greeting').getByRole('button',{name:'开始浏览',exact:true}).click();
   await waitFor(async() => { const s=await state(); return [first,second].every(url=>s.tabs.some(t=>t.url===url)); },'queued shell URLs');
   checks.push('Cold and forwarded URLs wait for onboarding, then open in the existing session');
   const count=(await state()).tabs.length;

@@ -165,6 +165,7 @@ try {
   await stop(); await launch();
   assert.equal((await state()).onboarding.step, 'bring');
   assert.equal((await state()).pins.length, 3); assert.equal((await state()).onboarding.imports.length, 4);
+  await ui.getByRole('checkbox', { name: /Microsoft Edge/ }).waitFor();
   await ui.getByRole('button', { name: '跳过', exact: true }).click();
   await waitFor(() => ui.locator('.onboarding').getAttribute('data-step').then(step => step === 'spaces'), 'space setup');
   await ui.getByRole('button', { name: '继续', exact: true }).click();
@@ -174,6 +175,7 @@ try {
   await ui.getByRole('button', { name: '暂时跳过', exact: true }).click();
   await ui.getByRole('radio', { name: '暂时不用', exact: true }).check();
   await ui.getByRole('button', { name: '开始浏览', exact: true }).click();
+  await ui.locator('.onboarding-greeting').getByRole('button', { name: '开始浏览', exact: true }).click();
   await ui.locator('.sidebar').waitFor();
   await send({ type: 'space', id: `import-${edgeId}` });
   await ui.locator('.space-name').filter({ hasText: '导入 · Microsoft Edge' }).waitFor();

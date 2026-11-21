@@ -54,6 +54,5 @@ onMounted(() => b.scanImports());
     <div v-if="reportFor('password-file')" class="import-result" role="status"><p>已导入 {{ reportFor('password-file')!.passwords }} 个密码<span v-if="reportFor('password-file')!.skipped">，跳过 {{ reportFor('password-file')!.skipped }} 个重复或无效项目</span>。</p><p v-for="problem in reportFor('password-file')!.problems" :key="problem" class="import-problem">{{ problem }}</p></div>
     <p class="onboarding-card-note">书签放入各来源的独立工作区；历史合并并去重。原浏览器的数据保持原样。导入的密码可在对应网站登录时点击“Rove · 填写登录信息”使用。</p>
     </details>
-    <p v-if="b.importBusy && b.importPhase === 'importing'" class="import-progress" role="status">正在导入，请稍候…</p>
   </div>
 </template>

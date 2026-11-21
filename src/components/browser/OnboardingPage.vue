@@ -5,9 +5,9 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { ONBOARDING_SITES, ONBOARDING_STEPS, otherFavorites, selectedSiteIds } from "../../lib/onboarding";
 import { MAX_FAVORITES } from "../../lib/favorites";
-import { frameOf } from "../../lib/space-look";
 import Icon from "../common/Icon.vue";
 import OnboardingLogo from "./OnboardingLogo.vue";
+import OnboardingGreeting from "./OnboardingGreeting.vue";
 import DataImportPicker from "./DataImportPicker.vue";
 import SpaceEditor from "./SpaceEditor.vue";
 
@@ -36,11 +36,7 @@ const engines = [
   { id: "google", title: "Google" }, { id: "bing", title: "Bing" }, { id: "duckDuckGo", title: "DuckDuckGo" },
 ];
 const primaryTitle = computed(() => step.value === "ready" ? "开始浏览" : step.value === "bring" && importer.value?.canImport ? "导入所选数据" : "继续");
-const previewStyle = computed(() => {
-  const space = b.spacePreview?.id === b.space.id ? { ...b.space, ...b.spacePreview.look } : b.space;
-  const frame = frameOf(space, b.state.theme, false);
-  return frame.custom ? { background: frame.background } : undefined;
-});
+const importing = computed(() => step.value === "bring" && b.importBusy && b.importPhase === "importing");
 watch(step, async () => {
   busy.value = false; limitNotice.value = "";
   if (step.value === "sites") picked.value = selectedSiteIds(b.state);
@@ -60,7 +56,8 @@ function advance(skip = false) {
   if (busy.value || b.importBusy) return;
   if (step.value === "bring" && !skip && importer.value?.canImport) { importer.value.run(); return; }
   busy.value = true;
-  b.send({ type: "onboardingAdvance", step: step.value, skip, sites: [...picked.value], makeDefault: step.value === "ready" && makeDefault.value && b.native && !(b.defaultBrowser?.http && b.defaultBrowser?.https) });
+  if (step.value === "ready") b.finishOnboarding(makeDefault.value);
+  else b.send({ type: "onboardingAdvance", step: step.value, skip, sites: [...picked.value] });
   if (!b.native) busy.value = false;
 }
 function back() {
@@ -69,6 +66,13 @@ function back() {
 function key(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
   const target = event.target as HTMLElement;
+  if (b.onboardingGreeting) {
+    if (event.key === "Escape" || (event.key === "Enter" && !target.closest("button"))) {
+      event.preventDefault();
+      b.dismissOnboardingGreeting();
+    }
+    return;
+  }
   if (target.closest('input, textarea, select, [contenteditable="true"], [role="slider"]')) return;
   if (event.key === "Escape" && index.value > 0) { event.preventDefault(); back(); }
   else if (event.key === "Enter" && !target.closest("button, a")) { event.preventDefault(); advance(); }
@@ -78,13 +82,14 @@ onMounted(focusHeading);
 </script>
 
 <template>
-  <main class="onboarding" :data-step="step" aria-label="Rove 欢迎引导" @keydown="key">
-    <Transition name="onboarding-page" mode="out-in" @after-enter="focusHeading">
-      <section v-if="step === 'hello'" key="hello" class="onboarding-hello" aria-labelledby="onboarding-title">
+  <main class="onboarding" :data-step="b.onboardingGreeting ? 'complete' : step" aria-label="Rove 欢迎引导" @keydown="key">
+    <Transition name="onboarding-page" :css="!b.onboardingGreeting" mode="out-in" @after-enter="focusHeading">
+      <OnboardingGreeting v-if="b.onboardingGreeting" key="complete" />
+      <section v-else-if="step === 'hello'" key="hello" class="onboarding-hello" aria-labelledby="onboarding-title">
         <p class="onboarding-welcome">欢迎来到你的新空间</p>
         <h1 id="onboarding-title" ref="heading" class="onboarding-wordmark" tabindex="-1">Rove</h1>
         <p class="onboarding-hello-note">少一点纷扰，多一点自由。</p>
-        <button class="onboarding-primary onboarding-start" :disabled="busy" @click="advance()">开始使用 <Icon name="arrow" :size="18" /></button>
+        <button class="onboarding-primary onboarding-primary-light onboarding-start" :disabled="busy" @click="advance()">开始使用 <Icon name="arrow" :size="18" /></button>
         <p v-if="b.error" class="onboarding-error" role="alert">{{ b.error }}</p>
       </section>
       <section v-else :key="step" class="onboarding-step" aria-labelledby="onboarding-title" aria-describedby="onboarding-subtitle">
@@ -96,14 +101,18 @@ onMounted(focusHeading);
           </div>
           <footer class="onboarding-footer">
             <p v-if="b.error" class="onboarding-error" role="alert">{{ b.error }}</p>
-            <button class="onboarding-primary" :disabled="busy || b.importBusy" @click="advance()">{{ b.importBusy ? '请稍候…' : primaryTitle }}</button>
+            <button class="onboarding-primary" :disabled="busy || b.importBusy" @click="advance()">
+              <Icon v-if="importing" name="spinner" class="reload-spinner" :size="18" />
+              {{ importing ? '正在导入，请稍候…' : b.importBusy ? '请稍候…' : primaryTitle }}
+            </button>
+            <span v-if="step === 'bring'" class="sr-only" role="status">{{ importing ? '正在导入，请稍候…' : '' }}</span>
             <button v-if="step === 'sites' || step === 'bring'" class="onboarding-skip" :disabled="busy || b.importBusy" @click="advance(true)">{{ step === 'sites' ? '暂时跳过' : '跳过' }}</button>
             <ol class="onboarding-progress" aria-label="引导进度">
               <li v-for="(name, i) in ONBOARDING_STEPS.slice(1)" :key="name" :class="{ current: index === i + 1, done: index > i + 1 }" :aria-current="index === i + 1 ? 'step' : undefined"><span class="sr-only">第 {{ i + 1 }} 步，共 5 步</span></li>
             </ol>
           </footer>
         </div>
-        <div class="onboarding-visual" :class="`onboarding-visual-${step}`" :style="step === 'spaces' ? previewStyle : undefined">
+        <div class="onboarding-visual" :class="`onboarding-visual-${step}`">
           <DataImportPicker v-if="step === 'bring'" ref="importer" />
           <div v-else-if="step === 'spaces'" class="onboarding-space-preview">
             <div class="onboarding-theme" role="group" aria-label="外观模式">

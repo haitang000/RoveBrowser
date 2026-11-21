@@ -37,8 +37,8 @@ const shownSpace = computed(() => {
   const preview = b.spacePreview;
   return preview && preview.id === b.space?.id ? { ...b.space, ...preview.look } : b.space;
 });
-const painted = computed<ReturnType<typeof frameOf>>((previous) => shareSnapshot(previous, frameOf(shownSpace.value, b.state.theme, glassAllowed.value)));
 const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(shownSpace.value?.translucency) && glassAllowed.value);
+const painted = computed<ReturnType<typeof frameOf>>((previous) => shareSnapshot(previous, frameOf(shownSpace.value, b.state.theme, glassActive.value)));
 watch(() => b.onboardingOpen, (open) => { document.documentElement.dataset.onboarding = String(open); }, { immediate: true, flush: "sync" });
 const gradient = "linear-gradient(var(--frame-gradient-angle), var(--frame-gradient-start), var(--frame-gradient-end))";
 const shellStyle = computed<Record<string, string>>((previous) => shareSnapshot(previous, {

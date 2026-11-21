@@ -161,7 +161,21 @@ export const useBrowser = defineStore("browser", () => {
   function scanImports() { importPhase.value = "checking"; if (native) send({ type: "importScan" }); }
   function runImport(request: ImportRequest) { importPhase.value = "importing"; if (native) send({ type: "importRun", request }); }
   function importPasswords() { importPhase.value = "importing"; if (native) send({ type: "importPasswords" }); }
-  const onboardingOpen = computed(() => state.value.onboarding?.completed === false);
+  const onboardingDefaultChoice = ref<boolean>();
+  const onboardingGreeting = computed(() => state.value.onboarding?.completed === true && onboardingDefaultChoice.value !== undefined);
+  const onboardingOpen = computed(() => state.value.onboarding?.completed === false || onboardingGreeting.value);
+  function finishOnboarding(makeDefault: boolean) {
+    onboardingDefaultChoice.value = makeDefault && native && !(defaultBrowser.value?.http && defaultBrowser.value?.https);
+    send({ type: "onboardingAdvance", step: "ready" });
+  }
+  function dismissOnboardingGreeting() {
+    const openSettings = onboardingDefaultChoice.value;
+    onboardingDefaultChoice.value = undefined;
+    if (openSettings) send({ type: "systemSettings" });
+  }
+  watch(error, message => {
+    if (message && !state.value.onboarding?.completed) onboardingDefaultChoice.value = undefined;
+  });
   function openOnboarding() {
     commandOpen.value = false; settingsOpen.value = false; deskOpen.value = false;
     closeSpaceEditor();
@@ -774,8 +788,7 @@ export const useBrowser = defineStore("browser", () => {
   return {
     canOutputPage, pageOutputShortcut, outputPage,
     importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser,
-    onboardingOpen,
-    openOnboarding,
+    onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,
     native,
     popupWindow,
     contextMenu,

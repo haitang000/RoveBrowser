@@ -2841,6 +2841,13 @@ impl App {
             }
             let make_default = matches!(c, Command::OnboardingAdvance { step: crate::onboarding::Step::Ready, make_default: true, .. });
             if let Err(e) = self.state.apply(&c) { self.error(e); return; }
+            if matches!(c, Command::OnboardingAdvance { step: crate::onboarding::Step::Ready, .. }) {
+                // Wait for the browser surface to report its new bounds after the greeting.
+                self.pending_layout.take();
+                self.primary = Rect::default();
+                self.secondary = None;
+                self.sidebar_rect = None;
+            }
             self.open_external_urls(event_loop);
             self.save(); self.publish();
             if let Err(e) = self.sync() { self.error(e); }

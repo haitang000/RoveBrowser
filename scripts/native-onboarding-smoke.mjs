@@ -92,8 +92,12 @@ try {
   checks.push("SQLite restores the unfinished step, space appearance, theme, search engine, and favorites after process exit");
   await ui.getByRole("radio", { name: "暂时不用", exact: true }).check();
   await ui.getByRole("button", { name: "开始浏览", exact: true }).click();
-  await ui.locator(".sidebar").waitFor();
+  const greeting = ui.locator(".onboarding-greeting");
+  await greeting.waitFor();
   assert.equal((await state()).onboarding.completed, true);
+  assert.equal(await ui.locator(".sidebar").count(), 0);
+  await greeting.getByRole("button", { name: "开始浏览", exact: true }).click();
+  await ui.locator(".sidebar").waitFor();
   assert.equal(await ui.locator(".favorite-tile").count(), 2);
   await stop();
 
