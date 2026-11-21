@@ -37,10 +37,14 @@ mod storage;
 mod split;
 mod suggestions;
 mod thumbnails;
+mod update_install;
 mod updates;
 mod web_settings;
 fn main() {
-    if let Err(e) = host::run() {
+    if update_install::run_helper() {
+        return;
+    }
+    if let Err(e) = host::run(update_install::startup_message()) {
         eprintln!("Rove: {e}");
         let _ = std::fs::write(std::env::temp_dir().join("rove-error.log"), e.to_string());
     }

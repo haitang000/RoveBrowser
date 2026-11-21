@@ -110,6 +110,17 @@
   },
   {
     "ecosystem": "rust",
+    "name": "constant_time_eq",
+    "version": "0.6.1",
+    "license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
+    "files": [
+      "LICENSE-APACHE",
+      "LICENSE-CC0",
+      "LICENSE-MIT0"
+    ]
+  },
+  {
+    "ecosystem": "rust",
     "name": "cookie",
     "version": "0.18.2",
     "license": "MIT OR Apache-2.0",
@@ -877,6 +888,16 @@
   },
   {
     "ecosystem": "rust",
+    "name": "rustversion",
+    "version": "1.0.23",
+    "license": "MIT OR Apache-2.0",
+    "files": [
+      "LICENSE-APACHE",
+      "LICENSE-MIT"
+    ]
+  },
+  {
+    "ecosystem": "rust",
     "name": "ryu",
     "version": "1.0.23",
     "license": "Apache-2.0 OR BSL-1.0",
@@ -1189,6 +1210,16 @@
     "license": "MIT",
     "files": [
       "LICENSE"
+    ]
+  },
+  {
+    "ecosystem": "rust",
+    "name": "typed-path",
+    "version": "0.13.0",
+    "license": "MIT OR Apache-2.0",
+    "files": [
+      "LICENSE-APACHE",
+      "LICENSE-MIT"
     ]
   },
   {
@@ -1566,6 +1597,26 @@
   },
   {
     "ecosystem": "rust",
+    "name": "zeroize",
+    "version": "1.9.2",
+    "license": "Apache-2.0 OR MIT",
+    "files": [
+      "LICENSE-APACHE",
+      "LICENSE-MIT"
+    ]
+  },
+  {
+    "ecosystem": "rust",
+    "name": "zeroize_derive",
+    "version": "1.5.0",
+    "license": "Apache-2.0 OR MIT",
+    "files": [
+      "LICENSE-APACHE",
+      "LICENSE-MIT"
+    ]
+  },
+  {
+    "ecosystem": "rust",
     "name": "zerotrie",
     "version": "0.2.5",
     "license": "Unicode-3.0",
@@ -1587,6 +1638,15 @@
     "name": "zerovec-derive",
     "version": "0.11.7",
     "license": "Unicode-3.0",
+    "files": [
+      "LICENSE"
+    ]
+  },
+  {
+    "ecosystem": "rust",
+    "name": "zip",
+    "version": "9.8.1",
+    "license": "MIT",
     "files": [
       "LICENSE"
     ]

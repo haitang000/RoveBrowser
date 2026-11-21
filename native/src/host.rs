@@ -155,7 +155,11 @@ enum Event {
     SleepDone(String, bool),
     StorageWriteError(String),
     PermissionsChanged,
-    UpdateReport { install: bool, ticket: u64, report: crate::updates::Report },
+    UpdateProgress(crate::updates::Report),
+    UpdatePrepared {
+        channel: crate::updates::Channel,
+        result: Result<(crate::update_install::PreparedUpdate, crate::updates::Report), crate::updates::Report>,
+    },
 }
 struct Page {
     permission_document: Rc<permissions::Document>,
@@ -321,6 +325,8 @@ struct UndoBatch {
 }
 struct App {
     _instance: crate::instance::Instance,
+    updating: bool,
+    update_message: Option<String>,
     external_urls: Vec<String>,
     import_sources: Vec<crate::import::Source>,
     import_busy: bool,
@@ -427,7 +433,7 @@ struct PreviewRender {
     pending: bool,
     version: u64,
 }
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Keep the existing profile location so the rename preserves sessions and logins.
     let data = std::env::var_os("ERA_DATA_DIR")
         .map(PathBuf::from)
@@ -480,6 +486,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut app = App {
         _instance: instance,
+        updating: false,
+        update_message,
         external_urls,
         import_sources: vec![],
         import_busy: false,
@@ -730,12 +738,17 @@ impl App {
         // a save indefinitely. Only clone/serialize once per batch.
         self.next_session_save.get_or_insert_with(|| Instant::now() + Duration::from_millis(150));
     }
-    fn flush_session(&mut self) {
+    fn flush_session(&mut self) -> bool {
         self.next_session_save = None;
         self.session_writer.save(self.state.clone());
         if let Err(error) = self.session_writer.flush() {
             self.error(format!("保存会话失败：{error}"));
+            return false;
         }
+        true
+    }
+    fn publish_update(&self, report: crate::updates::Report) {
+        self.emit(json!({"type":"updateStatus","phase":report.phase,"channel":report.channel,"version":report.version,"message":report.message}));
     }
     /// One-time: replace icons an older build enlarged to 64 pixels. Each saved
     /// site is asked for its own icon in the background and the replacements
@@ -2929,31 +2942,16 @@ impl App {
             );
         match c {
             Command::UpdateCheck => {
+                if self.updating { return; }
+                self.updating = true;
                 let channel = crate::updates::Channel::parse(&self.state.settings.update_channel);
-                let Some(ticket) = crate::updates::begin_check() else {
-                    self.emit(json!({"type":"updateStatus","phase":"downloading","channel":channel.as_str(),"version":"","message":"正在下载安装程序，请稍候。"}));
-                    return;
-                };
-                self.emit(json!({"type":"updateStatus","phase":"checking","channel":channel.as_str(),"version":"","message":"正在检查更新…"}));
+                self.publish_update(crate::updates::Report::new(channel, "checking", "正在检查更新…"));
                 let proxy = self.proxy.clone();
                 std::thread::spawn(move || {
-                    let report = crate::updates::check(channel);
-                    let _ = proxy.send_event(Event::UpdateReport { install: false, ticket, report });
-                });
-                return;
-            }
-            Command::UpdateInstall => {
-                let channel = crate::updates::Channel::parse(&self.state.settings.update_channel);
-                let Some(ticket) = crate::updates::begin_install() else {
-                    self.emit(json!({"type":"updateStatus","phase":"downloading","channel":channel.as_str(),"version":"","message":"正在下载安装程序，请稍候。"}));
-                    return;
-                };
-                self.emit(json!({"type":"updateStatus","phase":"downloading","channel":channel.as_str(),"version":"","message":"正在下载安装程序…"}));
-                let proxy = self.proxy.clone();
-                std::thread::spawn(move || {
-                    let _guard = crate::updates::InstallGuard;
-                    let report = crate::updates::install(channel);
-                    let _ = proxy.send_event(Event::UpdateReport { install: true, ticket, report });
+                    let result = crate::updates::prepare(channel, |report| {
+                        let _ = proxy.send_event(Event::UpdateProgress(report));
+                    });
+                    let _ = proxy.send_event(Event::UpdatePrepared { channel, result });
                 });
                 return;
             }
@@ -3170,6 +3168,9 @@ impl App {
             }
             Command::Ready => {
                 self.ready = true;
+                if let Some(message) = self.update_message.take() {
+                    self.toast(&message, None);
+                }
                 self.open_external_urls(event_loop);
                 if let Err(e) = self.update_window_frame() {
                     self.error(e);
@@ -3861,11 +3862,37 @@ impl ApplicationHandler<Event> for App {
                 self.data_clear_view = None;
                 self.emit(json!({"type":"dataCleared","action":kind,"message":if ok { "已清除浏览数据" } else { "清除失败，请重试" }}));
             }
-            Event::UpdateReport { install, ticket, report } => {
-                let fresh = if install { crate::updates::install_current(ticket) } else { crate::updates::check_current(ticket) };
-                if fresh {
-                    self.emit(json!({"type":"updateStatus","phase":report.phase,"channel":report.channel,"version":report.version,"message":report.message}));
+            Event::UpdateProgress(report) => self.publish_update(report),
+            Event::UpdatePrepared { channel, result } => {
+                self.updating = false;
+                let active = crate::updates::Channel::parse(&self.state.settings.update_channel);
+                if channel != active {
+                    self.publish_update(crate::updates::Report::new(active, "idle", ""));
+                    return;
                 }
+                let report = match result {
+                    Ok((update, mut report)) => {
+                        let started = if self.flush_session() {
+                            update.start()
+                        } else {
+                            Err("无法保存浏览会话，已取消更新。".into())
+                        };
+                        match started {
+                            Ok(()) => {
+                                self.publish_update(report);
+                                event_loop.exit();
+                                return;
+                            }
+                            Err(message) => {
+                                report.phase = "error";
+                                report.message = message;
+                                report
+                            }
+                        }
+                    }
+                    Err(report) => report,
+                };
+                self.publish_update(report);
             }
             Event::HistoryCleared(ok) => {
                 if ok {

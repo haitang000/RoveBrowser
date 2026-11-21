@@ -254,9 +254,9 @@ const groups = computed<Group[]>(() => [
       {
         id: "updates",
         title: "检查更新",
-        detail: b.updateStatus.message || `当前版本 ${__APP_VERSION__}。`,
+        detail: b.updateStatus.message || `当前版本 ${__APP_VERSION__}。发现新版本时会自动安装并重启 Rove。`,
         kind: "button",
-        action: b.updateStatus.phase === "available" ? "下载并安装" : "检查更新",
+        action: "检查更新",
         keywords: "check for updates 检查更新 安装",
       },
     ],
@@ -453,8 +453,7 @@ function saveInput(id: string) {
 }
 function action(row: Row) {
   if (row.id === "updates") {
-    if (b.updateStatus.phase === "available") b.installUpdate();
-    else b.checkUpdates();
+    b.checkUpdates();
     return;
   }
   if (row.id === "onboarding") { b.openOnboarding(); return; }
@@ -640,7 +639,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   v-else-if="row.kind === 'select'"
                   :id="`setting-${row.id}-${tabId}`"
                   :aria-label="row.title"
-                  :disabled="row.id === 'channel' && (b.updateStatus.phase === 'checking' || b.updateStatus.phase === 'downloading')"
+                  :disabled="row.id === 'channel' && b.updating"
                   :value="value(row)"
                   @change="select(row, $event)"
                 >
@@ -678,7 +677,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   v-else-if="row.kind === 'button'"
                   :id="`setting-${row.id}-${tabId}`"
                   class="setting-button"
-                  :disabled="(row.id === 'default' && !b.native) || (row.id === 'updates' && (b.updateStatus.phase === 'checking' || b.updateStatus.phase === 'downloading'))"
+                  :disabled="(row.id === 'default' && !b.native) || (row.id === 'updates' && b.updating)"
                   :aria-label="row.id === 'default' || row.id === 'updates' ? row.action : `${row.action}${row.title}`"
                   @click="action(row)"
                 >

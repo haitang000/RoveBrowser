@@ -154,8 +154,12 @@ export const useBrowser = defineStore("browser", () => {
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedBookmarks.value.get(active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
-  const updateStatus = ref<{ phase: "idle" | "checking" | "current" | "available" | "ahead" | "downloading" | "launched" | "error"; channel?: UpdateChannel; version?: string; message: string }>({ phase: "idle", message: "" });
+  const updatePhases = ["idle", "checking", "current", "ahead", "downloading", "extracting", "installing", "error"] as const;
+  type UpdatePhase = (typeof updatePhases)[number];
+  const updateStatus = ref<{ phase: UpdatePhase; channel?: UpdateChannel; version?: string; message: string }>({ phase: "idle", message: "" });
+  const updating = computed(() => ["checking", "downloading", "extracting", "installing"].includes(updateStatus.value.phase));
   function checkUpdates() {
+    if (updating.value) return;
     const channel = settings.value.updateChannel;
     if (!native) {
       updateStatus.value = { phase: "error", channel, message: "请在 Rove 桌面版中检查更新。" };
@@ -164,13 +168,8 @@ export const useBrowser = defineStore("browser", () => {
     updateStatus.value = { phase: "checking", channel, message: "正在检查更新…" };
     send({ type: "updateCheck" });
   }
-  function installUpdate() {
-    if (!native || updateStatus.value.phase !== "available") return;
-    updateStatus.value = { ...updateStatus.value, phase: "downloading", message: "正在下载安装程序…" };
-    send({ type: "updateInstall" });
-  }
   watch(() => settings.value.updateChannel, (next, previous) => {
-    if (next !== previous) updateStatus.value = { phase: "idle", message: "" };
+    if (next !== previous && !updating.value) updateStatus.value = { phase: "idle", message: "" };
   });
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
@@ -676,10 +675,9 @@ export const useBrowser = defineStore("browser", () => {
     }
     if (e.type === "defaultBrowser" && e.defaultBrowser) defaultBrowser.value = e.defaultBrowser;
     if (e.type === "updateStatus" && typeof e.message === "string") {
-      const phase = e.phase === "checking" || e.phase === "current" || e.phase === "available" || e.phase === "ahead" || e.phase === "downloading" || e.phase === "launched" || e.phase === "error" ? e.phase : "error";
+      const phase = updatePhases.find(phase => phase === e.phase) ?? "error";
       const channel = e.channel === "canary" || e.channel === "preview" ? e.channel : settings.value.updateChannel;
       if (channel === settings.value.updateChannel) updateStatus.value = { phase, channel, version: e.version || "", message: e.message };
-      else if (phase === "launched") notify(e.message);
     }
     if (e.type === "state" && e.state) {
       const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
@@ -845,8 +843,8 @@ export const useBrowser = defineStore("browser", () => {
     state,
     settings,
     updateStatus,
+    updating,
     checkUpdates,
-    installUpdate,
     shortcutLabel,
     shortcutTitle,
     dataStatus,

@@ -43,7 +43,7 @@ Versions are fixed in package-lock.json and native/Cargo.lock. This list disting
 | Vue 3, Pinia, Vite, @vitejs/plugin-vue, vue-tsc, Vitest | MIT |
 | TypeScript, Playwright | Apache-2.0 |
 | Rust winit, wry | Apache-2.0 |
-| webview2-com, include_dir | MIT |
+| webview2-com, include_dir, zip | MIT |
 | windows-rs, serde, serde_json, uuid, url, rusqlite, base64, image | MIT OR Apache-2.0 |
 | directories | MIT OR Apache-2.0 |
 | ammonia (HTML sanitization) | MIT OR Apache-2.0 |
