@@ -4,8 +4,9 @@ use std::{
     rc::Rc,
 };
 use webview2_com::{
-    take_pwstr, ExecuteScriptCompletedHandler, Microsoft::Web::WebView2::Win32::*,
-    NavigationCompletedEventHandler, NavigationStartingEventHandler,
+    take_pwstr, ContentLoadingEventHandler, ExecuteScriptCompletedHandler,
+    Microsoft::Web::WebView2::Win32::*, NavigationCompletedEventHandler,
+    NavigationStartingEventHandler,
 };
 use windows::core::{Interface, BOOL, HSTRING, PWSTR};
 use wry::{WebView, WebViewExtWindows};
@@ -37,6 +38,7 @@ pub fn install(view: &WebView, dark: bool) -> windows::core::Result<Rc<ErrorPage
     let state = Rc::new(ErrorPage::default());
     state.dark.set(dark);
     let starting_state = state.clone();
+    let content_state = state.clone();
     let completed_state = state.clone();
     let starting = NavigationStartingEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
@@ -57,6 +59,22 @@ pub fn install(view: &WebView, dark: bool) -> windows::core::Result<Rc<ErrorPage
         }
         Ok(())
     }));
+    let content_loading = ContentLoadingEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        unsafe {
+            let mut id = 0;
+            args.NavigationId(&mut id)?;
+            if id == content_state.navigation.get()
+                && crate::model::is_web(&content_state.url.borrow())
+            {
+                // A website can supply its own document for the same HTTP status.
+                let mut error_page = BOOL::default();
+                args.IsErrorPage(&mut error_page)?;
+                content_state.failed.set(error_page.as_bool());
+            }
+        }
+        Ok(())
+    }));
     let completed = NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
         let (Some(sender), Some(args)) = (sender, args) else {
             return Ok(());
@@ -64,38 +82,38 @@ pub fn install(view: &WebView, dark: bool) -> windows::core::Result<Rc<ErrorPage
         unsafe {
             let mut id = 0;
             args.NavigationId(&mut id)?;
-            if id != completed_state.navigation.get() {
-                return Ok(());
-            }
-            let mut success = BOOL::default();
-            args.IsSuccess(&mut success)?;
-            if success.as_bool() {
+            if id != completed_state.navigation.get() || !completed_state.is_failed() {
                 return Ok(());
             }
             let mut status = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
             args.WebErrorStatus(&mut status)?;
-            let url = completed_state.url.borrow().clone();
-            if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED
-                || !crate::model::is_web(&url)
-            {
+            if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
                 return Ok(());
             }
-            // HTTP errors can carry the site's own useful document. WebView2
-            // reports IsSuccess=false for these as well as transport failures.
-            if status == COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN {
-                let mut http_status = 0;
-                if args
-                    .cast::<ICoreWebView2NavigationCompletedEventArgs2>()
-                    .is_ok_and(|args| args.HttpStatusCode(&mut http_status).is_ok())
-                    && http_status >= 400
-                {
-                    return Ok(());
-                }
+            let mut http_status = 0;
+            if let Ok(args) = args.cast::<ICoreWebView2NavigationCompletedEventArgs2>() {
+                let _ = args.HttpStatusCode(&mut http_status);
             }
-            completed_state.failed.set(true);
-            let (description, code) = error_message(status);
+            let (description, code) = match http_status {
+                404 => (
+                    "找不到这个网页，请检查网址后重试。",
+                    format!("HTTP {http_status}"),
+                ),
+                400..=499 => (
+                    "网站无法处理此请求，请检查网址后重试。",
+                    format!("HTTP {http_status}"),
+                ),
+                500..=599 => (
+                    "网站服务器暂时无法处理请求，请稍后重试。",
+                    format!("HTTP {http_status}"),
+                ),
+                _ => {
+                    let (description, code) = error_message(status);
+                    (description, code.to_owned())
+                }
+            };
             let data = serde_json::json!({
-                "url": url, "description": description, "code": code,
+                "url": &*completed_state.url.borrow(), "description": description, "code": code,
                 "theme": if completed_state.dark.get() { "dark" } else { "light" },
             });
             let html = serde_json::to_string(include_str!("error-page.html")).unwrap();
@@ -122,6 +140,7 @@ pub fn install(view: &WebView, dark: bool) -> windows::core::Result<Rc<ErrorPage
         core.Settings()?.SetIsBuiltInErrorPageEnabled(false)?;
         let mut token = 0;
         core.add_NavigationStarting(&starting, &mut token)?;
+        core.add_ContentLoading(&content_loading, &mut token)?;
         core.add_NavigationCompleted(&completed, &mut token)?;
     }
     Ok(state)

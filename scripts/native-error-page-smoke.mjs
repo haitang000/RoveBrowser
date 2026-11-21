@@ -8,11 +8,19 @@ import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 let recovered = false;
+let recoveredHttp = false;
+const emptyErrors = new Map([['/empty-404', 404], ['/empty-500', 500]]);
 const requests = new Set();
 const server = createServer((req, res) => {
   requests.add(req.url);
   if (req.url.startsWith('/failure') && !recovered) { req.socket.destroy(); return; }
   if (req.url === '/slow') return;
+  const emptyStatus = emptyErrors.get(req.url);
+  if (emptyStatus && !recoveredHttp) {
+    res.writeHead(emptyStatus, { 'Content-Length': 0, 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
   res.writeHead(req.url === '/missing' ? 404 : 200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(`<!doctype html><title>Fixture ${req.url}</title><h1>Fixture ${req.url}</h1>`);
 });
@@ -36,7 +44,7 @@ async function send(command) {
   await ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
 }
 async function errorAt(url, page = web) {
-  await waitFor(async () => await page.locator('#address').textContent() === url, 'custom error page at ' + url);
+  await waitFor(() => page.evaluate(url => document.getElementById('address')?.textContent === url, url), 'custom error page at ' + url);
   const session = await page.context().newCDPSession(page);
   const history = await session.send('Page.getNavigationHistory');
   await session.detach();
@@ -106,6 +114,20 @@ try {
   await web.getByRole('heading', { name: 'Fixture /missing' }).waitFor();
   assert.equal(await web.locator('#retry').count(), 0);
   checks.push('保留网站自身的 HTTP 404 页面');
+
+  for (const [path, status] of emptyErrors) {
+    const url = base + path;
+    await send({ type: 'navigate', url });
+    await errorAt(url);
+    assert.equal(await web.locator('#code').textContent(), `HTTP ${status}`);
+  }
+  await send({ type: 'back' });
+  await errorAt(base + '/empty-404');
+  assert.equal(await web.locator('#code').textContent(), 'HTTP 404');
+  recoveredHttp = true;
+  await web.getByRole('button', { name: '重新加载', exact: true }).click();
+  await web.getByRole('heading', { name: 'Fixture /empty-404' }).waitFor();
+  checks.push('空 HTTP 404 和 500 响应显示自定义错误页和状态码，后退和重试可用');
 
   await send({ type: 'navigate', url: base + '/slow' });
   await waitFor(() => requests.has('/slow'), 'pending request');
