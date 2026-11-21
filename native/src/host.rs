@@ -1685,6 +1685,8 @@ impl App {
         let id = tab.id.clone();
         let p2 = p.clone();
         let id2 = id.clone();
+        let extension_id = url::Url::parse(&tab.url).ok()
+            .as_ref().and_then(model::extension_id).map(str::to_owned);
         let view = browsing_webview(&mut self.context)
             .with_visible(false)
             .with_focused(false)
@@ -1694,7 +1696,12 @@ impl App {
             } else {
                 wry::Theme::Light
             })
-            .with_navigation_handler(|url| model::is_web(&url) || url == "about:blank")
+            .with_navigation_handler(move |url| {
+                model::is_web(&url) || url == "about:blank"
+                    || extension_id.as_deref().is_some_and(|id| {
+                        url::Url::parse(&url).is_ok_and(|url| model::extension_id(&url) == Some(id))
+                    })
+            })
             .with_initialization_script(include_str!("peek-links.js"))
             .with_initialization_script(include_str!("chrome-store-install.js"))
             // Zigzag's SwipeNavigation: WebView2 performs the macOS-style
@@ -2375,7 +2382,7 @@ impl App {
             self.state
                 .tabs
                 .iter()
-                .any(|t| &t.id == id && model::is_web(&t.url))
+                .any(|t| &t.id == id && model::is_tab_page(&t.url))
         });
         let sources: HashMap<_, _> = self.state.tabs.iter().map(|t| (t.id.as_str(), t.url.as_str()))
             .chain(self.state.pins.iter().chain(&self.state.favorites).map(|f| (f.id.as_str(), f.url.as_str()))).collect();
@@ -2389,7 +2396,7 @@ impl App {
         let visible: Vec<_> = active
             .into_iter()
             .chain(second)
-            .filter(|t| model::is_web(&t.url))
+            .filter(|t| model::is_tab_page(&t.url))
             .collect();
         // Create on first activation. Previously opened pages stay alive but are hidden.
         for tab in &visible {
@@ -3038,7 +3045,8 @@ impl App {
         let bounds = self.bounds(Rect { x: 0., height: 470., width: 458., ..rect });
         let ticket = uuid::Uuid::new_v4();
         let proxy = self.proxy.clone();
-        let view = crate::extension_view::build(browsing_webview(&mut self.context), window, &page.url, active_url.as_deref(), bounds, move |event| {
+        let view = crate::extension_view::build(browsing_webview(&mut self.context), window,
+            &page.url, page.options.as_ref(), active_url.as_deref(), bounds, move |event| {
             let _ = proxy.send_event(Event::ExtensionView(ticket, event));
         })?;
         self.extension_view = Some(ExtensionView {
@@ -3397,6 +3405,7 @@ impl App {
             && matches!(
                 c,
                 Command::New { .. }
+                    | Command::OpenExtensionTab { .. }
                     | Command::Activate { .. }
                     | Command::OpenBookmark { .. }
                     | Command::Navigate { .. }
@@ -3420,7 +3429,8 @@ impl App {
         }
         if matches!(c, Command::OpenSettings { .. }) { self.close_peek(); }
         if matches!(c,
-            Command::New { .. } | Command::Activate { .. } | Command::OpenBookmark { .. } | Command::Navigate { .. }
+            Command::New { .. } | Command::OpenExtensionTab { .. }
+            | Command::Activate { .. } | Command::OpenBookmark { .. } | Command::Navigate { .. }
             | Command::Close { .. } | Command::CloseOthers { .. } | Command::CloseBelow { .. }
             | Command::SwitchSpace { .. } | Command::CreateSpace { .. } | Command::Restore | Command::Move { .. }
             | Command::OpenSettings { .. } | Command::Split { .. } | Command::SwapSplit { .. } | Command::Unsplit
@@ -3433,6 +3443,7 @@ impl App {
             c,
             Command::Activate { .. }
                 | Command::New { .. }
+                | Command::OpenExtensionTab { .. }
                 | Command::Navigate { .. }
                 | Command::OpenBookmark { .. }
                 | Command::Restore
@@ -3447,6 +3458,7 @@ impl App {
             && matches!(
                 c,
                 Command::New { .. }
+                    | Command::OpenExtensionTab { .. }
                     | Command::Activate { .. }
                     | Command::OpenBookmark { .. }
                     | Command::Close { .. }
@@ -4180,12 +4192,14 @@ impl App {
                         | Command::OpenBookmark { .. }
                         | Command::SwitchSpace { .. }
                         | Command::New { .. }
+                        | Command::OpenExtensionTab { .. }
                 ) {
                     self.refresh_visible_thumbnails();
                 }
                 if matches!(
                     c,
                     Command::New { .. }
+                        | Command::OpenExtensionTab { .. }
                         | Command::Activate { .. }
                         | Command::OpenBookmark { .. }
                         | Command::Close { .. }
@@ -4438,7 +4452,14 @@ impl ApplicationHandler<Event> for App {
                         self.emit(json!({"type":"extensionView","phase":"error"}));
                     }
                     ViewEvent::Close => self.close_extension_menu(),
-                    ViewEvent::Link(url) => self.command(Command::New { url }, Some(event_loop)),
+                    ViewEvent::Link(url) => {
+                        let command = if model::is_extension_page(&url) {
+                            Command::OpenExtensionTab { url }
+                        } else {
+                            Command::New { url }
+                        };
+                        self.command(command, Some(event_loop));
+                    }
                 }
             }
             Event::PermissionsChanged => {}, // Wake the event loop so about_to_wait reconciles once.
@@ -4812,7 +4833,7 @@ impl ApplicationHandler<Event> for App {
                 }
                 if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
                     t.loading = loading;
-                    if model::is_web(&url) {
+                    if model::is_tab_page(&url) {
                         // A page on another site must not keep the last site's icon.
                         if !crate::favicon::same_origin(&t.url, &url) {
                             t.favicon = None;
@@ -4825,7 +4846,7 @@ impl ApplicationHandler<Event> for App {
                             }
                         }
                     }
-                    if !loading && !failed && self.state.settings.remember_history {
+                    if !loading && !failed && self.state.settings.remember_history && model::is_web(&t.url) {
                         self.session_writer.visit(&t.title, &t.url);
                     }
                 }
@@ -4879,7 +4900,7 @@ impl ApplicationHandler<Event> for App {
                     }
                     return;
                 }
-                if model::is_web(&url) {
+                if model::is_tab_page(&url) {
                     if self.pages.get(&id).is_some_and(|p| p.url != url) {
                         self.invalidate_thumbnail(&id);
                     }
@@ -5154,6 +5175,7 @@ fn register_page_events(
     unsafe { view.webview().cast::<ICoreWebView2_4>()?.add_DownloadStarting(&download, &mut token)?; }
     let p = proxy.clone();
     let source_id = id.clone();
+    let nav = navigation.clone();
     let popup = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
             unsafe {
@@ -5161,6 +5183,20 @@ fn register_page_events(
                 let mut uri = PWSTR::null();
                 args.Uri(&mut uri)?;
                 let url = take_pwstr(uri);
+                let parsed = url::Url::parse(&url).ok();
+                if let Some(owner) = parsed.as_ref().and_then(model::extension_id) {
+                    let mut user = BOOL::default();
+                    args.IsUserInitiated(&mut user)?;
+                    if user.as_bool()
+                        && url::Url::parse(&nav.current.borrow()).is_ok_and(|current| {
+                            model::extension_id(&current) == Some(owner)
+                        })
+                        && crate::extension_view::requested_by_extension(&args, owner)
+                    {
+                        let _ = p.send_event(Event::Command(Command::OpenExtensionTab { url }));
+                    }
+                    return Ok(());
+                }
                 if !model::is_web(&url) {
                     return Ok(());
                 }

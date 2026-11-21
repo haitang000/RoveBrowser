@@ -241,6 +241,8 @@ pub enum Command {
     ExtensionViewBounds { rect: Rect },
     #[serde(rename = "extensionViewClose")]
     CloseExtensionView,
+    #[serde(skip)]
+    OpenExtensionTab { url: String },
     #[serde(rename = "extensionsChoose")]
     ChooseExtension,
     #[serde(rename = "extensionsChromeStore")]
@@ -616,6 +618,25 @@ pub fn is_web(url: &str) -> bool {
     url::Url::parse(url)
         .is_ok_and(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some())
 }
+
+pub fn extension_id(url: &url::Url) -> Option<&str> {
+    url.host_str().filter(|id| {
+        url.scheme() == "chrome-extension"
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.port().is_none()
+            && id.len() == 32
+            && id.bytes().all(|c| (b'a'..=b'p').contains(&c))
+    })
+}
+
+pub fn is_extension_page(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|url| extension_id(&url).is_some())
+}
+
+pub fn is_tab_page(url: &str) -> bool {
+    is_web(url) || is_extension_page(url)
+}
 /// The site a page belongs to for per-site settings: the lowercased host with
 /// a leading `www.` dropped, as Zigzag's `HistoryStore.normalizedHost`. IP
 /// hosts and other non-domain hosts stay as they are.
@@ -784,10 +805,14 @@ impl State {
         self.remember_active();
     }
     pub fn new_tab(&mut self, input: &str) -> Result<(), String> {
+        let url = normalize_with(input, &self.settings)?;
+        self.new_tab_with_url(url)
+    }
+
+    fn new_tab_with_url(&mut self, url: String) -> Result<(), String> {
         if self.tabs.len() >= 256 {
             return Err("已达到 256 个标签页上限".into());
         }
-        let url = normalize_with(input, &self.settings)?;
         let title = if crate::settings::is_settings(&url) { "设置".into() } else { url::Url::parse(&url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_string))
@@ -1035,7 +1060,7 @@ impl State {
             if !self.spaces.iter().any(|s| s.id == t.space_id) {
                 t.space_id = self.active_space.clone()
             }
-            if !is_web(&t.url) && !crate::settings::is_settings(&t.url) {
+            if !is_tab_page(&t.url) && !crate::settings::is_settings(&t.url) {
                 t.url = "era://newtab".into()
             }
             if t.split_with
@@ -1121,6 +1146,9 @@ impl State {
                 }
             }
             Command::New { url } => self.new_tab(url)?,
+            Command::OpenExtensionTab { url } if is_extension_page(url) => {
+                self.new_tab_with_url(url.clone())?;
+            }
             Command::Navigate { url, id } => {
                 let id = id.as_deref().unwrap_or(&self.active_tab);
                 if !self.visible_tab(id) { return Ok(()); }
@@ -1160,7 +1188,11 @@ impl State {
                 let Some(source) = self.tabs.iter().find(|tab| &tab.id == id && tab.bookmark_id.is_none()).cloned() else { return Ok(()); };
                 let index = self.tabs.iter().position(|tab| tab.id == source.id).unwrap_or(0);
                 let space = source.space_id.clone();
-                self.new_tab(&source.url)?;
+                if is_extension_page(&source.url) {
+                    self.new_tab_with_url(source.url)?;
+                } else {
+                    self.new_tab(&source.url)?;
+                }
                 let Some(mut duplicate) = self.tabs.pop() else { return Ok(()); };
                 duplicate.space_id = space.clone();
                 duplicate.title = source.title;

@@ -1,5 +1,22 @@
-function (extensionOrigin, activeUrl) {
-  if (location.origin !== extensionOrigin || !globalThis.chrome?.tabs?.query) return;
+function (extensionOrigin, activeUrl, optionsPage) {
+  if (location.origin !== extensionOrigin) return;
+
+  // WebView2 opens runtime.openOptionsPage in an unmanaged WebView.
+  // Use its ordinary, user-initiated window request for the same page instead.
+  if (optionsPage && chrome.runtime?.openOptionsPage) {
+    const openOptionsPage = chrome.runtime.openOptionsPage.bind(chrome.runtime);
+    const open = window.open.bind(window);
+    chrome.runtime.openOptionsPage = function (callback) {
+      if (!navigator.userActivation.isActive) {
+        return callback === undefined ? openOptionsPage() : openOptionsPage(callback);
+      }
+      open(optionsPage, "_blank", "noopener");
+      if (callback === undefined) return Promise.resolve();
+      if (typeof callback === "function") queueMicrotask(callback);
+    };
+  }
+
+  if (!activeUrl || !chrome.tabs?.query) return;
 
   const tabs = chrome.tabs;
   const query = tabs.query.bind(tabs);

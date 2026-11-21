@@ -15,7 +15,9 @@ import SpaceCreatePage from "./SpaceCreatePage.vue";
 import SpaceEditor from "./SpaceEditor.vue";
 import { provideTabDrag } from "../../lib/tab-drag";
 const b = useBrowser();
-const splitAddress = computed(() => isSettingsUrl(b.active?.url) ? b.t("设置") : host(b.active?.url || "") || b.t("搜索或输入地址"));
+const splitAddress = computed(() => isSettingsUrl(b.active?.url) ? b.t("设置")
+  : b.active?.url.startsWith("chrome-extension:") ? b.active.title || b.t("扩展")
+  : host(b.active?.url || "") || b.t("搜索或输入地址"));
 const sidebar = ref<HTMLElement>();
 const tabDrag = provideTabDrag(sidebar);
 const spaceDeck = ref<InstanceType<typeof SpaceDeck>>();

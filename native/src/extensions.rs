@@ -236,6 +236,7 @@ fn extension_icon(payload: &Path, manifest: &serde_json::Value) -> Option<String
 
 pub struct ActionPage {
     pub url: url::Url,
+    pub options: Option<url::Url>,
     pub fit_content: bool,
 }
 
@@ -244,24 +245,31 @@ fn extension_page(payload: &Path, manifest: &serde_json::Value, id: &str) -> Opt
         return None;
     }
     let origin = url::Url::parse(&format!("chrome-extension://{id}/")).ok()?;
-    ["/action/default_popup", "/options_ui/page", "/options_page"]
-        .into_iter()
-        .find_map(|field| {
-            let value = manifest.pointer(field)?.as_str()?;
-            let end = value.find(['?', '#']).unwrap_or(value.len());
-            let path = &value[..end];
-            let path = path.trim_start_matches('/').trim_start_matches("./");
-            package_file(payload, path)?;
-            let mut page = origin.clone();
-            page.path_segments_mut().ok()?.clear().extend(path.split('/'));
-            let (query, fragment) = value[end..].split_once('#').unwrap_or((&value[end..], ""));
-            page.set_query(query.strip_prefix('?'));
-            page.set_fragment(value[end..].contains('#').then_some(fragment));
-            Some(ActionPage {
-                url: page,
-                fit_content: field == "/action/default_popup",
-            })
-        })
+    let options = manifest_page(payload, manifest, &origin, &["/options_ui/page", "/options_page"]);
+    let popup = manifest_page(payload, manifest, &origin, &["/action/default_popup"]);
+    let fit_content = popup.is_some();
+    let url = popup.or_else(|| options.clone())?;
+    Some(ActionPage { url, options, fit_content })
+}
+
+fn manifest_page(
+    payload: &Path,
+    manifest: &serde_json::Value,
+    origin: &url::Url,
+    fields: &[&str],
+) -> Option<url::Url> {
+    fields.iter().find_map(|field| {
+        let value = manifest.pointer(field)?.as_str()?;
+        let end = value.find(['?', '#']).unwrap_or(value.len());
+        let path = value[..end].trim_start_matches('/').trim_start_matches("./");
+        package_file(payload, path)?;
+        let mut page = origin.clone();
+        page.path_segments_mut().ok()?.clear().extend(path.split('/'));
+        let (query, fragment) = value[end..].split_once('#').unwrap_or((&value[end..], ""));
+        page.set_query(query.strip_prefix('?'));
+        page.set_fragment(value[end..].contains('#').then_some(fragment));
+        Some(page)
+    })
 }
 
 fn copy_directory(
@@ -677,6 +685,7 @@ impl Profile {
         let (payload, manifest) = package_manifest(&package).ok_or("无法读取扩展清单")?;
         extension_page(&payload, &manifest, id).ok_or_else(|| "此扩展没有可打开的页面".into())
     }
+
 
     pub fn enable(&self, root: &Path, id: &str, enabled: bool) -> Result<()> {
         let (_, extension) = self.managed(root, id)?;

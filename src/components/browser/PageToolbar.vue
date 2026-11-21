@@ -14,6 +14,7 @@ const reading = computed(() => Boolean(id.value && b.reader.id === id.value));
 const waiting = computed(() => Boolean(id.value && b.reader.waiting === id.value));
 const canRead = computed(() => id.value && (reading.value || waiting.value || b.reader.available.includes(id.value)));
 const address = computed(() => isSettingsUrl(tab.value?.url) ? b.t("设置")
+  : tab.value?.url.startsWith("chrome-extension:") ? tab.value.title || b.t("扩展")
   : host(tab.value?.url || "") || (props.pane ? b.t("新标签页") : "Search or enter address"));
 const extensionsOpen = computed(() => Boolean(b.extensionMenuAnchor && b.extensionMenuAnchor.tabId === id.value));
 
