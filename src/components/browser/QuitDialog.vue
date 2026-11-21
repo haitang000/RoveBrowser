@@ -59,11 +59,11 @@ onBeforeUnmount(() => dialog.value?.close());
 }
 .quit-dialog {
   color-scheme: dark;
-  width: min(568px, calc(100vw - 40px));
+  width: min(440px, calc(100vw - 40px));
   max-width: none;
   max-height: calc(100vh - 40px);
   margin: auto;
-  padding: 32px;
+  padding: 24px;
   overflow: auto;
   border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 12px;
@@ -76,35 +76,36 @@ onBeforeUnmount(() => dialog.value?.close());
 .quit-dialog:focus-visible { outline: none; }
 .quit-dialog h2 {
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1.4;
   font-weight: 600;
   letter-spacing: -0.025em;
   text-wrap: balance;
 }
 .quit-dialog p {
-  margin: 16px 0 32px;
+  margin: 8px 0 20px;
   color: #c4c4c4;
-  font-size: 17px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.5;
 }
 .quit-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 .quit-actions button {
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  gap: 10px;
-  min-height: 50px;
-  padding: 0 20px;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 12px;
   border: 1px solid rgb(255 255 255 / 0.025);
   border-radius: 7px;
   background: #2c2c2c;
   color: #fafafa;
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1.2;
   white-space: nowrap;
   transition: background-color 120ms ease, transform 120ms ease;
@@ -115,11 +116,11 @@ onBeforeUnmount(() => dialog.value?.close());
 .quit-actions button:active { transform: scale(0.97); background: #383838; }
 .quit-actions .quit-confirm:active { background: #ed8798; }
 .quit-actions kbd {
-  padding: 4px 8px;
+  padding: 2px 5px;
   border: 1px solid rgb(255 255 255 / 0.06);
   border-radius: 6px;
   color: #c4c4c4;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
 }
@@ -128,10 +129,8 @@ onBeforeUnmount(() => dialog.value?.close());
   .quit-actions button:hover { background: #353535; }
   .quit-actions .quit-confirm:hover { background: #ffabb8; }
 }
-@media (max-width: 560px) {
-  .quit-dialog { padding: 24px; }
-  .quit-dialog h2 { font-size: 22px; }
-  .quit-actions { flex-wrap: wrap; }
+@media (max-width: 380px) {
+  .quit-dialog { padding: 16px; }
   .quit-actions .quit-always { width: 100%; margin: 0; }
   .quit-cancel, .quit-confirm { flex: 1; }
 }
