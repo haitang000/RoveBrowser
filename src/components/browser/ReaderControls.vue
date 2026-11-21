@@ -47,6 +47,8 @@ watch(() => [b.reader.id, b.state.activeTab, b.peek], () => { open.value = false
 .reader-controls[data-reader-theme=dark] { --reader-paper:#1e1e20; --reader-ink:#e6e4df; --reader-rule:rgba(255,255,255,.15); }
 .reader-controls[data-reader-theme=sepia] { --reader-paper:#f4ecde; --reader-ink:#3b2f24; --reader-rule:rgba(80,55,25,.16); }
 .reader-style-button { width:32px; height:32px; display:grid; place-items:center; border-radius:8px; background:var(--reader-paper); color:inherit; font:16px/1 Georgia,serif; transition:background-color 220ms ease,transform 120ms ease; }
+/* Global `svg { color: var(--icon) }` follows the workspace. The close glyph follows the reader ink. */
+.reader-style-button :deep(svg) { color: inherit; }
 .reader-style-button:hover { background:color-mix(in srgb,var(--reader-ink) 8%,var(--reader-paper)); }
 .reader-style-button:active { transform:scale(.97); }
 /* Keep native clip bounds stable while the inner surface scales/overshoots. */
