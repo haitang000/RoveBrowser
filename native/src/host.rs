@@ -23,7 +23,8 @@ use webview2_com::{
     FocusChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
+        ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2Environment,
+        ICoreWebView2NavigationStartingEventArgs3,
         ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2NewWindowRequestedEventArgs3,
         ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
         ICoreWebView2_4, ICoreWebView2_9,
@@ -98,10 +99,18 @@ fn browser_args(ui: bool) -> String {
     let _ = ui;
     args
 }
-fn browsing_webview(context: &mut WebContext) -> WebViewBuilder<'_> {
-    WebViewBuilder::new_with_web_context(context)
+fn browsing_webview(
+    context: &mut WebContext,
+    environment: Option<ICoreWebView2Environment>,
+) -> WebViewBuilder<'_> {
+    let builder = WebViewBuilder::new_with_web_context(context)
         .with_additional_browser_args(browser_args(false))
-        .with_browser_extensions_enabled(true)
+        .with_browser_extensions_enabled(true);
+    if let Some(environment) = environment {
+        builder.with_environment(environment)
+    } else {
+        builder
+    }
 }
 #[derive(Debug)]
 enum Event {
@@ -414,6 +423,9 @@ struct App {
     last_focused_view: Rc<Cell<HWND>>,
     window: Option<Window>,
     context: WebContext,
+    /// Reuse the first WebView2 environment for every controller in the
+    /// browsing profile. WebContext only stores its data path on Windows.
+    web_environment: Option<ICoreWebView2Environment>,
     state: State,
     storage: Storage,
     session_writer: crate::session_writer::SessionWriter,
@@ -588,6 +600,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         last_focused_view: Rc::default(),
         window: None,
         context: WebContext::new(Some(data.join("WebView2"))),
+        web_environment: None,
         state,
         storage,
         session_writer,
@@ -1125,7 +1138,7 @@ impl App {
         let source_id = reader_id.clone();
         let initial_document = Cell::new(true);
         let ticket = self.reader_epoch;
-        let view = browsing_webview(&mut self.context)
+        let view = browsing_webview(&mut self.context, self.web_environment.clone())
             .with_visible(false).with_focused(false).with_javascript_disabled()
             .with_transparent(true)
             .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
@@ -1154,6 +1167,7 @@ impl App {
             })
             .with_html(crate::reader::html(&article, &self.state.reader_preferences))
             .build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+        self.remember_web_environment(&view);
         // Reveal at DOM readiness, without waiting for slow article images.
         let proxy = self.proxy.clone();
         let handler = DOMContentLoadedEventHandler::create(Box::new(move |_, _| {
@@ -1676,6 +1690,12 @@ impl App {
             _ => {}
         }
     }
+    fn remember_web_environment(&mut self, view: &WebView) {
+        if self.web_environment.is_none() {
+            self.web_environment = Some(view.environment());
+        }
+    }
+
     fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {
         let navigation = Rc::new(NavigationPolicy {
             bookmarked: Cell::new(tab.bookmark_id.is_some()),
@@ -1688,7 +1708,7 @@ impl App {
         let id2 = id.clone();
         let extension_id = url::Url::parse(&tab.url).ok()
             .as_ref().and_then(model::extension_id).map(str::to_owned);
-        let view = browsing_webview(&mut self.context)
+        let view = browsing_webview(&mut self.context, self.web_environment.clone())
             .with_visible(false)
             .with_focused(false)
             .with_background_color(surface_color(self.state.theme == "dark"))
@@ -1720,6 +1740,7 @@ impl App {
             })
             // The page adapters use standard window requests. Websites have no application IPC.
             .build_as_child(self.window.as_ref().unwrap())?;
+        self.remember_web_environment(&view);
         self.track_webview_focus(&view)?;
         // Wry's zoom option also enables pinch, which is handled separately by WebView2.
         unsafe { view.webview().Settings()?.SetIsZoomControlEnabled(true)?; }
@@ -1866,7 +1887,7 @@ impl App {
             let epoch = self.preview_epoch;
             let key = tab.id.clone();
             let proxy = self.proxy.clone();
-            let view = browsing_webview(&mut self.context)
+            let view = browsing_webview(&mut self.context, self.web_environment.clone())
                 .with_visible(false).with_focused(false)
                 .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
                 .with_background_color(surface_color(self.state.theme == "dark"))
@@ -1876,6 +1897,7 @@ impl App {
                 .with_on_page_load_handler(move |event, url| {
                     let _ = proxy.send_event(Event::PreviewLoad(key.clone(), epoch, url, matches!(event, PageLoadEvent::Started)));
                 }).build_as_child(self.window.as_ref().unwrap())?;
+            self.remember_web_environment(&view);
             crate::web_settings::apply(&view, &self.state.settings)?;
             permissions::deny_preview_requests(&view)?;
             let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
@@ -3054,10 +3076,18 @@ impl App {
         let bounds = self.bounds(Rect { x: 0., height: 470., width: 458., ..rect });
         let ticket = uuid::Uuid::new_v4();
         let proxy = self.proxy.clone();
-        let view = crate::extension_view::build(browsing_webview(&mut self.context), window,
-            &page.url, page.options.as_ref(), active_url.as_deref(), bounds, move |event| {
-            let _ = proxy.send_event(Event::ExtensionView(ticket, event));
-        })?;
+        let view = crate::extension_view::build(
+            browsing_webview(&mut self.context, self.web_environment.clone()),
+            window,
+            &page.url,
+            page.options.as_ref(),
+            active_url.as_deref(),
+            bounds,
+            move |event| {
+                let _ = proxy.send_event(Event::ExtensionView(ticket, event));
+            },
+        )?;
+        self.remember_web_environment(&view);
         self.extension_view = Some(ExtensionView {
             ticket, view, clip: WindowClip::default(), fit_content: page.fit_content, ready: false,
             visible: false, size: None, next_measure: None,
@@ -3160,11 +3190,12 @@ impl App {
         // Settings can be the only open tab. Use the browsing profile without
         // keeping an extra WebView that extensions would see as a tab.
         let window = self.window.as_ref().ok_or("窗口尚未就绪")?;
-        let view = browsing_webview(&mut self.context)
+        let view = browsing_webview(&mut self.context, self.web_environment.clone())
             .with_url("about:blank")
             .with_visible(false)
             .with_focused(false)
             .build_as_child(window)?;
+        self.remember_web_environment(&view);
         run(extensions::Profile::new(&view)?, &self.extensions_root)
     }
 
@@ -3557,7 +3588,12 @@ impl App {
                 } else if kind == "cache" || kind == "siteData" {
                     if self.data_clear_view.is_some() { self.error("正在清除浏览数据，请稍候"); return; }
                     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-                        let view = browsing_webview(&mut self.context).with_url("about:blank").with_visible(false).with_focused(false).build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+                        let view = browsing_webview(&mut self.context, self.web_environment.clone())
+                            .with_url("about:blank")
+                            .with_visible(false)
+                            .with_focused(false)
+                            .build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+                        self.remember_web_environment(&view);
                         let proxy = self.proxy.clone(); let action = kind.clone();
                         crate::web_settings::clear(&view, &kind, move |ok| { let _ = proxy.send_event(Event::DataCleared(action.clone(), ok)); })?;
                         self.data_clear_view = Some(view);
@@ -4363,6 +4399,8 @@ impl ApplicationHandler<Event> for App {
                     }
                 }).build_as_child(&window)?;
             self.track_webview_focus(&ui)?;
+            // Both trusted UI surfaces share a data directory and options.
+            let ui_environment = ui.environment();
             let proxy = self.proxy.clone();
             let popup=WebViewBuilder::new_with_web_context(&mut ui_context)
                 .with_custom_protocol("era".into(),|_,req|{
@@ -4375,6 +4413,7 @@ impl ApplicationHandler<Event> for App {
                         .body(Cow::Borrowed(file.map(|f|f.contents()).unwrap_or(b"Not found"))).unwrap()
                 }).with_https_scheme(true).with_url("era://ui/index.html?popup")
                 .with_additional_browser_args(browser_args(true))
+                .with_environment(ui_environment)
                 .with_background_color((0, 0, 0, 0))
                 .with_transparent(true)
                 .with_theme(if dark { wry::Theme::Dark } else { wry::Theme::Light })
