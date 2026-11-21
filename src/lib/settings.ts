@@ -127,7 +127,7 @@ export interface Settings {
   /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
   sleepTabs: boolean;
   downloadFolder: string;
-  /** Preview reads GitHub releases. Canary reads the GitLab windows-installer job. */
+  /** Preview reads GitHub releases. Canary follows each GitLab pipeline build. */
   updateChannel: "preview" | "canary";
   shortcuts: Record<string, Shortcut | null>;
 }
@@ -154,7 +154,7 @@ export const UPDATE_CHANNELS = [
 export type UpdateChannel = Settings["updateChannel"];
 export function updateChannelDetail(channel: UpdateChannel): string {
   return channel === "canary"
-    ? "Canary 使用 GitLab CI 的 windows-installer（hub.haitang000.cn/haitang000/rovebrowser 的 main）。"
+    ? "Canary 跟随 GitLab 流水线：main 的每次提交都会构建 windows-installer（hub.haitang000.cn/haitang000/rovebrowser）。"
     : "Preview 从 GitHub（haitang000/RoveBrowser）获取稳定版本。";
 }
 export function settingsFor(value?: Partial<Settings>): Settings {

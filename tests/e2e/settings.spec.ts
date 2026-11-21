@@ -281,6 +281,7 @@ test("update channel switches between Preview and Canary", async ({ page }) => {
   await expect(channel).toHaveValue("preview");
   await expect(page.locator(".settings-page")).toContainText("GitHub");
   await channel.selectOption("canary");
+  await expect(page.locator(".settings-page")).toContainText("每次提交");
   await expect(page.locator(".settings-page")).toContainText("windows-installer");
   await page.getByRole("button", { name: "检查更新", exact: true }).click();
   await expect(page.locator(".settings-page")).toContainText("请在 Rove 桌面版中检查更新");

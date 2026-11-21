@@ -1,8 +1,8 @@
 //! Update checks for the two release channels.
-//! Preview reads GitHub Releases. Canary reads the `windows-installer` job
-//! artifact on hub.haitang000.cn. The page chooses a channel; the host
-//! resolves and downloads the installer itself, and only from that channel's
-//! servers.
+//! Preview reads GitHub Releases. Canary follows the GitLab pipeline: every
+//! commit on main builds the `windows-installer` job, so a new build is a new
+//! commit even when the package version stays the same. The host resolves and
+//! downloads that job's installer itself.
 
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -24,8 +24,11 @@ use windows::{
 };
 
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
+/// Set by GitLab CI while `windows-installer` compiles this binary. Preview
+/// builds leave it empty, so they are not mistaken for that pipeline commit.
+pub const COMMIT: Option<&str> = option_env!("CI_COMMIT_SHA");
 const PREVIEW_API: &str = "https://api.github.com/repos/haitang000/RoveBrowser/releases/latest";
-const CANARY_SUMS: &str = "https://hub.haitang000.cn/api/v4/projects/haitang000%2Frovebrowser/jobs/artifacts/main/raw/release/SHA256SUMS.txt?job=windows-installer";
+const CANARY_PIPELINES: &str = "https://hub.haitang000.cn/api/v4/projects/haitang000%2Frovebrowser/pipelines?ref=main&status=success&order_by=id&sort=desc&per_page=5";
 const JSON_LIMIT: u64 = 1024 * 1024;
 const SUM_LIMIT: u64 = 64 * 1024;
 const INSTALLER_LIMIT: u64 = 256 * 1024 * 1024;
@@ -146,6 +149,8 @@ struct Release {
     checksum_url: Option<String>,
     /// SHA-256 already read from the canary job's checksum file.
     checksum: Option<String>,
+    /// Git commit of a canary pipeline build.
+    commit: Option<String>,
 }
 #[derive(Clone, Debug)]
 enum Outcome {
@@ -182,6 +187,9 @@ pub fn install(channel: Channel) -> Report {
 }
 
 fn report(channel: Channel, outcome: Result<Outcome, String>) -> Report {
+    if channel == Channel::Canary {
+        return canary_report(outcome);
+    }
     match outcome {
         Ok(Outcome::Current) => Report {
             phase: "current",
@@ -207,17 +215,64 @@ fn report(channel: Channel, outcome: Result<Outcome, String>) -> Report {
         Err(message) => Report { phase: "error", channel: channel.as_str(), version: String::new(), message },
     }
 }
+fn canary_report(outcome: Result<Outcome, String>) -> Report {
+    match outcome {
+        Ok(Outcome::Current) => {
+            let sha = running_commit().map(short_sha).unwrap_or_else(|| "未知".into());
+            Report { phase: "current", channel: "canary", version: sha.clone(), message: format!("Canary 已是最新构建 {sha}。") }
+        }
+        Ok(Outcome::Available(release)) => {
+            let sha = release.commit.as_deref().map(short_sha).unwrap_or_else(|| "未知".into());
+            Report {
+                phase: "available",
+                channel: "canary",
+                version: sha.clone(),
+                message: format!("发现新的 Canary 构建 {sha}（{}）。", release.version_text),
+            }
+        }
+        Ok(Outcome::Ahead { remote }) => Report {
+            phase: "ahead",
+            channel: "canary",
+            version: remote,
+            message: "Canary 构建还没有新的安装包。".into(),
+        },
+        Err(message) => Report { phase: "error", channel: "canary", version: String::new(), message },
+    }
+}
 fn lookup(channel: Channel) -> Result<Outcome, String> {
-    let body = match channel {
-        Channel::Preview => get_text(PREVIEW_API, channel, true, "application/vnd.github+json", JSON_LIMIT)?,
-        Channel::Canary => get_text(CANARY_SUMS, channel, true, "text/plain", SUM_LIMIT)?,
-    };
-    let release = match channel {
-        Channel::Preview => parse_github(&body)?,
-        Channel::Canary => parse_canary_sums(&body)?,
-    };
-    let current = parse_version(CURRENT).map(|(version, _)| version).ok_or("无法识别当前版本。")?;
-    Ok(judge(&current, release))
+    match channel {
+        Channel::Preview => {
+            let body = get_text(PREVIEW_API, channel, true, "application/vnd.github+json", JSON_LIMIT)?;
+            let release = parse_github(&body)?;
+            let current = parse_version(CURRENT).map(|(version, _)| version).ok_or("无法识别当前版本。")?;
+            Ok(judge(&current, release))
+        }
+        Channel::Canary => lookup_canary(),
+    }
+}
+fn lookup_canary() -> Result<Outcome, String> {
+    let pipelines = parse_pipelines(&get_text(CANARY_PIPELINES, Channel::Canary, true, "application/json", JSON_LIMIT)?)?;
+    let mut last_error = "Canary 通道还没有 Windows 安装包。".to_string();
+    for (id, sha) in pipelines.into_iter().take(5) {
+        let jobs_url = canary_jobs_url(id)?;
+        let jobs = match get_text(&jobs_url, Channel::Canary, true, "application/json", JSON_LIMIT) {
+            Ok(body) => body,
+            Err(error) => { last_error = error; continue; }
+        };
+        let Some(job_id) = installer_job_id(&jobs) else { continue };
+        let sums_url = canary_sums_url(job_id)?;
+        let sums = match get_text(&sums_url, Channel::Canary, true, "text/plain", SUM_LIMIT) {
+            Ok(body) => body,
+            Err(error) => { last_error = error; continue; }
+        };
+        let mut release = match parse_canary_sums(&sums, job_id) {
+            Ok(release) => release,
+            Err(error) => { last_error = error; continue; }
+        };
+        release.commit = Some(sha.clone());
+        return Ok(judge_canary(running_commit(), &sha, release));
+    }
+    Err(last_error)
 }
 fn judge(current: &Version, release: Release) -> Outcome {
     match release.version.cmp(current) {
@@ -238,7 +293,48 @@ fn parse_github(body: &str) -> Result<Release, String> {
     }
     release_from_github(&value)
 }
-fn parse_canary_sums(body: &str) -> Result<Release, String> {
+fn parse_pipelines(body: &str) -> Result<Vec<(u64, String)>, String> {
+    let value: Value = serde_json::from_str(body).map_err(|_| "无法读取 Canary 流水线。")?;
+    let list = value.as_array().ok_or("Canary 通道还没有构建。")?;
+    let mut pipelines = vec![];
+    for item in list {
+        if item.get("ref").and_then(Value::as_str) != Some("main") || item.get("status").and_then(Value::as_str) != Some("success") {
+            continue;
+        }
+        let Some(id) = item.get("id").and_then(Value::as_u64) else { continue };
+        let Some(sha) = item.get("sha").and_then(Value::as_str).filter(|sha| is_commit(sha)) else { continue };
+        pipelines.push((id, sha.to_ascii_lowercase()));
+    }
+    pipelines.sort_by(|a, b| b.0.cmp(&a.0));
+    if pipelines.is_empty() { return Err("Canary 通道还没有构建。".into()); }
+    Ok(pipelines)
+}
+fn installer_job_id(body: &str) -> Option<u64> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    value.as_array()?.iter().find_map(|job| {
+        if job.get("name").and_then(Value::as_str) == Some("windows-installer")
+            && job.get("status").and_then(Value::as_str) == Some("success")
+            && job.get("ref").and_then(Value::as_str) == Some("main")
+        {
+            job.get("id").and_then(Value::as_u64)
+        } else {
+            None
+        }
+    })
+}
+fn judge_canary(running: Option<&str>, remote: &str, release: Release) -> Outcome {
+    if running.is_some_and(|sha| sha.eq_ignore_ascii_case(remote)) { Outcome::Current } else { Outcome::Available(release) }
+}
+fn running_commit() -> Option<&'static str> {
+    COMMIT.filter(|sha| is_commit(sha))
+}
+fn is_commit(sha: &str) -> bool {
+    sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit())
+}
+fn short_sha(sha: &str) -> String {
+    if is_commit(sha) { sha[..8].to_ascii_lowercase() } else { "未知".into() }
+}
+fn parse_canary_sums(body: &str, job_id: u64) -> Result<Release, String> {
     let mut best: Option<Release> = None;
     for line in body.lines() {
         let line = line.trim();
@@ -260,21 +356,39 @@ fn parse_canary_sums(body: &str) -> Result<Release, String> {
             version_text,
             notes: "来自 GitLab CI 的 windows-installer。".into(),
             asset_name: file.to_string(),
-            asset_url: canary_artifact_url(file)?,
+            asset_url: canary_artifact_url(job_id, file)?,
             checksum_url: None,
             checksum: Some(hash.to_ascii_lowercase()),
+            commit: None,
         };
         if best.as_ref().map(|current| release.version > current.version).unwrap_or(true) { best = Some(release); }
     }
     best.ok_or_else(|| "Canary 通道还没有 Windows 安装包。".into())
 }
-fn canary_artifact_url(name: &str) -> Result<String, String> {
+fn canary_jobs_url(pipeline_id: u64) -> Result<String, String> {
+    pinned_canary_url(
+        &format!("https://hub.haitang000.cn/api/v4/projects/haitang000%2Frovebrowser/pipelines/{pipeline_id}/jobs"),
+        &format!("/api/v4/projects/haitang000%2Frovebrowser/pipelines/{pipeline_id}/jobs"),
+    )
+}
+fn canary_sums_url(job_id: u64) -> Result<String, String> {
+    pinned_canary_url(
+        &format!("https://hub.haitang000.cn/api/v4/projects/haitang000%2Frovebrowser/jobs/{job_id}/artifacts/release/SHA256SUMS.txt"),
+        &format!("/api/v4/projects/haitang000%2Frovebrowser/jobs/{job_id}/artifacts/release/SHA256SUMS.txt"),
+    )
+}
+fn canary_artifact_url(job_id: u64, name: &str) -> Result<String, String> {
     if !setup_name(name) { return Err("发布文件地址无效。".into()); }
-    let raw = format!("https://hub.haitang000.cn/api/v4/projects/haitang000%2Frovebrowser/jobs/artifacts/main/raw/release/{name}?job=windows-installer");
-    let url = Url::parse(&raw).map_err(|_| "发布文件地址无效。")?;
-    if !allowed(Channel::Canary, true, &url) { return Err("发布文件不在该通道的服务器上。".into()); }
-    let expected = format!("/api/v4/projects/haitang000%2Frovebrowser/jobs/artifacts/main/raw/release/{name}?job=windows-installer");
-    if request_target(&url)? != expected { return Err("发布文件地址无效。".into()); }
+    pinned_canary_url(
+        &format!("https://hub.haitang000.cn/api/v4/projects/haitang000%2Frovebrowser/jobs/{job_id}/artifacts/release/{name}"),
+        &format!("/api/v4/projects/haitang000%2Frovebrowser/jobs/{job_id}/artifacts/release/{name}"),
+    )
+}
+fn pinned_canary_url(raw: &str, expected: &str) -> Result<String, String> {
+    let url = Url::parse(raw).map_err(|_| "发布文件地址无效。")?;
+    if !allowed(Channel::Canary, true, &url) || request_target(&url)? != expected {
+        return Err("发布文件地址无效。".into());
+    }
     Ok(url.to_string())
 }
 fn release_from_github(item: &Value) -> Result<Release, String> {
@@ -302,7 +416,7 @@ fn release_from_github(item: &Value) -> Result<Release, String> {
         setup = Some((file_name, raw.to_string()));
     }
     let Some((asset_name, asset_url)) = setup else { return Err("这个版本没有 Windows 安装包。".into()); };
-    Ok(Release { version, version_text, notes, asset_name, asset_url, checksum_url: checksum, checksum: None })
+    Ok(Release { version, version_text, notes, asset_name, asset_url, checksum_url: checksum, checksum: None, commit: None })
 }
 fn setup_name(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("Rove-").and_then(|name| name.strip_suffix("-windows-x64-setup.exe")) else { return false; };
@@ -595,20 +709,28 @@ mod tests {
         assert!(parse_github(hostile).is_err());
     }
     #[test]
-    fn canary_uses_the_windows_installer_job_artifact() {
+    fn canary_follows_each_pipeline_commit_not_the_package_version() {
         let hash = "841f1241ba975d6927fcf5b7f045dfefaf2bc2001e212c25c6d6e0f10e6c0818";
-        let sums = format!("{hash}  Rove-0.2.0-windows-x64-setup.exe\r\n{}  Rove-0.2.0-windows-x64.zip\r\n", "b".repeat(64));
-        let release = parse_canary_sums(&sums).unwrap();
-        assert_eq!(release.version_text, "0.2.0");
-        assert_eq!(release.asset_name, "Rove-0.2.0-windows-x64-setup.exe");
-        assert_eq!(release.checksum.as_deref(), Some(hash));
-        assert!(release.asset_url.starts_with("https://hub.haitang000.cn/"));
-        assert!(release.asset_url.contains("/jobs/artifacts/main/raw/release/Rove-0.2.0-windows-x64-setup.exe?job=windows-installer"));
-        assert!(parse_canary_sums("abcd  Rove-0.2.0-windows-x64.zip\n").is_err());
-        assert!(parse_canary_sums("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Rove-../windows-x64-setup.exe\n").is_err());
-        let target = request_target(&Url::parse(CANARY_SUMS).unwrap()).unwrap();
+        let sums = format!("{hash}  Rove-0.1.2-windows-x64-setup.exe\r\n{}  Rove-0.1.2-windows-x64.zip\r\n", "b".repeat(64));
+        let release = parse_canary_sums(&sums, 147).unwrap();
+        assert!(release.asset_url.contains("/jobs/147/artifacts/release/Rove-0.1.2-windows-x64-setup.exe"));
+        assert!(!release.asset_url.contains("job="));
+        let pipelines = parse_pipelines(r#"[
+            {"id":70,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ref":"feature","status":"success"},
+            {"id":72,"sha":"F99534F3508FDFF6F7D17FAF0A28D7CB54C99E38","ref":"main","status":"success"},
+            {"id":71,"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","ref":"main","status":"failed"}
+        ]"#).unwrap();
+        assert_eq!(pipelines, vec![(72, "f99534f3508fdff6f7d17faf0a28d7cb54c99e38".into())]);
+        let jobs = r#"[{"id":151,"name":"frontend","status":"success","ref":"main"},{"id":152,"name":"windows-installer","status":"success","ref":"main"}]"#;
+        assert_eq!(installer_job_id(jobs), Some(152));
+        let same = "f99534f3508fdff6f7d17faf0a28d7cb54c99e38";
+        assert!(matches!(judge_canary(Some(same), same, release), Outcome::Current));
+        let built = parse_canary_sums(&sums, 152).unwrap();
+        assert!(matches!(judge_canary(Some("cccccccccccccccccccccccccccccccccccccccc"), same, built), Outcome::Available(_)));
+        assert!(parse_canary_sums("abcd  Rove-0.2.0-windows-x64.zip\n", 1).is_err());
+        let target = request_target(&Url::parse(CANARY_PIPELINES).unwrap()).unwrap();
         assert!(target.contains("haitang000%2Frovebrowser"));
-        assert!(target.ends_with("/release/SHA256SUMS.txt?job=windows-installer"));
+        assert!(target.contains("ref=main"));
     }
     #[test]
     fn checksum_lines_match_the_installer_name() {

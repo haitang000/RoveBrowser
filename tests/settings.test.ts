@@ -26,6 +26,7 @@ describe("Zigzag settings port", () => {
     expect(defaultSettings().updateChannel).toBe("preview");
     expect(updateChannelDetail("preview")).toContain("GitHub");
     expect(settingsFor({ updateChannel: "canary" }).updateChannel).toBe("canary");
+    expect(updateChannelDetail("canary")).toContain("每次提交");
     expect(updateChannelDetail("canary")).toContain("windows-installer");
     expect(settingsFor({ updateChannel: "nightly" as "preview" }).updateChannel).toBe("preview");
   });

@@ -60,7 +60,8 @@ pub struct Settings {
     /// their memory back. On unless the user turns it off.
     pub sleep_tabs: bool,
     pub download_folder: String,
-    /// `preview` reads GitHub Releases. `canary` reads the GitLab `windows-installer` job.
+    /// `preview` reads GitHub Releases. `canary` follows each successful GitLab
+    /// `windows-installer` build on main.
     pub update_channel: String,
     pub shortcuts: HashMap<String, Option<Shortcut>>,
 }
