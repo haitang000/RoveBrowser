@@ -16,8 +16,17 @@ use std::{
 };
 use uuid::Uuid;
 use windows::{
-    core::{w, HSTRING},
-    Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR},
+    core::{w, Interface, HSTRING},
+    Data::Xml::Dom::XmlDocument,
+    Foundation::{DateTime, IReference, PropertyValue},
+    Win32::{
+        System::{
+            SystemInformation::GetSystemTimeAsFileTime,
+            WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
+        },
+        UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR},
+    },
+    UI::Notifications::{ToastNotification, ToastNotificationManager},
 };
 use windows_sys::Win32::{
     Foundation::{ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
@@ -305,6 +314,43 @@ fn wait_for_exit(pid: u32) -> io::Result<()> {
     }
 }
 
+fn show_restart_notification() -> Result<(), Box<dyn std::error::Error>> {
+    const APP_ID: &str = "Rove.Browser.Updates";
+    const TOAST: &str = r#"<toast>
+        <visual><binding template="ToastGeneric">
+            <text>Rove 正在重启以应用更新</text>
+            <text>这可能需要一些时间，更新完成后 Rove 将重新启动</text>
+        </binding></visual>
+    </toast>"#;
+
+    // A per-user identity also works when the portable copy has no shortcut.
+    let (registration, _) = RegKey::predef(HKEY_CURRENT_USER)
+        .create_subkey(format!(r"Software\Classes\AppUserModelId\{APP_ID}"))?;
+    registration.set_value("DisplayName", &"Rove")?;
+
+    unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
+    let result = (|| -> windows::core::Result<()> {
+        let content = XmlDocument::new()?;
+        content.LoadXml(&HSTRING::from(TOAST))?;
+        let notification = ToastNotification::CreateToastNotification(&content)?;
+        notification.SetTag(&HSTRING::from("update-restart"))?;
+
+        // FILETIME and WinRT DateTime both count 100 ns ticks since 1601.
+        let now = unsafe { GetSystemTimeAsFileTime() };
+        let ticks = (i64::from(now.dwHighDateTime) << 32) | i64::from(now.dwLowDateTime);
+        let expires = PropertyValue::CreateDateTime(DateTime {
+            UniversalTime: ticks + 60 * 10_000_000,
+        })?
+        .cast::<IReference<DateTime>>()?;
+        notification.SetExpirationTime(&expires)?;
+
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_ID))?
+            .Show(&notification)
+    })();
+    unsafe { RoUninitialize() };
+    result.map_err(Into::into)
+}
+
 fn run_update(id: Uuid, parent: u32, target: &Path, kind: PackageKind, hash: &str) {
     let directory = target.parent().unwrap();
     let stage = portable_stage(directory, id);
@@ -322,6 +368,9 @@ fn run_update(id: Uuid, parent: u32, target: &Path, kind: PackageKind, hash: &st
             .map_err(|e| format!("无法锁定程序目录：{e}"))?;
         if sha256_file(target)? != hash {
             return Err("程序文件已变化，请重新检查更新。".into());
+        }
+        if let Err(error) = show_restart_notification() {
+            eprintln!("Rove update notification: {error}");
         }
         match kind {
             PackageKind::Setup => install_setup(&downloaded, directory),
