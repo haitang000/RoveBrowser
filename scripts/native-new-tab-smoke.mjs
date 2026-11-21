@@ -60,11 +60,18 @@ async function stop() {
 }
 try {
   await launch();
-  assert.equal(await ui.locator(".nt-clock").count(), 1);
+  assert.equal(await ui.locator(".nt-widget-grid .nt-clock").count(), 1);
   assert.equal(await ui.locator(".nt-suggestion").count(), 5);
   passed("legacy profile opens the new home with a live clock and suggestions");
 
   await ui.getByRole("button", { name: "编辑小组件", exact: true }).click();
+  const previews = ui.locator(".nt-catalog-preview[inert]");
+  assert.equal(await previews.count(), 4);
+  const clocks = await ui.locator(".nt-widget-preview .nt-clock time, .nt-widget-grid .nt-clock time").allTextContents();
+  assert.equal(clocks.length, 2);
+  assert.equal(clocks[0], clocks[1]);
+  assert.equal(await previews.locator(".nt-calendar .nt-today").count(), 1);
+  passed("Discover renders live read-only widget previews in WebView2");
   await ui.getByRole("button", { name: "添加日历", exact: true }).click();
   await ui.getByRole("button", { name: "添加便签", exact: true }).click();
   await ui.getByRole("button", { name: "添加GitHub 贡献图", exact: true }).click();

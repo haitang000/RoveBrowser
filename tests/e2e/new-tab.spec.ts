@@ -10,8 +10,8 @@ test.beforeEach(async ({ page }) => {
 
 test("new tab follows the reference layout and opens a suggested site", async ({ page }) => {
   await expect(page.locator(".nt-greeting")).toContainText("Good afternoon,");
-  await expect(page.locator(".nt-clock time")).toHaveText("12:47");
-  await expect(page.locator(".nt-clock > span")).toHaveText("2026-11-14");
+  await expect(page.locator(".nt-widget-grid .nt-clock time")).toHaveText("12:47");
+  await expect(page.locator(".nt-widget-grid .nt-clock > span")).toHaveText("2026-11-14");
   await expect(page.locator(".nt-suggestion")).toHaveCount(5);
   await expect(page.locator(".nt-widget-empty")).toHaveCount(2);
   await page.setViewportSize({ width: 1826, height: 1344 });
@@ -65,7 +65,7 @@ test("the selected widget flies from its preview to its final grid slot below th
   await add.scrollIntoViewIfNeeded();
 
   const flight = await add.evaluate(async (button) => {
-    const preview = button.closest(".nt-catalog-card")!.querySelector(".nt-preview-notes")!;
+    const preview = button.closest(".nt-catalog-card")!.querySelector(".nt-widget-preview")!;
     const source = preview.getBoundingClientRect().toJSON();
     button.click();
     await new Promise(requestAnimationFrame);
@@ -92,6 +92,28 @@ test("the selected widget flies from its preview to its final grid slot below th
   await add.click();
   await expect(page.locator(".nt-flight-card")).toHaveCount(0);
   await expect(page.locator('.nt-widget-grid article[aria-label="便签"]').last()).toBeInViewport();
+});
+
+test("discover renders read-only widgets and updates the clock and calendar across midnight", async ({ page }) => {
+  await page.clock.setSystemTime(new Date("2026-12-01T04:59:00Z"));
+  await page.clock.runFor(1000);
+  await page.getByRole("button", { name: "编辑小组件", exact: true }).click();
+  const previews = page.locator(".nt-catalog-preview[inert]");
+  await expect(previews).toHaveCount(4);
+  await expect(previews.locator(".nt-github-form")).toBeVisible();
+  await expect(previews.locator(".nt-notes textarea")).toBeVisible();
+  await expect(previews.locator(".nt-clock time")).toHaveText("23:59");
+  await expect(previews.locator(".nt-month-title")).toHaveText("November 2026");
+  await expect(previews.locator(".nt-today")).toHaveText("30");
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "添加GitHub 贡献图", exact: true })).toBeFocused();
+  await page.clock.setSystemTime(new Date("2026-12-01T05:00:00Z"));
+  await page.clock.runFor(1000);
+  await expect(previews.locator(".nt-clock time")).toHaveText("00:00");
+  await expect(page.locator(".nt-widget-grid .nt-clock time")).toHaveText("00:00");
+  await expect(previews.locator(".nt-month-title")).toHaveText("December 2026");
+  await expect(previews.locator(".nt-today")).toHaveText("1");
 });
 
 test("discover adds, resizes, sorts and removes widgets and preserves notes on reload", async ({ page }) => {

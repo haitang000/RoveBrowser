@@ -4,7 +4,7 @@ import { calendarDays, localDate, validGithubUsername, type NewTabWidget } from 
 import { githubContributions, type Contribution } from "../../lib/github-widget";
 import Icon from "../common/Icon.vue";
 
-const props = defineProps<{ widget: NewTabWidget; now: Date; editing: boolean }>();
+const props = defineProps<{ widget: NewTabWidget; now: Date }>();
 const emit = defineEmits<{
   patch: [value: Partial<NewTabWidget>];
   navigate: [url: string];

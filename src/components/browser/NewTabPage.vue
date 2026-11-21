@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { greeting, MAX_WIDGETS, newTabSettings, newTabSuggestions, WIDGET_CATALOG, type NewTabWidget, type WidgetKind } from "../../lib/new-tab";
 import { useNewTabMotion } from "../../lib/new-tab-motion";
@@ -21,6 +21,12 @@ const settings = computed(() => newTabSettings(b.state.newTab));
 const sites = computed(() => newTabSuggestions(b.history, b.state.favorites, b.state.pins));
 const editing = ref(false);
 const now = ref(new Date());
+const previewNow = computed<Date>((previous) => editing.value ? now.value : previous ?? now.value);
+const previewId = useId();
+const catalog = WIDGET_CATALOG.map((entry) => ({
+  ...entry,
+  widget: { id: `${previewId}-${entry.kind}`, kind: entry.kind, size: entry.size },
+}));
 const editButton = ref<HTMLButtonElement>();
 const discoverTitle = ref<HTMLElement>();
 const name = ref("");
@@ -70,7 +76,7 @@ async function finishEditing() {
 }
 async function addWidget(kind: WidgetKind, source: HTMLElement) {
   if (settings.value.widgets.length >= MAX_WIDGETS) return;
-  const preview = source.closest(".nt-catalog-card")?.querySelector(".nt-catalog-preview > div");
+  const preview = source.closest(".nt-catalog-card")?.querySelector(".nt-widget-preview");
   const from = (preview ?? source).getBoundingClientRect();
   motion.stopPlacement();
   const definition = WIDGET_CATALOG.find((entry) => entry.kind === kind)!;
@@ -136,12 +142,11 @@ function navigate(url: string, event?: MouseEvent) {
     <aside class="nt-discover" aria-label="发现小组件" :inert="!editing" :aria-hidden="!editing">
       <h1 ref="discoverTitle" tabindex="-1">Discover</h1>
       <div class="nt-catalog">
-        <article v-for="entry in WIDGET_CATALOG" :key="entry.kind" class="nt-catalog-card">
-          <div class="nt-catalog-preview" aria-hidden="true">
-            <div v-if="entry.kind === 'github'" class="nt-preview-graph"><i v-for="cell in 77" :key="cell" :class="{ filled: cell === 71, soft: cell === 72 || cell === 64 }" /></div>
-            <div v-else-if="entry.kind === 'clock'" class="nt-preview-clock"><strong>{{ now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) }}</strong><span>{{ now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }}</span></div>
-            <div v-else-if="entry.kind === 'calendar'" class="nt-preview-calendar"><span>{{ now.toLocaleDateString('en-US', { month: 'long' }) }}</span><strong>{{ now.getDate() }}</strong><small>{{ now.toLocaleDateString('en-US', { weekday: 'long' }) }}</small></div>
-            <div v-else class="nt-preview-notes"><Icon name="edit" :size="18" /><i /><i /><i /></div>
+        <article v-for="entry in catalog" :key="entry.kind" class="nt-catalog-card">
+          <div class="nt-catalog-preview" inert aria-hidden="true">
+            <div class="nt-widget-preview" :class="{ 'nt-widget-preview-wide': entry.size === 'wide' }">
+              <NewTabWidgetView :widget="entry.widget" :now="previewNow" />
+            </div>
           </div>
           <div class="nt-catalog-info"><h2>{{ entry.title }}</h2><p>{{ entry.description }}</p><button class="nt-add-button" :aria-label="`添加${entry.title}`" :disabled="settings.widgets.length >= MAX_WIDGETS" @click="addWidget(entry.kind, $event.currentTarget as HTMLElement)"><Icon name="plus" :size="14" /> Add</button></div>
         </article>
@@ -171,7 +176,7 @@ function navigate(url: string, event?: MouseEvent) {
                   <button class="nt-drag-handle" draggable="true" :aria-label="`拖动${widgetTitle(widget.kind)}排序`" title="拖动排序" @dragstart="dragStart($event, widget.id)" @dragend="dragged = undefined; dropTarget = undefined"><Icon name="more" :size="16" /></button>
                   <div><button :disabled="index === 0" :aria-label="`前移${widgetTitle(widget.kind)}`" @click="moveWidget(widget.id, -1)"><Icon name="back" :size="13" /></button><button :disabled="index === settings.widgets.length - 1" :aria-label="`后移${widgetTitle(widget.kind)}`" @click="moveWidget(widget.id, 1)"><Icon name="forward" :size="13" /></button><button :aria-label="`调整${widgetTitle(widget.kind)}宽度`" @click="patchWidget(widget.id, { size: widget.size === 'wide' ? 'small' : 'wide' })"><Icon name="expand" :size="13" /></button><button :aria-label="`移除${widgetTitle(widget.kind)}`" @click="removeWidget(widget.id)"><Icon name="close" :size="14" /></button></div>
                 </div>
-                <NewTabWidgetView :widget="widget" :now="now" :editing="editing" @patch="patchWidget(widget.id, $event)" @navigate="navigate($event)" />
+                <NewTabWidgetView :widget="widget" :now="now" @patch="patchWidget(widget.id, $event)" @navigate="navigate($event)" />
               </article>
               <button v-for="slot in placeholders" :key="`empty-${slot}`" class="nt-widget nt-widget-empty" aria-label="添加小组件" @click="editing ? addWidget('notes', $event.currentTarget as HTMLElement) : beginEditing()"><span><Icon name="plus" :size="22" /><small>{{ editing ? '添加便签' : 'Add a widget' }}</small></span></button>
             </div>
