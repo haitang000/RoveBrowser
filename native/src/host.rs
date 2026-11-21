@@ -4179,6 +4179,23 @@ impl App {
                 }
                 return;
             }
+            Command::MediaControl { id, action } => {
+                if !matches!(action.as_str(), "play" | "pause") {
+                    return;
+                }
+                let resumed = if let Some(page) = self.pages.get(&id) {
+                    let was_sleeping = page.sleeping.get();
+                    page.wake();
+                    crate::site::control_media(&page.view, &action);
+                    was_sleeping
+                } else {
+                    false
+                };
+                if resumed {
+                    self.emit(json!({"type":"sleep","id":id,"asleep":false}));
+                }
+                return;
+            }
             Command::ClearStep => {
                 // Zigzag's sidebar Clear: old tabs first, then the others, then
                 // the tab being looked at and its split partner.

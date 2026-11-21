@@ -43,6 +43,31 @@ pub fn is_playing_audio_core(
     Ok(playing.as_bool())
 }
 
+/// Controls media elements from the sidebar's Now Playing card. Remember the
+/// elements paused by the card so Play does not start unrelated paused players.
+pub fn control_media(view: &WebView, action: &str) {
+    let script = match action {
+        "pause" => r#"(() => {
+            const media = [...document.querySelectorAll('audio,video')];
+            const playing = media.filter(item => !item.paused && !item.ended);
+            window.__ROVE_NOW_PLAYING_PAUSED__ = playing;
+            for (const item of playing) item.pause();
+        })()"#,
+        "play" => r#"(() => {
+            const media = [...document.querySelectorAll('audio,video')];
+            const remembered = Array.isArray(window.__ROVE_NOW_PLAYING_PAUSED__)
+                ? window.__ROVE_NOW_PLAYING_PAUSED__ : [];
+            const tracked = remembered.filter(item => media.includes(item) && item.paused && !item.ended);
+            const targets = tracked.length
+                ? tracked : media.filter(item => item.paused && !item.ended).slice(0, 1);
+            window.__ROVE_NOW_PLAYING_PAUSED__ = [];
+            for (const item of targets) item.play().catch(() => {});
+        })()"#,
+        _ => return,
+    };
+    let _ = view.evaluate_script(script);
+}
+
 pub fn zoom_factor_controller(
     controller: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
 ) -> windows::core::Result<f64> {

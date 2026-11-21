@@ -574,6 +574,9 @@ pub enum Command {
         id: Option<String>,
         muted: Option<bool>,
     },
+    /// Play or pause HTML audio/video elements on a tab, as requested by Now Playing.
+    #[serde(rename = "mediaControl")]
+    MediaControl { id: String, action: String },
     #[serde(rename = "peekOpen")]
     PeekOpen { url: String, origin: Option<Point> },
     #[serde(rename = "peekClose")]

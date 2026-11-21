@@ -32,7 +32,7 @@
 | 10 | 页面对话框 + HTTP 认证 | `Web/PageDialogs.swift` | 中 | S | 低 |
 | 11 | 通知 + 弹窗拦截提示 | `Web/WebNotifications.swift`、`Web/PopupNotice.swift` | 中 | S–M | Windows Toast |
 | 12 | 视频占满页面（页内全屏） | `Web/PageFullScreen.swift` | 中 | S | 页内脚本 + 布局 |
-| 13 | Now Playing 侧栏卡片 | `Sidebar/NowPlaying.swift` | 中 | S | 复用现有音频状态 |
+| 13 | Now Playing 侧栏卡片 | `Sidebar/NowPlaying.swift` | 中 | S | 复用现有音频状态；**已实现** |
 | 14 | 数字键提示 + Ctrl+Tab 切换器 + 空间切换器 | `Sidebar/NumberHints.swift`、`Switcher/*` | 中高 | S–M | 纯 UI |
 | 15 | 侧栏尺寸 Small/Medium/Large + 右侧侧栏 | `Sidebar/SidebarView.swift`、`BrowserRootView` 镜像布局 | 中高 | S / M | 原生页面矩形需镜像 |
 | 16 | 新标签排列选项 + 分屏比例持久化 + 分屏关闭按钮 | `Tabs/TabManager.swift`、`Tabs/TileLayout.swift` | 中 | S | 低 |
@@ -188,7 +188,7 @@
 
 12. **视频占满页面**（S）：`PageFullScreen.swift:9-11` 的做法是在页内接管 `requestFullscreen`/`webkitEnterFullscreen`，把元素固定到视口并伪造 `fullscreenElement`/`fullscreenchange`；WebView2 中页内全屏是整窗全屏，若要“只占页面区域”，在页面内用 CSS 固定即可（网页 HWND 本来就是页面矩形），无需原生改动；加设置项与站点开关。
 
-13. **Now Playing 卡片**（S）：`Sidebar/NowPlaying.swift:3-13` 是侧栏底部的一行（站点、播放/暂停、静音、关闭，固定显示），按 (标签, 页面) 记住隐藏；Rove 已有 `playing` 集合与 `is_playing_audio`，补注入脚本控制媒体元素播放/暂停即可。
+13. **Now Playing 卡片**（S，已实现）：参考 `Sidebar/NowPlaying.swift`，侧栏为后台播放声音的标签显示站点图标、播放/暂停、静音和隐藏控件；隐藏仅对当前页面生效，最多显示 3 个。前端在 `src/components/browser/NowPlaying.vue` 管理选择状态，原生宿主通过页面媒体元素控制播放。
 
 14. **数字键提示 + 切换器**（S–M）：`ModifierHold` 0.5 秒（`NumberHints.swift:37-74`），只按修饰键且无其他输入时显示；标签 ⌘1–⌘8、⌘9 最后，空间 ⌃1–⌃9；`Ctrl+Tab` 网格切换器（`Switcher/TabSwitcher.swift`）与 ⌥⌘S 空间切换器（`SpaceSwitcher.swift`）。Rove 已有 Ctrl+Tab 循环与 Ctrl+1–9，补“按住显示数字 + 切换器浮层”，键盘事件经原生 accelerator 转发到受信 UI。
 
@@ -253,7 +253,7 @@
 按“互不耦合、可独立验收、每个都能单独进 VALIDATION”的原则分批：
 
 1. **批次 A（页面体验，约 1 周）**：自定义错误页（P0-1）→ 打印/另存（P0-4）→ Cookie 横幅（P0-2）→ 弹窗拦截提示（P1-11 的前半）。四项都不改存储模型，只加命令/事件/前端页面，适合作为一批提交。
-2. **批次 B（标签与资源）**：标签休眠（P0-3，**已实现**，见 [标签休眠移植](TAB_SLEEP_PORT.md)）→ 标签归档（P1-9）→ 数字提示/切换器（P1-14）→ Now Playing（P1-13）。休眠涉及 `host.rs` 页面生命周期，先做；其余都是前端/存储增量。
+2. **批次 B（标签与资源）**：标签休眠（P0-3，**已实现**，见 [标签休眠移植](TAB_SLEEP_PORT.md)）→ 标签归档（P1-9）→ 数字提示/切换器（P1-14）。Now Playing（P1-13）已实现。
 3. **批次 C（数据与信任）**：历史页 + 聚类（P0-5）→ 站点权限最小闭环（P0-6）→ 页面对话框（P1-10）→ 侧栏尺寸/右侧（P1-15）。历史页会改 `history` 表，之后做权限与站点数据都会复用 origin 索引。
 4. **批次 D（内容能力）**：阅读器（P1-7）→ 深色页面（P1-8）→ 整页截图（P1-18）→ 视频占满页面（P1-12）。
 5. **再往后**：导入扩展（P1-17，拉新）与 MCP（P2-26，差异化）可以独立插队；广告拦截（P2-19）、4 分屏（P2-20）、嵌套标签（P2-21）各自单独开分支，不要和别的批次混。
