@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, ref, watch } from "vue";
+import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { defineStore } from "pinia";
 import { initialState, reduce } from "../lib/preview";
 import type {
@@ -200,7 +200,8 @@ export const useBrowser = defineStore("browser", () => {
   }, { flush: "sync" });
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
-  const extensions = ref<ExtensionsState>({ items: null, review: null, busy: false, error: null });
+  const extensions = ref<ExtensionsState>({ items: null, review: null, popup: false, busy: false, error: null });
+  const extensionBackground = shallowRef<{ rect: Rect; image: string }[]>([]);
   const defaultBrowser = ref<{ http: boolean; https: boolean }>();
   const importPhase = ref("checking");
   function scanImports() { importPhase.value = "checking"; if (native) send({ type: "importScan" }); }
@@ -704,6 +705,10 @@ export const useBrowser = defineStore("browser", () => {
     }
     if (e.type === "extensionsState" && e.extensions) {
       extensions.value = { ...e.extensions, items: e.extensions.items ?? extensions.value.items };
+      if (!e.extensions.popup) extensionBackground.value = [];
+    }
+    if (e.type === "extensionBackground" && extensions.value.popup && e.rect && e.image) {
+      extensionBackground.value = [...extensionBackground.value, { rect: e.rect, image: e.image }];
     }
     if (e.type === "defaultBrowser" && e.defaultBrowser) defaultBrowser.value = e.defaultBrowser;
     if (e.type === "updateStatus" && typeof e.message === "string" && (e.channel === "canary" || e.channel === "preview")) {
@@ -846,7 +851,7 @@ export const useBrowser = defineStore("browser", () => {
   send({ type: popupWindow ? "popupReady" : "ready" });
   return {
     canOutputPage, pageOutputShortcut, outputPage,
-    importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser, extensions,
+    importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser, extensions, extensionBackground,
     onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,
     native,
     popupWindow,

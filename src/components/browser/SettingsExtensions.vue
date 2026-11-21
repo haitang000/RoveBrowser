@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { CHROME_STORE_URL, type ExtensionItem } from "../../lib/extensions";
 import type { Command } from "../../lib/types";
 import { useBrowser } from "../../stores/browser";
+import ExtensionIcon from "./ExtensionIcon.vue";
+import ExtensionReviewDetails from "./ExtensionReviewDetails.vue";
 
 const b = useBrowser();
 const removal = ref<ExtensionItem | null>(null);
@@ -11,9 +13,10 @@ const reviewPanel = ref<HTMLElement>();
 const cancelReview = ref<HTMLButtonElement>();
 const cancelRemoval = ref<HTMLButtonElement>();
 const storeInput = ref("");
+const inlineReview = computed(() => b.extensions.popup ? null : b.extensions.review);
 
 function run(command: Command) {
-  if (!b.native || b.extensions.busy) return;
+  if (!b.native || b.extensions.busy || b.extensions.popup) return;
   b.extensions = { ...b.extensions, busy: true, error: null };
   b.send(command);
 }
@@ -27,7 +30,7 @@ function remove(id: string) {
   run({ type: "extensionsRemove", id });
 }
 
-watch(() => b.extensions.review, async (current, previous) => {
+watch(inlineReview, async (current, previous) => {
   if (current?.ticket === previous?.ticket) return;
   await nextTick();
   if (current) {
@@ -50,7 +53,7 @@ onMounted(() => {
 
 <template>
   <section class="settings-group extension-settings" :aria-label="b.t('浏览器扩展')" :aria-busy="b.extensions.busy">
-    <div v-if="!b.extensions.review" class="setting-row extension-intro">
+    <div v-if="!inlineReview" class="setting-row extension-intro">
       <div class="setting-description">
         <strong>{{ b.t('Chrome 网上应用店') }}</strong>
       </div>
@@ -71,7 +74,7 @@ onMounted(() => {
         </button>
       </form>
     </div>
-    <div v-if="!b.extensions.review" class="setting-row extension-intro">
+    <div v-if="!inlineReview" class="setting-row extension-intro">
       <div class="setting-description">
         <strong>{{ b.t('本地扩展') }}</strong>
         <p>{{ b.t('选择包含 manifest.json 的 Manifest V3 扩展目录。扩展会作用于所有工作区中的匹配网页。') }}</p>
@@ -86,43 +89,28 @@ onMounted(() => {
       >{{ b.t('加载本地扩展…') }}</button>
     </div>
 
-    <p v-if="b.extensions.error" class="settings-feedback" role="alert">{{ b.extensions.error }}</p>
-    <p v-else-if="b.extensions.busy" class="settings-feedback" role="status">{{ b.t('正在处理扩展…') }}</p>
+    <p v-if="!b.extensions.popup && b.extensions.error" class="settings-feedback" role="alert">{{ b.extensions.error }}</p>
+    <p v-else-if="!b.extensions.popup && b.extensions.busy" class="settings-feedback" role="status">{{ b.t('正在处理扩展…') }}</p>
 
     <section
-      v-if="b.extensions.review"
+      v-if="inlineReview"
       ref="reviewPanel"
       class="extension-review"
       :aria-label="b.t('确认安装扩展')"
-      @keydown.esc.stop="review(b.extensions.review.ticket, false)"
+      @keydown.esc.stop="review(inlineReview.ticket, false)"
     >
-      <div class="setting-description">
-        <strong>{{ b.t('安装 {name}？', { name: b.extensions.review.name }) }}</strong>
-        <p v-if="b.extensions.review.source === 'chromeStore'">{{ b.t('版本 {version} · 已验证 Chrome 网上应用店签名', { version: b.extensions.review.version }) }}</p>
-        <p v-else>{{ b.t('版本 {version}。仅安装你信任来源的扩展。', { version: b.extensions.review.version }) }}</p>
-      </div>
-      <div v-if="b.extensions.review.permissions.length" class="extension-request">
-        <strong>{{ b.t('声明的权限（含可选权限）') }}</strong>
-        <ul><li v-for="permission in b.extensions.review.permissions" :key="permission">{{ permission }}</li></ul>
-      </div>
-      <div v-if="b.extensions.review.hosts.length" class="extension-request">
-        <strong>{{ b.t('声明的网站访问范围') }}</strong>
-        <ul><li v-for="host in b.extensions.review.hosts" :key="host">{{ host }}</li></ul>
-      </div>
-      <p v-if="!b.extensions.review.permissions.length && !b.extensions.review.hosts.length">
-        {{ b.t('这份清单未声明额外权限或网站访问范围。') }}
-      </p>
+      <ExtensionReviewDetails :review="inlineReview" />
       <div class="extension-actions">
         <button
           ref="cancelReview"
           class="setting-button"
           :disabled="b.extensions.busy"
-          @click="review(b.extensions.review.ticket, false)"
+          @click="review(inlineReview.ticket, false)"
         >{{ b.t('取消') }}</button>
         <button
           class="primary-button"
           :disabled="b.extensions.busy"
-          @click="review(b.extensions.review.ticket, true)"
+          @click="review(inlineReview.ticket, true)"
         >{{ b.t('安装扩展') }}</button>
       </div>
     </section>
@@ -133,9 +121,12 @@ onMounted(() => {
         <div class="setting-description"><p>{{ b.t('还没有安装扩展。') }}</p></div>
       </div>
       <div v-for="item in b.extensions.items" :key="item.id" class="setting-row extension-row">
-        <div class="setting-description">
-          <strong>{{ item.name }}</strong>
-          <p>{{ b.t('版本 {version}', { version: item.version }) }} · {{ item.enabled ? b.t('已启用') : b.t('已停用') }}<template v-if="item.source === 'chromeStore'"> · {{ b.t('Chrome 网上应用店') }}</template></p>
+        <div class="extension-identity">
+          <ExtensionIcon :src="item.icon" />
+          <div class="setting-description">
+            <strong>{{ item.name }}</strong>
+            <p>{{ b.t('版本 {version}', { version: item.version }) }} · {{ item.enabled ? b.t('已启用') : b.t('已停用') }}<template v-if="item.source === 'chromeStore'"> · {{ b.t('Chrome 网上应用店') }}</template></p>
+          </div>
         </div>
         <div class="extension-actions">
           <button
@@ -175,10 +166,11 @@ onMounted(() => {
   gap: 12px;
 }
 .extension-intro .setting-description,
-.extension-row .setting-description {
+.extension-identity {
   flex: 1 1 180px;
   overflow-wrap: anywhere;
 }
+.extension-identity { display: flex; align-items: center; min-width: 0; gap: 10px; }
 .extension-review {
   display: grid;
   gap: 12px;
@@ -200,18 +192,6 @@ onMounted(() => {
   flex: 1 1 14rem;
   min-width: 0;
   width: auto;
-}
-.extension-review > p,
-.extension-request {
-  margin: 0;
-  color: var(--quiet);
-  font-size: 12px;
-}
-.extension-request ul {
-  margin: 4px 0 0;
-  padding-inline-start: 20px;
-  max-height: 135px;
-  overflow-y: auto;
 }
 .extension-actions {
   display: flex;

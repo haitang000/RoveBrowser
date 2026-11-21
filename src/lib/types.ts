@@ -152,6 +152,7 @@ declare global {
       importSources?: import("./import").ImportSource[];
       importBusy?: boolean;
       extensions?: import("./extensions").ExtensionsState;
+      rect?: Rect;
       defaultBrowser?: { http: boolean; https: boolean };
       ratio?: number;
       width?: number;

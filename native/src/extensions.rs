@@ -41,6 +41,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
 const MAX_MANIFEST: u64 = 1024 * 1024;
+const MAX_ICON: u64 = 512 * 1024;
 
 #[derive(Deserialize)]
 struct Manifest {
@@ -81,6 +82,8 @@ pub struct Review {
     name: String,
     version: String,
     source: Source,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
     permissions: BTreeSet<String>,
     hosts: BTreeSet<String>,
 }
@@ -119,6 +122,8 @@ pub struct Item {
     version: String,
     enabled: bool,
     source: Source,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
 }
 
 pub fn choose_folder(owner: HWND) -> Result<Option<PathBuf>> {
@@ -170,6 +175,52 @@ fn json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     }
     let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
     Ok(serde_json::from_slice(bytes)?)
+}
+
+fn icon_file(payload: &Path, name: &str) -> Option<String> {
+    let relative = chrome_store::package_path(name.strip_prefix('/').unwrap_or(name))?;
+    let path = payload.join(relative);
+    if !fs::canonicalize(&path).ok()?.starts_with(payload) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    regular_file(&path)
+        .ok()?
+        .take(MAX_ICON + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    crate::favicon::raster_icon_url(&bytes)
+}
+
+fn extension_icon(package: &Path) -> Option<String> {
+    let payload = package.join("payload");
+    if reparse(&fs::symlink_metadata(&payload).ok()?) {
+        return None;
+    }
+    let payload = fs::canonicalize(payload).ok()?;
+    let manifest: serde_json::Value = json_file(&payload.join("manifest.json")).ok()?;
+    for icons in [manifest.get("icons"), manifest.pointer("/action/default_icon")]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(path) = icons.as_str() {
+            if let Some(icon) = icon_file(&payload, path) {
+                return Some(icon);
+            }
+            continue;
+        }
+        let Some(sizes) = icons.as_object() else { continue };
+        let mut candidates: Vec<_> = sizes
+            .iter()
+            .filter_map(|(size, path)| Some((size.parse::<u32>().ok()?, path.as_str()?)))
+            .collect();
+        let target = crate::favicon::MAX_SIDE;
+        candidates.sort_unstable_by_key(|(size, _)| (*size < target, size.abs_diff(target)));
+        if let Some(icon) = candidates.into_iter().take(8).find_map(|(_, path)| icon_file(&payload, path)) {
+            return Some(icon);
+        }
+    }
+    None
 }
 
 fn copy_directory(
@@ -351,6 +402,7 @@ fn stage(root: &Path, identity: &[u8], source: Source) -> Result<Prepared> {
             name: String::new(),
             version: String::new(),
             source,
+            icon: None,
             permissions: BTreeSet::new(),
             hosts: BTreeSet::new(),
         },
@@ -372,6 +424,7 @@ fn finish(mut prepared: Prepared, expected_id: Option<&str>) -> Result<Prepared>
         return Err("商店扩展的安装 ID 与已验证的扩展 ID 不一致".into());
     }
     prepared.review.name = localized_name(&manifest, &payload);
+    prepared.review.icon = extension_icon(&prepared.stage);
     prepared.review.version = manifest.version;
     prepared.review.permissions = manifest
         .permissions
@@ -487,7 +540,7 @@ impl Profile {
     pub fn list(&self, root: &Path) -> Result<Vec<Item>> {
         let installed = self.installed()?;
         let mut items = Vec::new();
-        for (_, record) in managed_packages(root)? {
+        for (package, record) in managed_packages(root)? {
             let Some(extension) = installed.get(&record.id) else {
                 continue;
             };
@@ -502,6 +555,7 @@ impl Profile {
                     version: record.version,
                     enabled: enabled.as_bool(),
                     source: record.source,
+                    icon: extension_icon(&package),
                 });
             }
         }

@@ -161,6 +161,7 @@ try {
   await writeFile(join(fixture, "content.js"), "document.body.dataset.extension = 'changed-source';");
   await review().getByRole("button", { name: "安装扩展" }).click();
   await expect(toggle()).toHaveAttribute("aria-checked", "true");
+  await expect(ui.locator(".extension-row", { has: toggle() }).locator(".extension-icon svg")).toBeVisible();
   const [installed] = await readdir(packages);
   assert.equal(await readFile(join(packages, installed, "payload", "content.js"), "utf8"), originalScript);
   await browse("/installed", true);

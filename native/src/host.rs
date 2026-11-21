@@ -109,7 +109,8 @@ enum Event {
     ExternalUrls(Vec<String>),
     ImportSources(Vec<crate::import::Source>),
     ImportRead(Vec<crate::import::Batch>),
-    ExtensionPrepared(Result<extensions::Prepared, String>),
+    ExtensionPrepared(uuid::Uuid, Result<extensions::Prepared, String>),
+    ExtensionBackground(uuid::Uuid, Rect, String),
     RestoreKeyboardFocus,
     Layout,
     SplitResize,
@@ -349,7 +350,9 @@ struct App {
     import_busy: bool,
     extensions_root: PathBuf,
     extension_candidate: Option<extensions::Prepared>,
-    extension_busy: bool,
+    extension_preparation: Option<uuid::Uuid>,
+    extension_popup: Option<uuid::Uuid>,
+    extension_error: Option<String>,
     // Drop child controllers before their parent HWND and shared context.
     split_handle: Option<crate::split::SplitHandle>,
     sidebar_handle: Option<crate::sidebar::SidebarHandle>,
@@ -523,7 +526,9 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         import_busy: false,
         extensions_root: std::path::absolute(data.join("Extensions"))?,
         extension_candidate: None,
-        extension_busy: false,
+        extension_preparation: None,
+        extension_popup: None,
+        extension_error: None,
         split_handle: None,
         sidebar_handle: None,
         resize_appearance: crate::resize_surface::Appearance::default(),
@@ -2970,16 +2975,52 @@ impl App {
             _ => {}
         }
     }
-    fn emit_extensions(&self, items: Option<Vec<extensions::Item>>, error: Option<String>) {
+    fn publish_extensions(&self, items: Option<Vec<extensions::Item>>) {
         self.emit(json!({
             "type": "extensionsState",
             "extensions": {
                 "items": items,
                 "review": self.extension_candidate.as_ref().map(|extension| &extension.review),
-                "busy": self.extension_busy,
-                "error": error,
+                "busy": self.extension_preparation.is_some(),
+                "popup": self.extension_popup.is_some(),
+                "error": self.extension_error,
             }
         }));
+    }
+
+    fn emit_extensions(&mut self, items: Option<Vec<extensions::Item>>, error: Option<String>) {
+        self.extension_error = error;
+        self.publish_extensions(items);
+    }
+
+    fn prepare_extension(
+        &mut self,
+        prepare: impl FnOnce(&FilePath) -> Result<extensions::Prepared, String> + Send + 'static,
+    ) {
+        let request = uuid::Uuid::new_v4();
+        self.extension_candidate = None;
+        self.extension_preparation = Some(request);
+        self.emit_extensions(None, None);
+        let root = self.extensions_root.clone();
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let _ = proxy.send_event(Event::ExtensionPrepared(request, prepare(&root)));
+        });
+    }
+
+    fn capture_extension_background(&self, popup: uuid::Uuid) {
+        let Some(active) = self.state.active() else { return };
+        for (id, rect) in std::iter::once((&active.id, self.primary))
+            .chain(active.split_with.as_ref().zip(self.secondary))
+        {
+            let Some(page) = self.pages.get(id).filter(|page| page.visible.get()) else { continue };
+            let proxy = self.proxy.clone();
+            let _ = crate::capture::thumbnail(&page.view, move |image| {
+                if let Some(image) = image {
+                    let _ = proxy.send_event(Event::ExtensionBackground(popup, rect, image));
+                }
+            });
+        }
     }
 
     fn extension_profile<T>(
@@ -3001,7 +3042,15 @@ impl App {
     }
 
     fn extension_command(&mut self, command: Command) {
-        if self.extension_busy && !matches!(command, Command::ListExtensions) { return; }
+        if matches!(command, Command::DismissExtensionPopup) {
+            if self.extension_popup.take().is_some() {
+                self.extension_preparation = None;
+                self.extension_candidate = None;
+                self.emit_extensions(None, None);
+            }
+            return;
+        }
+        if self.extension_preparation.is_some() && !matches!(command, Command::ListExtensions) { return; }
         let result = match command {
             Command::ChooseExtension => {
                 let owner = self.window.as_ref().and_then(|window| window.window_handle().ok())
@@ -3014,20 +3063,14 @@ impl App {
                     return;
                 };
                 self.extension_candidate = None;
-                self.extension_busy = true;
-                self.emit_extensions(None, None);
                 match extensions::choose_folder(owner) {
                     Ok(Some(path)) => {
-                        let root = self.extensions_root.clone();
-                        let proxy = self.proxy.clone();
-                        std::thread::spawn(move || {
-                            let prepared = extensions::prepare(&root, &path)
-                                .map_err(|error| format!("无法读取扩展目录：{error}"));
-                            let _ = proxy.send_event(Event::ExtensionPrepared(prepared));
+                        self.prepare_extension(move |root| {
+                            extensions::prepare(root, &path)
+                                .map_err(|error| format!("无法读取扩展目录：{error}"))
                         });
                     }
                     result => {
-                        self.extension_busy = false;
                         self.emit_extensions(None, result.err().map(|error| format!("无法选择扩展目录：{error}")));
                     }
                 }
@@ -3045,19 +3088,22 @@ impl App {
                         return;
                     }
                 };
-                self.extension_candidate = None;
-                self.extension_busy = true;
-                self.emit_extensions(None, None);
-                let root = self.extensions_root.clone();
-                let proxy = self.proxy.clone();
-                std::thread::spawn(move || {
-                    let prepared = extensions::prepare_store(&root, &id, &runtime)
-                        .map_err(|error| format!("无法准备商店扩展：{error}"));
-                    let _ = proxy.send_event(Event::ExtensionPrepared(prepared));
+                self.prepare_extension(move |root| {
+                    extensions::prepare_store(root, &id, &runtime)
+                        .map_err(|error| format!("无法准备商店扩展：{error}"))
                 });
                 return;
             }
-            Command::ListExtensions => self.extension_profile(|profile, root| profile.list(root)),
+            Command::ListExtensions => {
+                match self.extension_profile(|profile, root| profile.list(root)) {
+                    Ok(items) => self.publish_extensions(Some(items)),
+                    Err(error) if self.extension_popup.is_none() => {
+                        self.emit_extensions(None, Some(format!("无法读取扩展列表：{error}")));
+                    }
+                    Err(_) => self.publish_extensions(None),
+                }
+                return;
+            }
             Command::ReviewExtension { ticket, install } => {
                 if !self.extension_candidate.as_ref().is_some_and(|candidate| candidate.matches(&ticket)) {
                     self.emit_extensions(None, Some("这次安装确认已失效，请重新选择目录".into()));
@@ -3066,13 +3112,23 @@ impl App {
                 let candidate = self.extension_candidate.take().unwrap();
                 if !install {
                     drop(candidate);
+                    self.extension_popup = None;
                     self.emit_extensions(None, None);
                     return;
                 }
-                self.extension_profile(|profile, root| {
+                let result = self.extension_profile(|profile, root| {
                     profile.install(root, candidate)?;
                     profile.list(root)
-                })
+                });
+                if result.is_ok() && self.extension_popup.take().is_some() {
+                    let message = match self.state.settings.language.as_str() {
+                        "en" => "Extension installed",
+                        "zh-TW" => "已安裝擴充功能",
+                        _ => "扩展已安装",
+                    };
+                    self.toast(message, None);
+                }
+                result
             }
             Command::EnableExtension { id, enabled } => self.extension_profile(|profile, root| {
                 profile.enable(root, &id, enabled)?;
@@ -3187,6 +3243,9 @@ impl App {
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
         ) { return; }
         if let Command::PrepareChromeStoreTab { id, expected_url } = &c {
+            if self.extension_preparation.is_some() || self.extension_popup.is_some() || self.quit_pending {
+                return;
+            }
             let extension_id = self.state.active()
                 .filter(|tab| &tab.id == id || tab.split_with.as_ref() == Some(id))
                 .and_then(|_| self.pages.get(id))
@@ -3198,14 +3257,17 @@ impl App {
                     chrome_store::detail_id(&url::Url::parse(&current).ok()?).map(str::to_owned)
                 });
             if let Some(input) = extension_id {
-                self.command(Command::OpenSettings { pane: Some("extensions".into()) }, event_loop);
+                let popup = uuid::Uuid::new_v4();
+                self.extension_popup = Some(popup);
+                self.extension_candidate = None;
                 self.extension_command(Command::PrepareChromeStoreExtension { input });
+                self.capture_extension_background(popup);
             } else if expected_url.is_none() {
                 self.error("当前标签页不是 Chrome 网上应用店的扩展详情页");
             }
             return;
         }
-        if matches!(c, Command::ListExtensions | Command::ChooseExtension | Command::PrepareChromeStoreExtension { .. } | Command::ReviewExtension { .. }
+        if matches!(c, Command::ListExtensions | Command::ChooseExtension | Command::PrepareChromeStoreExtension { .. } | Command::ReviewExtension { .. } | Command::DismissExtensionPopup
             | Command::EnableExtension { .. } | Command::RemoveExtension { .. }) {
             self.extension_command(c);
             return;
@@ -3648,6 +3710,7 @@ impl App {
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
                 self.emit(json!({"type":"quitConfirmation","visible":self.quit_pending}));
+                self.publish_extensions(None);
                 self.publish_downloads();
                 self.publish_peek();
                 self.publish_sleep_state();
@@ -4193,14 +4256,23 @@ impl ApplicationHandler<Event> for App {
                 let _ = request.reply.send(response);
             }
             Event::RestoreKeyboardFocus => self.restore_keyboard_focus(),
-            Event::ExtensionPrepared(result) => {
-                self.extension_busy = false;
+            Event::ExtensionPrepared(request, result) => {
+                if self.extension_preparation != Some(request) { return; }
+                self.extension_preparation = None;
                 match result {
                     Ok(prepared) => {
                         self.extension_candidate = Some(prepared);
                         self.emit_extensions(None, None);
                     }
                     Err(error) => self.emit_extensions(None, Some(error)),
+                }
+            }
+            Event::ExtensionBackground(popup, rect, image) => {
+                if self.extension_popup == Some(popup) {
+                    self.emit(json!({
+                        "type": "extensionBackground", "image": image,
+                        "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
+                    }));
                 }
             }
             Event::PermissionsChanged => {}, // Wake the event loop so about_to_wait reconciles once.

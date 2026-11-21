@@ -352,10 +352,10 @@ mod tests {
             "folder./child",
             "nested//file",
         ] {
-            assert!(zip_path(name).is_none(), "{name}");
+            assert!(package_path(name).is_none(), "{name}");
         }
         assert_eq!(
-            zip_path("_locales/en/messages.json").unwrap(),
+            package_path("_locales/en/messages.json").unwrap(),
             PathBuf::from("_locales/en/messages.json")
         );
     }
@@ -427,7 +427,7 @@ fn verify_with_publisher<'a>(
     })
 }
 
-fn zip_path(name: &str) -> Option<PathBuf> {
+pub(crate) fn package_path(name: &str) -> Option<PathBuf> {
     let mut relative = PathBuf::new();
     for component in name.trim_end_matches('/').split('/') {
         if component.is_empty()
@@ -472,7 +472,7 @@ pub fn unpack(
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
         let name = std::str::from_utf8(entry.name_raw())?;
-        let relative = zip_path(name).ok_or("商店安装包包含无效路径")?;
+        let relative = package_path(name).ok_or("商店安装包包含无效路径")?;
         if entry.is_symlink() {
             return Err("商店安装包包含符号链接".into());
         }

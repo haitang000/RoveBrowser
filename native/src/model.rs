@@ -247,6 +247,8 @@ pub enum Command {
     },
     #[serde(rename = "extensionsReview")]
     ReviewExtension { ticket: String, install: bool },
+    #[serde(rename = "extensionsDismissPopup")]
+    DismissExtensionPopup,
     #[serde(rename = "extensionsEnable")]
     EnableExtension { id: String, enabled: bool },
     #[serde(rename = "extensionsRemove")]

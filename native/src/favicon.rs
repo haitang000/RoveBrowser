@@ -148,6 +148,13 @@ fn icon_url(bytes: &[u8]) -> Option<String> {
             STANDARD.encode(bytes)
         ));
     }
+    raster_icon_url(bytes)
+}
+
+pub(crate) fn raster_icon_url(bytes: &[u8]) -> Option<String> {
+    if bytes.len() > MAX_ICON {
+        return None;
+    }
     let format = image::guess_format(bytes).ok()?;
     if !matches!(
         format,

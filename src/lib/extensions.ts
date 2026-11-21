@@ -22,6 +22,7 @@ export interface ExtensionItem {
   version: string;
   enabled: boolean;
   source: ExtensionSource;
+  icon?: string;
 }
 
 export interface ExtensionReview {
@@ -29,6 +30,7 @@ export interface ExtensionReview {
   name: string;
   version: string;
   source: ExtensionSource;
+  icon?: string;
   permissions: string[];
   hosts: string[];
 }
@@ -36,6 +38,7 @@ export interface ExtensionReview {
 export interface ExtensionsState {
   items: ExtensionItem[] | null;
   review: ExtensionReview | null;
+  popup: boolean;
   busy: boolean;
   error: string | null;
 }

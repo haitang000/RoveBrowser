@@ -19,6 +19,7 @@ import BrowserMenu from "./BrowserMenu.vue";
 import QuitDialog from "./QuitDialog.vue";
 import SplitControls from "./SplitControls.vue";
 import PermissionPrompt from "./PermissionPrompt.vue";
+import ExtensionInstallDialog from "./ExtensionInstallDialog.vue";
 import { browserKey } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
 import { frameOf } from "../../lib/space-look";
@@ -43,7 +44,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const modals = ".quit-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer";
+  const modals = ".quit-scrim, .extension-install-scrim, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer";
   const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .permission-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer, .split-controls, .split-controls-dismiss`);
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
@@ -61,7 +62,7 @@ function report() {
     return surfaceRegion(bounds, element.classList.contains("reader-options-layer") ? 24 : shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout, downloads });
-  const active = b.quitOpen ? "quit" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.splitControls ? "splitControls" : b.permissionPrompt ? "permission" : b.findOpen ? "find" : "";
+  const active = b.quitOpen ? "quit" : b.extensions.popup ? "extension" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.splitControls ? "splitControls" : b.permissionPrompt ? "permission" : b.findOpen ? "find" : "";
   const nextFocus = active === "permission" ? b.permissionPrompt?.id ?? active : active;
   const focus = Boolean(active && nextFocus !== focusKey);
   focusKey = nextFocus;
@@ -70,7 +71,7 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus, downloads });
   }
   if (focus) {
-    const selector = active === "quit" ? ".quit-dialog" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
+    const selector = active === "quit" ? ".quit-dialog" : active === "extension" ? ".extension-install-dialog [autofocus]" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }
@@ -102,5 +103,6 @@ onBeforeUnmount(() => {
   <ReaderControls />
   <SplitControls />
   <PermissionPrompt v-if="b.permissionPrompt" :key="b.permissionPrompt.id" :prompt="b.permissionPrompt" />
+  <ExtensionInstallDialog v-if="b.extensions.popup && !b.quitOpen" />
   <QuitDialog v-if="b.quitOpen" />
 </template>
