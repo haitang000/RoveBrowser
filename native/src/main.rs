@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod agent_bridge;
+mod agent_page;
 mod agent_tabs;
 mod bookmarks;
 mod caption;
@@ -46,6 +47,7 @@ mod suggestions;
 mod thumbnails;
 mod update_install;
 mod updates;
+mod web_script;
 mod web_settings;
 fn main() {
     if update_install::run_helper() {

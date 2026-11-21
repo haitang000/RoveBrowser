@@ -1,4 +1,5 @@
 use crate::{
+    agent_bridge::{self, BrowserCommand},
     chrome_store,
     clip::WindowClip,
     downloads::{DownloadItem, DownloadState, Downloads},
@@ -67,6 +68,7 @@ use wry::{
 };
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../dist");
+const AGENT_TAB_PAGE_SIZE: usize = 8;
 // Match theme.css --surface, including the empty frame before a document paints.
 fn app_icon() -> Result<Icon, Box<dyn std::error::Error>> {
     let image = image::load_from_memory(include_bytes!("../assets/icon.png"))?.into_rgba8();
@@ -3337,6 +3339,115 @@ impl App {
         Ok(())
     }
 
+    fn agent_browser(
+        &mut self,
+        command: BrowserCommand,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<serde_json::Value, &'static str> {
+        match command {
+            BrowserCommand::List { offset } => {
+                let total = self.state.tabs.len();
+                let start = offset.min(total);
+                let end = (start + AGENT_TAB_PAGE_SIZE).min(total);
+                let tabs: Vec<_> = self.state.tabs[start..end]
+                    .iter()
+                    .map(|tab| {
+                        let title = tab.custom_title.as_deref().unwrap_or(&tab.title);
+                        let url = (tab.url.len() <= agent_bridge::MAX_URL_BYTES
+                            && !tab.url.chars().any(char::is_control))
+                        .then_some(tab.url.as_str());
+                        json!({
+                            "id": tab.id,
+                            "spaceId": tab.space_id,
+                            "title": title.chars().take(512).collect::<String>(),
+                            "url": url,
+                            "loading": tab.loading,
+                        })
+                    })
+                    .collect();
+                Ok(json!({
+                    "tabs": tabs,
+                    "activeTab": self.state.active_tab,
+                    "activeSpace": self.state.active_space,
+                    "nextOffset": (end < total).then_some(end),
+                }))
+            }
+            BrowserCommand::Open { url } => {
+                let url = agent_bridge::web_url(&url).ok_or("invalid_url")?;
+                if self.state.tabs.len() >= model::MAX_TABS {
+                    return Err("tab_limit");
+                }
+                self.command(Command::New { url }, Some(event_loop));
+                Ok(json!({"id": self.state.active_tab}))
+            }
+            BrowserCommand::Navigate { id, url } => {
+                let url = agent_bridge::web_url(&url).ok_or("invalid_url")?;
+                let tab = self.state.tabs.iter().find(|tab| tab.id == id).ok_or("tab_not_found")?;
+                let visible = self.state.visible_tab(&id);
+                let page = self.pages.get(&id);
+                let deferred = !visible && page.is_none();
+                if tab.url != url {
+                    if let Some(page) = page {
+                        if page.sleep_pending.get() {
+                            return Err("tab_busy");
+                        }
+                        if page.sleeping.get() {
+                            page.wake();
+                            self.emit(json!({"type": "sleep", "id": id, "asleep": false}));
+                        }
+                        self.sleep_queue.retain(|queued| queued != &id);
+                    }
+                    let command = if visible {
+                        Command::Navigate { id: Some(id.clone()), url }
+                    } else {
+                        Command::NavigateBackgroundTab { id: id.clone(), url }
+                    };
+                    self.command(command, Some(event_loop));
+                }
+                Ok(json!({"id": id, "deferred": deferred}))
+            }
+            BrowserCommand::Activate { id } => {
+                if !self.state.tabs.iter().any(|tab| tab.id == id) {
+                    return Err("tab_not_found");
+                }
+                self.command(Command::Activate { id: id.clone() }, Some(event_loop));
+                Ok(json!({"id": id, "activeTab": self.state.active_tab}))
+            }
+            BrowserCommand::Close { id } => {
+                if !self.state.tabs.iter().any(|tab| tab.id == id) {
+                    return Err("tab_not_found");
+                }
+                self.command(Command::Close { id: Some(id.clone()) }, Some(event_loop));
+                Ok(json!({"id": id, "activeTab": self.state.active_tab}))
+            }
+        }
+    }
+
+    fn agent_page_target(&self, id: &str) -> Result<(&WebView, String), &'static str> {
+        let tab = self.state.tabs.iter().find(|tab| tab.id == id).ok_or("tab_not_found")?;
+        if !self.state.visible_tab(id) || self.overlay || self.peek.is_some() {
+            return Err("tab_not_visible");
+        }
+        if !model::is_web(&tab.url) || self.reader.as_ref().is_some_and(|reader| reader.id == id) {
+            return Err("page_unavailable");
+        }
+        let page = self.pages.get(id).ok_or("page_not_ready")?;
+        if self.fullscreen_page.as_ref().is_some_and(|(active, _)| active != id) || !page.visible.get() {
+            return Err("tab_not_visible");
+        }
+        if page.error_page.is_failed() {
+            return Err("page_unavailable");
+        }
+        let url = page.view.url().map_err(|_| "page_not_ready")?;
+        if tab.loading || url != tab.url {
+            return Err("page_not_ready");
+        }
+        if agent_bridge::web_url(&url).is_none() {
+            return Err("page_unavailable");
+        }
+        Ok((&page.view, url))
+    }
+
     fn command(&mut self, mut c: Command, event_loop: Option<&ActiveEventLoop>) {
         if let Command::ResizeAppearance { appearance } = &c {
             if appearance.angle.is_finite() {
@@ -4502,14 +4613,30 @@ impl ApplicationHandler<Event> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
             Event::Agent(request) => {
-                use crate::agent_bridge::Response;
+                use agent_bridge::{Command as AgentCommand, Response};
                 let response = if Instant::now() >= request.deadline {
                     Response::error("timeout")
                 } else if let Some(window) = self.window.as_ref().filter(|_| {
                     self.ready && self.state.onboarding.completed && !self.quit_pending && !self.updating
                 }) {
-                    self.agent_tabs.get_or_insert_with(|| crate::agent_tabs::Tabs::new(self.agent_data.clone()))
-                        .run(window, request.command)
+                    match request.command {
+                        AgentCommand::Background(command) => self
+                            .agent_tabs
+                            .get_or_insert_with(|| crate::agent_tabs::Tabs::new(self.agent_data.clone()))
+                            .run(window, command),
+                        AgentCommand::Browser(command) => self
+                            .agent_browser(command, event_loop)
+                            .map_or_else(Response::error, Response::ok),
+                        AgentCommand::Page(command) => {
+                            match self.agent_page_target(command.tab_id()) {
+                                Ok((view, url)) => crate::agent_page::run(
+                                    view, &url, command, request.deadline, request.reply,
+                                ),
+                                Err(code) => { let _ = request.reply.try_send(Response::error(code)); }
+                            }
+                            return;
+                        }
+                    }
                 } else {
                     Response::error("unavailable")
                 };

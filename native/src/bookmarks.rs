@@ -226,7 +226,7 @@ impl State {
             .iter()
             .filter(|id| !self.tabs.iter().any(|t| t.bookmark_id.as_ref() == Some(id)))
             .count();
-        if self.tabs.len() + missing > 256 {
+        if self.tabs.len() + missing > crate::model::MAX_TABS {
             return Err("已达到 256 个标签页上限".into());
         }
         let mut live = vec![];

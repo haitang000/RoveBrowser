@@ -3,10 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashSet, rc::Rc};
-use webview2_com::{
-    CallDevToolsProtocolMethodCompletedHandler, Microsoft::Web::WebView2::Win32::ICoreWebView2,
-};
-use windows::core::HSTRING;
+use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -71,90 +68,8 @@ pub struct Article {
     pub url: String,
 }
 
-type Reply = Rc<dyn Fn(Option<Value>)>;
-fn protocol(core: &ICoreWebView2, method: &str, parameters: Value, reply: Reply) {
-    let failed = reply.clone();
-    let handler =
-        CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |error, result| {
-            // Bound renderer-owned data before parsing it. Nothing returned is a host command.
-            let value = if error.is_ok() {
-                let text = result.to_string();
-                if text.len() <= 8 * 1024 * 1024 {
-                    serde_json::from_str(&text).ok()
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            reply(value);
-            Ok(())
-        }));
-    // SAFETY: WebView2 and its callbacks stay on the owning UI thread.
-    if unsafe {
-        core.CallDevToolsProtocolMethod(
-            &HSTRING::from(method),
-            &HSTRING::from(parameters.to_string()),
-            &handler,
-        )
-    }
-    .is_err()
-    {
-        failed(None);
-    }
-}
-
-/// A separate JS world, as WebKit's .defaultClient: sites cannot replace our
-/// parser or cache. No remote debugger or page message bridge is required.
-pub fn evaluate(core: &ICoreWebView2, expression: String, reply: Reply) {
-    let core = core.clone();
-    let frame_core = core.clone();
-    protocol(
-        &core,
-        "Page.getFrameTree",
-        json!({}),
-        Rc::new(move |tree| {
-            let Some(frame) = tree
-                .as_ref()
-                .and_then(|v| v["frameTree"]["frame"]["id"].as_str())
-            else {
-                reply(None);
-                return;
-            };
-            let eval_core = frame_core.clone();
-            let expression = expression.clone();
-            let reply = reply.clone();
-            protocol(
-                &frame_core,
-                "Page.createIsolatedWorld",
-                json!({"frameId": frame, "worldName": "Rove Reader"}),
-                Rc::new(move |world| {
-                    let Some(context) = world
-                        .as_ref()
-                        .and_then(|v| v["executionContextId"].as_u64())
-                    else {
-                        reply(None);
-                        return;
-                    };
-                    let reply = reply.clone();
-                    protocol(
-                        &eval_core,
-                        "Runtime.evaluate",
-                        json!({"contextId": context, "expression": expression, "returnByValue": true, "timeout": 3000}),
-                        Rc::new(move |result| {
-                            reply(result.and_then(|v| {
-                                if v.get("exceptionDetails").is_none() {
-                                    v["result"].get("value").cloned()
-                                } else {
-                                    None
-                                }
-                            }));
-                        }),
-                    );
-                }),
-            );
-        }),
-    );
+fn evaluate(core: &ICoreWebView2, expression: String, reply: crate::web_script::Reply) {
+    crate::web_script::evaluate(core, "Rove Reader", expression, || true, reply);
 }
 
 pub fn probe(core: &ICoreWebView2, url: &str, report: impl Fn(bool) + 'static) {

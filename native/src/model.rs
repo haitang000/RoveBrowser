@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 pub const MAX_FAVORITES: usize = 8;
+pub const MAX_TABS: usize = 256;
 /// Same ladder as Zigzag's `BrowserActions.zoomSteps`.
 pub const ZOOM_STEPS: [f64; 13] = [
     0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
@@ -328,6 +329,9 @@ pub enum Command {
     },
     #[serde(rename = "navigate")]
     Navigate { url: String, id: Option<String> },
+    // The local Agent bridge can target tabs outside the visible panes.
+    #[serde(skip)]
+    NavigateBackgroundTab { url: String, id: String },
     #[serde(rename = "activate")]
     Activate { id: String },
     #[serde(rename = "close")]
@@ -824,7 +828,7 @@ impl State {
     }
 
     fn new_tab_with_url(&mut self, url: String) -> Result<(), String> {
-        if self.tabs.len() >= 256 {
+        if self.tabs.len() >= MAX_TABS {
             return Err("已达到 256 个标签页上限".into());
         }
         let title = if crate::settings::is_settings(&url) { "设置".into() } else { url::Url::parse(&url)
@@ -850,6 +854,17 @@ impl State {
         });
         self.active_tab = id;
         self.remember_active();
+        Ok(())
+    }
+    fn navigate_tab(&mut self, id: &str, input: &str) -> Result<(), String> {
+        let url = normalize_with(input, &self.settings)?;
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
+            tab.url = url;
+            if crate::settings::is_settings(&tab.url) {
+                tab.title = "设置".into();
+            }
+            tab.favicon = None;
+        }
         Ok(())
     }
     fn open_tab_after(&mut self, id: &str, input: &str) -> Result<(), String> {
@@ -1187,15 +1202,11 @@ impl State {
                 self.new_tab_with_url(url.clone())?;
             }
             Command::Navigate { url, id } => {
-                let id = id.as_deref().unwrap_or(&self.active_tab);
-                if !self.visible_tab(id) { return Ok(()); }
-                let u = normalize_with(url, &self.settings)?;
-                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
-                    t.url = u;
-                    if crate::settings::is_settings(&t.url) { t.title = "设置".into(); }
-                    t.favicon = None
-                }
+                let id = id.clone().unwrap_or_else(|| self.active_tab.clone());
+                if !self.visible_tab(&id) { return Ok(()); }
+                self.navigate_tab(&id, url)?;
             }
+            Command::NavigateBackgroundTab { url, id } => self.navigate_tab(id, url)?,
             Command::Activate { id } => {
                 if self.bookmark(id).is_some() {
                     self.open_bookmark(id)?;

@@ -1,5 +1,5 @@
 //! Agent-owned WebViews live outside the browser's tab, focus and layout state.
-use crate::agent_bridge::{Command, Response};
+use crate::agent_bridge::{web_url, BackgroundCommand as Command, Response};
 use serde_json::{json, Value};
 use std::{cell::Cell, path::PathBuf, rc::Rc};
 use webview2_com::{
@@ -159,13 +159,6 @@ impl Tab {
         });
         json!({"id": self.id, "load": status, "url": url, "title": title})
     }
-}
-
-fn web_url(raw: &str) -> Option<String> {
-    if raw.chars().any(char::is_control) {
-        return None;
-    }
-    crate::import::web_url(raw).filter(|url| url.len() <= 8192)
 }
 
 fn configure(view: &WebView, load: &Rc<Cell<Load>>) -> windows::core::Result<()> {
