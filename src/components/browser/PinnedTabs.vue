@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { pinFolderById } from "../../lib/pin-folders";
+import { PIN_FOLDER_COLORS, pinFolderById } from "../../lib/pin-folders";
 import { useTabDrag } from "../../lib/tab-drag";
 import type { PinFolder, Tab } from "../../lib/types";
 import type { TabRow } from "../../lib/tab-rows";
@@ -38,8 +38,8 @@ function openMenu(event: MouseEvent, id?: string) {
   const x = event.type === "contextmenu" ? event.clientX : anchor.left;
   const y = event.type === "contextmenu" ? event.clientY : anchor.bottom + 4;
   b.contextMenu = {
-    x: Math.max(8, Math.min(x, innerWidth - 232)),
-    y: Math.max(32, Math.min(y, innerHeight - 160)),
+    x,
+    y,
     pinFolder: { spaceId: props.spaceId, id },
   };
 }
@@ -64,7 +64,8 @@ function openMenu(event: MouseEvent, id?: string) {
           <button type="button" class="pin-folder-toggle" :aria-expanded="!folder.collapsed" :title="folder.name"
             :aria-description="folder.collapsed && containsActive(folder) ? '包含当前网页' : undefined" @click="toggle(folder)">
             <Icon name="chevronDown" :size="12" />
-            <Icon name="folder" :size="16" />
+            <Icon name="folder" :size="16" class="pin-folder-icon" :data-color="folder.color ?? 'default'"
+              :style="{ '--folder-color': PIN_FOLDER_COLORS[folder.color ?? 'default'].fill }" />
             <span>{{ folder.name }}</span>
           </button>
           <button type="button" class="pin-folder-action pin-folder-more" :aria-label="`${folder.name}的文件夹操作`"
@@ -109,6 +110,10 @@ function openMenu(event: MouseEvent, id?: string) {
   text-align: left;
 }
 .pin-folder-toggle > svg { flex-shrink: 0; opacity: .75; }
+.pin-folder-toggle > .pin-folder-icon:not([data-color="default"]) {
+  color: color-mix(in srgb, var(--folder-color) 82%, var(--ink));
+  opacity: 1;
+}
 .pin-folder-toggle[aria-expanded="false"] > svg:first-child { transform: rotate(-90deg); }
 .pin-folder-toggle > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pin-folder-action {

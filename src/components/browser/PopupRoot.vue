@@ -70,7 +70,7 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus, downloads });
   }
   if (focus) {
-    const selector = active === "quit" ? ".quit-dialog" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button";
+    const selector = active === "quit" ? ".quit-dialog" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
     document.querySelector<HTMLElement>(selector)?.focus();
   }
 }

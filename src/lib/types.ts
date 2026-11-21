@@ -77,6 +77,7 @@ export interface Favorite {
 export interface PinFolder {
   id: string;
   name: string;
+  color?: import("./pin-folders").PinFolderColor;
   collapsed: boolean;
   pins: string[];
 }

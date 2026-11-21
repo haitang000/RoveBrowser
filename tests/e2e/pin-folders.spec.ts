@@ -16,7 +16,17 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("folders accept a drop while collapsed and can be renamed or dissolved without losing pins", async ({ page }) => {
-  const folder = await createFolder(page, "项目");
+  await page.getByRole("button", { name: "新建文件夹", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "新建文件夹" });
+  const input = editor.getByRole("textbox", { name: "文件夹名称" });
+  await expect(input).toBeFocused();
+  await expect(editor.getByRole("button", { name: "创建文件夹" })).toBeDisabled();
+  await input.fill("项目");
+  await editor.getByTitle("天蓝色").click();
+  await expect(editor.getByRole("radio", { name: "天蓝色" })).toBeChecked();
+  await editor.getByRole("button", { name: "创建文件夹" }).click();
+  const folder = page.getByRole("button", { name: "项目", exact: true });
+  await expect(folder.locator(".pin-folder-icon")).toHaveAttribute("data-color", "sky");
   const pin = root(page).locator('[data-bookmark-id="pin-wiki"]');
   const liveId = await pin.getAttribute("data-tab-id");
   await folder.click();
@@ -27,15 +37,42 @@ test("folders accept a drop while collapsed and can be renamed or dissolved with
   await expect(folderRows(page, "项目").getByRole("tab", { name: "Wikipedia" })).toHaveAttribute("data-tab-id", liveId!);
 
   await page.getByRole("button", { name: "项目的文件夹操作" }).click();
-  await page.getByRole("menuitem", { name: "重命名文件夹" }).click();
+  await page.getByRole("menuitem", { name: "编辑文件夹" }).click();
+  await expect(page.getByRole("radio", { name: "天蓝色" })).toBeChecked();
+  await page.getByTitle("紫色").click();
+  await page.getByRole("button", { name: "取消" }).click();
+  await expect(folder.locator(".pin-folder-icon")).toHaveAttribute("data-color", "sky");
+
+  await page.getByRole("button", { name: "项目的文件夹操作" }).click();
+  await page.getByRole("menuitem", { name: "编辑文件夹" }).click();
   await page.getByRole("textbox", { name: "文件夹名称" }).fill("参考");
-  await page.getByRole("button", { name: "保存名称" }).click();
+  await page.getByTitle("青绿色").click();
+  await page.getByRole("button", { name: "保存修改" }).click();
+  await expect(page.getByRole("button", { name: "参考", exact: true }).locator(".pin-folder-icon")).toHaveAttribute("data-color", "teal");
   await expect(folderRows(page, "参考").getByRole("tab", { name: "Wikipedia" })).toBeVisible();
 
   await page.getByRole("button", { name: "参考的文件夹操作" }).click();
   await page.getByRole("menuitem", { name: "解散文件夹" }).click();
   await expect(root(page).locator(".pin-folder")).toHaveCount(0);
   await expect(pin).toHaveAttribute("data-tab-id", liveId!);
+});
+
+test("the folder editor supports keyboard color selection with reduced motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "新建文件夹", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "新建文件夹" });
+  const input = editor.getByRole("textbox", { name: "文件夹名称" });
+  await expect(input).toBeFocused();
+  await expect(editor).toHaveCSS("animation-name", "none");
+  await input.press("Tab");
+  const defaultColor = editor.getByRole("radio", { name: "默认" });
+  await expect(defaultColor).toBeFocused();
+  await defaultColor.press("ArrowRight");
+  const yellow = editor.getByRole("radio", { name: "黄色" });
+  await expect(yellow).toBeChecked();
+  await expect(editor.locator("input:checked + .folder-color-bubble")).toHaveCSS("animation-name", "none");
+  await yellow.press("Escape");
+  await expect(editor).toHaveCount(0);
 });
 
 test("folders reorder among root pins and their contents can move by drag or menu", async ({ page }) => {

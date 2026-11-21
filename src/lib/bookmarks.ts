@@ -4,7 +4,7 @@ import { favoriteUrl, MAX_FAVORITES } from "./favorites";
 import { sameOrigin } from "./favicon";
 import { normalizeSettingsUrl } from "./settings";
 import { nowSeconds } from "./tab-meta";
-import { movePinEntries, pinFolderById, pinFolderName } from "./pin-folders";
+import { movePinEntries, pinFolderById, pinFolderColor, pinFolderName } from "./pin-folders";
 
 export function samePinnedUrl(a: string, b: string) {
   const key = (input: string) => {
@@ -240,11 +240,12 @@ export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string)
     case "pinFolderCreate": {
       const spaceId = String(c.spaceId);
       const name = pinFolderName(c.name);
+      const color = pinFolderColor(c.color);
       if (!s.spaces.some((space) => space.id === spaceId)) throw Error("工作区不存在");
       const layouts = s.pinLayouts ??= {};
       const layout = layouts[spaceId] ??= { root: s.pins!.filter((pin) => pin.spaceId === spaceId).map((pin) => pin.id), folders: [] };
       const id = crypto.randomUUID();
-      layout.folders.push({ id, name, collapsed: false, pins: [] });
+      layout.folders.push({ id, name, color, collapsed: false, pins: [] });
       layout.root.push(id);
       break;
     }
@@ -254,8 +255,11 @@ export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string)
       const layout = s.pinLayouts?.[String(c.spaceId)];
       const folder = layout?.folders.find((folder) => folder.id === id);
       if (!layout || !folder) throw Error("文件夹不存在");
-      if (c.type === "pinFolderRename") folder.name = pinFolderName(c.name);
-      else if (c.type === "pinFolderCollapse") folder.collapsed = c.collapsed === true;
+      if (c.type === "pinFolderRename") {
+        const name = pinFolderName(c.name);
+        const color = pinFolderColor(c.color ?? folder.color);
+        Object.assign(folder, { name, color });
+      } else if (c.type === "pinFolderCollapse") folder.collapsed = c.collapsed === true;
       else {
         const at = layout.root.indexOf(id);
         layout.root.splice(at, 1, ...folder.pins);

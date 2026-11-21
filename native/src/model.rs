@@ -342,9 +342,21 @@ pub enum Command {
         space_id: Option<String>,
     },
     #[serde(rename = "pinFolderCreate")]
-    CreatePinFolder { #[serde(rename = "spaceId")] space_id: String, name: String },
+    CreatePinFolder {
+        #[serde(rename = "spaceId")]
+        space_id: String,
+        name: String,
+        #[serde(default)]
+        color: crate::pin_folders::PinFolderColor,
+    },
     #[serde(rename = "pinFolderRename")]
-    RenamePinFolder { #[serde(rename = "spaceId")] space_id: String, id: String, name: String },
+    RenamePinFolder {
+        #[serde(rename = "spaceId")]
+        space_id: String,
+        id: String,
+        name: String,
+        color: Option<crate::pin_folders::PinFolderColor>,
+    },
     #[serde(rename = "pinFolderCollapse")]
     CollapsePinFolder { #[serde(rename = "spaceId")] space_id: String, id: String, collapsed: bool },
     #[serde(rename = "pinFolderRemove")]

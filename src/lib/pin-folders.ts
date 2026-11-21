@@ -1,5 +1,28 @@
 import type { BrowserState, PinLayout } from "./types";
 
+export const PIN_FOLDER_COLORS = {
+  default: { label: "默认", fill: "var(--ink)" },
+  yellow: { label: "黄色", fill: "#f4be16" },
+  orange: { label: "橙色", fill: "#f99a24" },
+  coral: { label: "珊瑚红", fill: "#f66451" },
+  pink: { label: "粉色", fill: "#ec52af" },
+  orchid: { label: "紫红色", fill: "#ae61e7" },
+  violet: { label: "紫色", fill: "#7a5cdc" },
+  sky: { label: "天蓝色", fill: "#399cf1" },
+  teal: { label: "青绿色", fill: "#00b89f" },
+  green: { label: "绿色", fill: "#65b927" },
+} as const;
+
+export type PinFolderColor = keyof typeof PIN_FOLDER_COLORS;
+
+export function pinFolderColor(input: unknown): PinFolderColor {
+  if (input == null) return "default";
+  if (typeof input === "string" && Object.prototype.hasOwnProperty.call(PIN_FOLDER_COLORS, input)) {
+    return input as PinFolderColor;
+  }
+  throw Error("文件夹颜色无效");
+}
+
 export function pinFolderById(layout?: PinLayout) {
   return new Map(layout?.folders.flatMap((folder) => folder.pins.map((id) => [id, folder.id] as const)));
 }

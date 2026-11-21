@@ -14,8 +14,26 @@ pub struct PinFolder {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub color: PinFolderColor,
+    #[serde(default)]
     pub collapsed: bool,
     pub pins: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PinFolderColor {
+    #[default]
+    Default,
+    Yellow,
+    Orange,
+    Coral,
+    Pink,
+    Orchid,
+    Violet,
+    Sky,
+    Teal,
+    Green,
 }
 
 impl PinLayout {
@@ -247,7 +265,7 @@ impl State {
 
     pub fn apply_pin_folder_command(&mut self, command: &Command) -> Result<bool, String> {
         let (space, id) = match command {
-            Command::CreatePinFolder { space_id, name } => {
+            Command::CreatePinFolder { space_id, name, color } => {
                 let name = folder_name(name)?;
                 if !self.spaces.iter().any(|space| space.id == *space_id) {
                     return Err("工作区不存在".into());
@@ -269,6 +287,7 @@ impl State {
                 layout.folders.push(PinFolder {
                     id,
                     name,
+                    color: *color,
                     collapsed: false,
                     pins: Vec::new(),
                 });
@@ -297,8 +316,12 @@ impl State {
         };
         let layout = self.pin_layouts.get_mut(space).ok_or("文件夹不存在")?;
         match command {
-            Command::RenamePinFolder { name, .. } => {
-                layout.folder_mut(id)?.name = folder_name(name)?
+            Command::RenamePinFolder { name, color, .. } => {
+                let folder = layout.folder_mut(id)?;
+                folder.name = folder_name(name)?;
+                if let Some(color) = color {
+                    folder.color = *color;
+                }
             }
             Command::CollapsePinFolder { collapsed, .. } => {
                 layout.folder_mut(id)?.collapsed = *collapsed
@@ -334,6 +357,7 @@ mod tests {
             .apply(&Command::CreatePinFolder {
                 space_id: space.into(),
                 name: "项目".into(),
+                color: PinFolderColor::default(),
             })
             .unwrap();
         state.pin_layouts[space].folders.last().unwrap().id.clone()
@@ -352,6 +376,14 @@ mod tests {
         state.pins[0].split_with = Some(second.clone());
         state.pins[1].split_with = Some(first.clone());
         let folder = create(&mut state, "personal");
+        state
+            .apply(&Command::RenamePinFolder {
+                space_id: "personal".into(),
+                id: folder.clone(),
+                name: "资料".into(),
+                color: Some(PinFolderColor::Teal),
+            })
+            .unwrap();
         state
             .apply(&Command::PlacePin {
                 id: second.clone(),
@@ -373,6 +405,7 @@ mod tests {
         let layout = &restored.pin_layouts["personal"];
         assert_eq!(layout.root, std::slice::from_ref(&folder));
         assert_eq!(layout.folders[0].pins, [first.clone(), second.clone()]);
+        assert_eq!(layout.folders[0].color, PinFolderColor::Teal);
         assert!(layout.folders[0].collapsed);
         restored
             .apply(&Command::RemovePinFolder {
@@ -394,6 +427,15 @@ mod tests {
             Some(second.as_str())
         );
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn folders_from_older_sessions_default_to_the_theme_color() {
+        let folder: PinFolder = serde_json::from_value(serde_json::json!({
+            "id": "folder", "name": "Old Folder", "pins": []
+        }))
+        .unwrap();
+        assert_eq!(folder.color, PinFolderColor::Default);
     }
 
     #[test]
