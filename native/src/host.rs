@@ -132,7 +132,7 @@ enum Event {
     /// Site icons fetched for saved addresses: the one-time legacy icon upgrade.
     IconsRefreshed(Vec<(String, Option<String>)>),
     Shortcut(String, bool),
-    Open(String),
+    Open(String, String),
     PeekRequest(String, String, Option<Point>),
     PeekSurface(String, u64, Option<String>),
     Suggestions(u64, Vec<String>),
@@ -1122,6 +1122,7 @@ impl App {
         if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
         let proxy = self.proxy.clone();
         let reader_id = id.clone();
+        let source_id = reader_id.clone();
         let initial_document = Cell::new(true);
         let ticket = self.reader_epoch;
         let view = browsing_webview(&mut self.context)
@@ -1141,7 +1142,7 @@ impl App {
             .with_new_window_req_handler({
                 let proxy = self.proxy.clone();
                 move |target, _| {
-                    if model::is_web(&target) { let _ = proxy.send_event(Event::Open(target)); }
+                    if model::is_web(&target) { let _ = proxy.send_event(Event::Open(source_id.clone(), target)); }
                     wry::NewWindowResponse::Deny
                 }
             })
@@ -2382,7 +2383,7 @@ impl App {
             self.state
                 .tabs
                 .iter()
-                .any(|t| &t.id == id && model::is_tab_page(&t.url))
+            .any(|t| &t.id == id && model::is_tab_page(&t.url))
         });
         let sources: HashMap<_, _> = self.state.tabs.iter().map(|t| (t.id.as_str(), t.url.as_str()))
             .chain(self.state.pins.iter().chain(&self.state.favorites).map(|f| (f.id.as_str(), f.url.as_str()))).collect();
@@ -3405,6 +3406,7 @@ impl App {
             && matches!(
                 c,
                 Command::New { .. }
+                    | Command::OpenAfter { .. }
                     | Command::OpenExtensionTab { .. }
                     | Command::Activate { .. }
                     | Command::OpenBookmark { .. }
@@ -3429,7 +3431,7 @@ impl App {
         }
         if matches!(c, Command::OpenSettings { .. }) { self.close_peek(); }
         if matches!(c,
-            Command::New { .. } | Command::OpenExtensionTab { .. }
+            Command::New { .. } | Command::OpenAfter { .. } | Command::OpenExtensionTab { .. }
             | Command::Activate { .. } | Command::OpenBookmark { .. } | Command::Navigate { .. }
             | Command::Close { .. } | Command::CloseOthers { .. } | Command::CloseBelow { .. }
             | Command::SwitchSpace { .. } | Command::CreateSpace { .. } | Command::Restore | Command::Move { .. }
@@ -3443,6 +3445,7 @@ impl App {
             c,
             Command::Activate { .. }
                 | Command::New { .. }
+                | Command::OpenAfter { .. }
                 | Command::OpenExtensionTab { .. }
                 | Command::Navigate { .. }
                 | Command::OpenBookmark { .. }
@@ -3458,6 +3461,7 @@ impl App {
             && matches!(
                 c,
                 Command::New { .. }
+                    | Command::OpenAfter { .. }
                     | Command::OpenExtensionTab { .. }
                     | Command::Activate { .. }
                     | Command::OpenBookmark { .. }
@@ -4192,6 +4196,7 @@ impl App {
                         | Command::OpenBookmark { .. }
                         | Command::SwitchSpace { .. }
                         | Command::New { .. }
+                        | Command::OpenAfter { .. }
                         | Command::OpenExtensionTab { .. }
                 ) {
                     self.refresh_visible_thumbnails();
@@ -4199,6 +4204,7 @@ impl App {
                 if matches!(
                     c,
                     Command::New { .. }
+                        | Command::OpenAfter { .. }
                         | Command::OpenExtensionTab { .. }
                         | Command::Activate { .. }
                         | Command::OpenBookmark { .. }
@@ -4772,7 +4778,7 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::Shortcut(key, shift) => self.shortcut(key, shift),
-            Event::Open(url) => self.command(Command::New { url }, Some(event_loop)),
+            Event::Open(id, url) => self.command(Command::OpenAfter { id, url }, Some(event_loop)),
             Event::Title(id, title) => {
                 let failed = self.pages.get(&id).is_some_and(|p| p.error_page.is_failed());
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
@@ -5235,7 +5241,7 @@ fn register_page_events(
                         let _ = p.send_event(Event::PeekRequest(source_id.clone(), url, point));
                     }
                 } else {
-                    let _ = p.send_event(Event::Open(url));
+                    let _ = p.send_event(Event::Open(source_id.clone(), url));
                 }
             }
         }
@@ -5263,6 +5269,7 @@ fn register_page_events(
         view.webview().add_SourceChanged(&source, &mut token)?;
     }
     let p = proxy.clone();
+    let source_id = id.clone();
     let starting = NavigationStartingEventHandler::create(Box::new(move |_, args| {
         if let Some(args) = args {
             unsafe {
@@ -5289,7 +5296,7 @@ fn register_page_events(
                     && crate::bookmarks::leaves_site(&navigation.current.borrow(), &url)
                 {
                     args.SetCancel(true)?;
-                    let _ = p.send_event(Event::Open(url));
+                    let _ = p.send_event(Event::Open(source_id.clone(), url));
                 }
             }
         }

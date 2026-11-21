@@ -243,6 +243,9 @@ pub enum Command {
     CloseExtensionView,
     #[serde(skip)]
     OpenExtensionTab { url: String },
+    /// Open a page requested by a tab immediately after its source tab.
+    #[serde(skip)]
+    OpenAfter { id: String, url: String },
     #[serde(rename = "extensionsChoose")]
     ChooseExtension,
     #[serde(rename = "extensionsChromeStore")]
@@ -838,6 +841,25 @@ impl State {
         self.remember_active();
         Ok(())
     }
+    fn open_tab_after(&mut self, id: &str, input: &str) -> Result<(), String> {
+        let source = self.tabs.iter().enumerate()
+            .find(|(_, tab)| tab.id == id)
+            .map(|(index, tab)| (index, tab.space_id.clone()));
+        if let Some((index, space_id)) = source {
+            if self.active_space != space_id {
+                self.remember_active();
+                self.active_space = space_id;
+            }
+            self.new_tab(input)?;
+            if let Some(tab) = self.tabs.pop() {
+                let position = (index + 1).min(self.tabs.len());
+                self.tabs.insert(position, tab);
+            }
+        } else {
+            self.new_tab(input)?;
+        }
+        Ok(())
+    }
     /// Remembers the tab the current space is showing, so a later switch back
     /// restores that tab rather than the space's first one.
     fn remember_active(&mut self) {
@@ -1146,6 +1168,7 @@ impl State {
                 }
             }
             Command::New { url } => self.new_tab(url)?,
+            Command::OpenAfter { id, url } => self.open_tab_after(id, url)?,
             Command::OpenExtensionTab { url } if is_extension_page(url) => {
                 self.new_tab_with_url(url.clone())?;
             }
