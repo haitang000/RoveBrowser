@@ -162,6 +162,12 @@ test("GitHub contribution widget validates usernames, retries failures and rende
   await page.getByRole("button", { name: "重试", exact: true }).click();
   await expect(page.locator(".nt-contribution-summary")).toContainText("238");
   await expect(page.locator(".nt-contribution-grid [data-level='2']")).toHaveCount(119);
+  const graphFits = await page.locator(".nt-widget-grid .nt-github").evaluate((widget) => {
+    const graph = widget.querySelector(".nt-contribution-grid")!.getBoundingClientRect();
+    const legend = widget.querySelector(".nt-contribution-legend")!.getBoundingClientRect();
+    return graph.bottom <= legend.top && legend.bottom <= widget.getBoundingClientRect().bottom;
+  });
+  expect(graphFits).toBe(true);
   await page.reload();
   await expect(page.locator(".nt-github-user")).toHaveText("@octocat");
   await expect(page.locator(".nt-contribution-summary")).toContainText("238");
