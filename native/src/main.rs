@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod agent_bridge;
+mod agent_tabs;
 mod bookmarks;
 mod caption;
 mod capture;

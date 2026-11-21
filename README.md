@@ -63,6 +63,8 @@ npm run native:dev
 
 仅预览界面时可运行 `npm run dev`，并打开终端显示的地址。该模式不是真正的浏览器宿主，不能用于验证外部网页和 Windows 原生功能。
 
+原生宿主提供默认关闭的 [Agent 后台标签接口](docs/AGENT_TABS.md)，用于独立于用户会话的标签管理和导航。
+
 ### 构建与打包
 
 ```powershell

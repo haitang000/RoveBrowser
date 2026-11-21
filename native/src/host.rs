@@ -104,6 +104,7 @@ fn browsing_webview(context: &mut WebContext) -> WebViewBuilder<'_> {
 }
 #[derive(Debug)]
 enum Event {
+    Agent(crate::agent_bridge::Request),
     ExternalUrls(Vec<String>),
     ImportSources(Vec<crate::import::Source>),
     ImportRead(Vec<crate::import::Batch>),
@@ -337,6 +338,8 @@ struct UndoBatch {
 }
 struct App {
     _instance: crate::instance::Instance,
+    agent_tabs: Option<crate::agent_tabs::Tabs>,
+    agent_data: PathBuf,
     updating: bool,
     update_offer: Option<crate::updates::Offer>,
     update_message: Option<String>,
@@ -485,6 +488,10 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
     }
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
+    let agent_proxy = proxy.clone();
+    if let Err(error) = crate::agent_bridge::start(move |request| agent_proxy.send_event(Event::Agent(request)).is_ok()) {
+        eprintln!("Rove agent bridge disabled: {error}");
+    }
     let save_proxy = proxy.clone();
     let session_writer = crate::session_writer::SessionWriter::new(&data, move |error| {
         let _ = save_proxy.send_event(Event::StorageWriteError(error));
@@ -505,6 +512,8 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
     }
     let mut app = App {
         _instance: instance,
+        agent_tabs: None,
+        agent_data: data.join("AgentWebView2"),
         updating: false,
         update_offer: None,
         update_message,
@@ -4161,6 +4170,20 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::Agent(request) => {
+                use crate::agent_bridge::Response;
+                let response = if Instant::now() >= request.deadline {
+                    Response::error("timeout")
+                } else if let Some(window) = self.window.as_ref().filter(|_| {
+                    self.ready && self.state.onboarding.completed && !self.quit_pending && !self.updating
+                }) {
+                    self.agent_tabs.get_or_insert_with(|| crate::agent_tabs::Tabs::new(self.agent_data.clone()))
+                        .run(window, request.command)
+                } else {
+                    Response::error("unavailable")
+                };
+                let _ = request.reply.send(response);
+            }
             Event::RestoreKeyboardFocus => self.restore_keyboard_focus(),
             Event::ExtensionPrepared(result) => {
                 self.extension_busy = false;
@@ -4770,6 +4793,7 @@ impl ApplicationHandler<Event> for App {
         event_loop.set_control_flow(due.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.agent_tabs.take();
         self.permissions.inbox.take();
         self.permissions.waiting.clear();
         self.page_save.take();
