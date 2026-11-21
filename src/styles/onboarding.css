@@ -1,5 +1,5 @@
 /* Rove welcome surfaces. Space editor controls keep their shared implementation. */
-[data-onboarding="true"] .window-controls { grid-column: 3; }
+[data-onboarding="true"] .titlebar-actions { grid-column: 3; }
 .onboarding {
   --onboard-paper: #fff;
   --onboard-ink: #141416;

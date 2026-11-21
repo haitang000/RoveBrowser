@@ -2,6 +2,7 @@
 import { useBrowser } from "../../stores/browser";
 import { titlebarDragRegions } from "../../lib/window-chrome";
 import Icon from "../common/Icon.vue";
+import ExtensionIcon from "./ExtensionIcon.vue";
 import PageToolbar from "./PageToolbar.vue";
 import { nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 const props = defineProps<{ split: boolean }>();
@@ -63,7 +64,7 @@ function report() {
     type: "windowChrome",
     maximize: { x: r.x, y: r.y, width: r.width, height: r.height },
     viewportWidth: innerWidth,
-    anchorLeft: props.split && !b.state.sidebarCollapsed,
+    anchorLeft: props.split && !b.state.sidebarCollapsed && !b.pinnedExtensions.length,
     dragRegions,
     ...palette,
   });
@@ -80,7 +81,7 @@ function observeChrome() {
   if (props.split && track) observer.observe(track);
   report();
 }
-watch([() => props.split, () => b.onboardingOpen], observeChrome, { flush: "post" });
+watch([() => props.split, () => b.onboardingOpen, () => b.pinnedExtensions.length], observeChrome, { flush: "post" });
 watch(
   [() => b.state.theme, () => b.space.color, () => b.space.translucency],
   async () => {
@@ -106,31 +107,36 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <header ref="header" class="window-chrome" :class="split ? 'split-window-chrome' : 'titlebar'">
+  <header ref="header" class="window-chrome" :class="split ? 'split-window-chrome' : 'titlebar'"
+    :data-window-drag="split && b.pinnedExtensions.length ? '' : undefined">
     <div v-if="!split" class="titlebar-identity" data-chrome-motion="app-name"><span class="app-name">Rove</span></div>
     <PageToolbar v-if="!split && !b.onboardingOpen" data-chrome-motion="titlebar" />
-    <div class="window-controls">
-      <button
-        :aria-label="b.t('最小化')"
-        :title="b.t('最小化')"
-        @click="b.send({ type: 'window', action: 'minimize' })"
-      >
-        <Icon name="minimize" :size="12" /></button
-      ><button
-        ref="maximize"
-        :aria-label="b.t('最大化或还原')"
-        :title="b.t('最大化或还原')"
-        @click="b.send({ type: 'window', action: 'maximize' })"
-      >
-        <Icon name="maximize" :size="11" /></button
-      ><button
-        class="window-close"
-        :aria-label="b.t('关闭窗口')"
-        :title="b.t('关闭窗口')"
-        @click="b.send({ type: 'window', action: 'close' })"
-      >
-        <Icon name="close" :size="13" />
-      </button>
+    <div class="titlebar-actions">
+      <div v-if="!b.onboardingOpen && b.pinnedExtensions.length" class="pinned-extensions"
+        role="group" :aria-label="b.t('已固定的扩展')" data-window-control>
+        <button v-for="item in b.pinnedExtensions" :key="item.id" type="button" class="icon-button pinned-extension"
+          :aria-label="item.name"
+          :title="item.name + (!item.enabled ? ' · ' + b.t('已停用') : !item.hasPage ? ' · ' + b.t('此扩展没有可打开的页面') : '')"
+          :disabled="!item.enabled || !item.hasPage" aria-haspopup="dialog"
+          :aria-expanded="b.extensionMenuAnchor?.extensionId === item.id"
+          @click="b.toggleExtensionMenu($event.currentTarget as HTMLElement, b.active?.id, item.id)">
+          <ExtensionIcon :src="item.icon" :size="16" />
+        </button>
+      </div>
+      <div class="window-controls">
+        <button :aria-label="b.t('最小化')" :title="b.t('最小化')"
+          @click="b.send({ type: 'window', action: 'minimize' })">
+          <Icon name="minimize" :size="12" />
+        </button>
+        <button ref="maximize" :aria-label="b.t('最大化或还原')" :title="b.t('最大化或还原')"
+          @click="b.send({ type: 'window', action: 'maximize' })">
+          <Icon name="maximize" :size="11" />
+        </button>
+        <button class="window-close" :aria-label="b.t('关闭窗口')" :title="b.t('关闭窗口')"
+          @click="b.send({ type: 'window', action: 'close' })">
+          <Icon name="close" :size="13" />
+        </button>
+      </div>
     </div>
   </header>
 </template>

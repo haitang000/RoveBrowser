@@ -225,7 +225,7 @@ kbd {
 .titlebar {
   height: var(--titlebar-block);
   display: grid;
-  grid-template-columns: clamp(64px, calc(100vw - 400px), var(--sidebar-width)) minmax(0, 1fr) auto;
+  grid-template-columns: clamp(64px, calc(100vw - var(--address-toolbar-space, 400px)), var(--sidebar-width)) minmax(0, 1fr) auto;
   align-items: start;
   user-select: none;
 }
@@ -267,6 +267,23 @@ kbd {
   font-weight: 500;
   letter-spacing: -0.3px;
   color: var(--quiet);
+}
+.titlebar-actions {
+  display: flex;
+  align-items: flex-start;
+}
+.pinned-extensions {
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-height);
+  margin-top: var(--chrome-inset);
+  padding-inline: 3px 7px;
+}
+.pinned-extension[aria-expanded="true"] { background: var(--hover); }
+.titlebar:has(.pinned-extensions) { --address-toolbar-space: 466px; }
+.titlebar:has(.pinned-extensions) .browser-toolbar {
+  grid-template-columns: minmax(max-content, 1fr) minmax(28px, 480px) minmax(max-content, 1fr);
+  gap: clamp(4px, 1vw, 12px);
 }
 .window-controls {
   app-region: no-drag;
@@ -322,6 +339,21 @@ kbd {
 .split-window-chrome .window-controls button {
   width: var(--split-caption-button);
   padding: 0;
+}
+.split-with-pinned-extensions .browser-body {
+  padding-top: calc(var(--split-top) + var(--titlebar-height) + 2px);
+}
+.split-with-pinned-extensions .split-window-chrome {
+  left: var(--card-inset);
+  right: var(--card-inset);
+  display: flex;
+  justify-content: flex-end;
+}
+.split-with-pinned-extensions .pinned-extensions {
+  margin-top: 0;
+}
+.split-with-pinned-extensions .split-sidebar-top {
+  padding-left: 0;
 }
 .chrome-outgoing {
   position: absolute;
@@ -846,6 +878,9 @@ kbd {
 .collapsed .split-divider + .page-pane .pane-header {
   padding-right: calc(var(--split-caption-width) + 6px);
 }
+.split-with-pinned-extensions.collapsed .split-divider + .page-pane .pane-header {
+  padding-right: 4px;
+}
 .pane-header .browser-navigation {
   gap: 0;
 }
@@ -870,6 +905,10 @@ kbd {
 }
 @media (max-width: 600px) {
   .split-shell { --split-caption-button: 24px; }
+  .browser-shell .titlebar:has(.pinned-extensions) { grid-template-columns: 48px minmax(0, 1fr) auto; }
+  .titlebar:has(.pinned-extensions) .browser-toolbar { padding-inline: 4px; }
+  .pinned-extensions { padding-inline: 0 3px; }
+  .pinned-extension { width: 23px; }
   .pane-header { gap: 2px; }
   .pane-header .icon-button { width: 20px; }
 }

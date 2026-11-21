@@ -202,7 +202,23 @@ export const useBrowser = defineStore("browser", () => {
   const importBusy = ref(false);
   const extensions = ref<ExtensionsState>({ items: null, review: null, popup: false, busy: false, error: null });
   const extensionBackground = shallowRef<{ rect: Rect; image: string }[]>([]);
-  const extensionMenuAnchor = ref<Rect & { tabId?: string }>();
+  const extensionMenuAnchor = ref<Rect & { tabId?: string; extensionId?: string }>();
+  const pinnedExtensions = computed(() => (state.value.extensionPins ?? []).flatMap(id => {
+    const item = extensions.value.items?.find(item => item.id === id);
+    return item ? [item] : [];
+  }));
+  function placeExtensionMenu(trigger: HTMLElement, tabId?: string, extensionId?: string) {
+    const { x, y, width, height } = trigger.getBoundingClientRect();
+    extensionMenuAnchor.value = { x, y, width, height, tabId, extensionId };
+  }
+  function toggleExtensionMenu(trigger: HTMLElement, tabId?: string, extensionId?: string) {
+    const open = extensionMenuAnchor.value;
+    if (open && open.tabId === tabId && open.extensionId === extensionId) {
+      extensionMenuAnchor.value = undefined;
+      return;
+    }
+    placeExtensionMenu(trigger, tabId, extensionId);
+  }
   const extensionView = ref<{ phase: "ready" | "error"; size?: [number, number]; message?: string }>();
   const defaultBrowser = ref<{ http: boolean; https: boolean }>();
   const importPhase = ref("checking");
@@ -857,7 +873,7 @@ export const useBrowser = defineStore("browser", () => {
   return {
     canOutputPage, pageOutputShortcut, outputPage,
     importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser, extensions, extensionBackground,
-    extensionMenuAnchor, extensionView,
+    extensionMenuAnchor, extensionView, pinnedExtensions, placeExtensionMenu, toggleExtensionMenu,
     onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,
     native,
     popupWindow,

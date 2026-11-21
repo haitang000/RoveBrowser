@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { CHROME_STORE_URL, type ExtensionItem } from "../../lib/extensions";
+import { CHROME_STORE_URL, MAX_PINNED_EXTENSIONS, type ExtensionItem } from "../../lib/extensions";
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
 import ExtensionIcon from "./ExtensionIcon.vue";
@@ -130,12 +130,19 @@ function finishPageAnimation() {
 }
 watch(() => b.settings.reduceMotion, finishPageAnimation);
 
-watch(openMenu, (visible) => {
-  if (!visible) return;
-  anchor.value = b.extensionMenuAnchor;
+watch(() => openMenu.value ? b.extensionMenuAnchor : undefined, (request, previous) => {
+  if (!request) return;
+  anchor.value = request;
+  if (previous && previous.tabId === request.tabId && previous.extensionId === request.extensionId) return;
+  cancelPageAnimation();
   selected.value = undefined;
   b.extensionView = undefined;
-  b.send({ type: "extensionsList" });
+  if (request.extensionId) {
+    const item = b.pinnedExtensions.find(item => item.id === request.extensionId);
+    if (item) void open(item);
+  } else {
+    b.send({ type: "extensionsList" });
+  }
 }, { immediate: true });
 
 function close() {
@@ -161,6 +168,17 @@ function tileLabel(item: ExtensionItem) {
   return reason ? item.name + " · " + reason : item.name;
 }
 
+const pinLimitReached = computed(() => (b.state.extensionPins?.length ?? 0) >= MAX_PINNED_EXTENSIONS);
+
+function isPinned(item: ExtensionItem) {
+  return b.state.extensionPins?.includes(item.id) ?? false;
+}
+
+function pinTitle(item: ExtensionItem) {
+  if (isPinned(item)) return b.t("取消固定");
+  return pinLimitReached.value ? b.t("最多固定 4 个扩展") : b.t("固定到工具栏");
+}
+
 onMounted(() => {
   window.addEventListener("resize", resize);
   reducedMotion.addEventListener("change", finishPageAnimation);
@@ -179,7 +197,7 @@ onBeforeUnmount(() => {
     <section ref="panel" class="extension-menu-panel"
       role="dialog" :aria-label="selected?.name ?? b.t('扩展')" tabindex="-1">
       <header class="extension-menu-header">
-        <button v-if="selected" type="button" class="icon-button" :aria-label="b.t('返回')" @click="back">
+        <button v-if="selected && !anchor?.extensionId" type="button" class="icon-button" :aria-label="b.t('返回')" @click="back">
           <Icon name="back" :size="15" />
         </button>
         <h2>{{ selected?.name ?? b.t('扩展') }}</h2>
@@ -197,16 +215,24 @@ onBeforeUnmount(() => {
         <p v-else-if="entering || revealingPage || b.extensionView?.phase !== 'ready'" role="status">{{ b.t('正在打开扩展…') }}</p>
       </div>
       <div v-else class="extension-menu-list">
-        <p v-if="!b.extensions.items && b.extensions.error" role="alert">{{ b.extensions.error }}</p>
+        <p v-if="b.extensions.error" role="alert">{{ b.t(b.extensions.error) }}</p>
         <p v-else-if="!b.extensions.items" role="status">{{ b.t('正在处理扩展…') }}</p>
         <p v-else-if="!b.extensions.items.length">{{ b.t('还没有安装扩展。') }}</p>
         <div class="extension-menu-grid">
-          <button v-for="item in b.extensions.items" :key="item.id" type="button" class="extension-menu-tile"
-            :aria-disabled="!item.enabled || !item.hasPage" :aria-label="tileLabel(item)"
-            :title="tileLabel(item)" @click="open(item)">
-            <ExtensionIcon :src="item.icon" />
-            <span>{{ item.name }}</span>
-          </button>
+          <div v-for="item in b.extensions.items" :key="item.id" class="extension-menu-item">
+            <button type="button" class="extension-menu-tile"
+              :aria-disabled="!item.enabled || !item.hasPage" :aria-label="tileLabel(item)"
+              :title="tileLabel(item)" @click="open(item)">
+              <ExtensionIcon :src="item.icon" />
+              <span>{{ item.name }}</span>
+            </button>
+            <button v-if="isPinned(item) || item.enabled" type="button" class="icon-button extension-pin"
+              :aria-label="b.t('固定扩展 {name}', { name: item.name })" :aria-pressed="isPinned(item)"
+              :title="pinTitle(item)" :disabled="b.extensions.busy || (!isPinned(item) && pinLimitReached)"
+              @click="b.send({ type: 'extensionPin', id: item.id, pinned: !isPinned(item) })">
+              <Icon name="pin" :size="12" />
+            </button>
+          </div>
           <button type="button" class="extension-menu-tile" :aria-label="b.t('浏览商店')" :title="b.t('浏览商店')"
             @click="close(); b.send({ type: 'new', url: CHROME_STORE_URL })">
             <Icon name="plus" :size="23" />
@@ -263,6 +289,17 @@ onBeforeUnmount(() => {
 .extension-manage:hover { background: var(--chosen); }
 .extension-menu-list { min-height: 0; overflow: auto; padding: 2px 12px 12px; }
 .extension-menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; }
+.extension-menu-item { position: relative; min-width: 0; }
+.extension-menu-item > .extension-menu-tile { width: 100%; }
+.extension-menu-item:has(.extension-pin) > .extension-menu-tile { padding-top: 11px; }
+.extension-pin {
+  position: absolute;
+  inset: 3px 3px auto auto;
+  width: 20px;
+  height: 20px;
+  color: var(--quiet);
+}
+.extension-pin[aria-pressed="true"] { color: var(--accent); background: var(--chosen); }
 .extension-menu-tile {
   display: flex;
   flex-direction: column;

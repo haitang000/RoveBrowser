@@ -220,6 +220,7 @@ onBeforeUnmount(() => {
       'custom-frame': painted.custom,
       'space-form-open': b.spaceFormOpen,
       'split-shell': split,
+      'split-with-pinned-extensions': split && b.pinnedExtensions.length > 0,
     }"
     :style="shellStyle"
   >

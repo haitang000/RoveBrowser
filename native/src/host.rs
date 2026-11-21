@@ -3002,7 +3002,15 @@ impl App {
             _ => {}
         }
     }
-    fn publish_extensions(&self, items: Option<Vec<extensions::Item>>) {
+    fn publish_extensions(&mut self, items: Option<Vec<extensions::Item>>) {
+        if let Some(items) = &items {
+            let count = self.state.extension_pins.len();
+            self.state.extension_pins.retain(|id| items.iter().any(|item| item.id == *id));
+            if self.state.extension_pins.len() != count {
+                self.save();
+                self.publish();
+            }
+        }
         self.emit(json!({
             "type": "extensionsState",
             "extensions": {
@@ -3174,6 +3182,11 @@ impl App {
             self.close_extension_menu();
         }
         let result = match command {
+            Command::SetExtensionPinned { id, pinned } => {
+                let result = self.set_extension_pinned(id, pinned);
+                self.emit_extensions(None, result.err().map(|error| error.to_string()));
+                return;
+            }
             Command::ChooseExtension => {
                 let owner = self.window.as_ref().and_then(|window| window.window_handle().ok())
                     .and_then(|handle| match handle.as_raw() {
@@ -3273,6 +3286,24 @@ impl App {
             Ok(items) => self.emit_extensions(Some(items), None),
             Err(error) => self.emit_extensions(None, Some(format!("扩展操作失败：{error}"))),
         }
+    }
+
+    fn set_extension_pinned(&mut self, id: String, pinned: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let position = self.state.extension_pins.iter().position(|entry| *entry == id);
+        match (pinned, position) {
+            (true, None) => {
+                if self.state.extension_pins.len() >= extensions::MAX_PINNED {
+                    return Err("最多固定 4 个扩展".into());
+                }
+                self.extension_profile(|profile, root| profile.enabled_package(root, &id))?;
+                self.state.extension_pins.push(id);
+            }
+            (false, Some(position)) => { self.state.extension_pins.remove(position); }
+            _ => return Ok(()),
+        }
+        self.save();
+        self.publish();
+        Ok(())
     }
 
     fn command(&mut self, mut c: Command, event_loop: Option<&ActiveEventLoop>) {
@@ -3390,7 +3421,7 @@ impl App {
             }
             return;
         }
-        if matches!(c, Command::ListExtensions | Command::ChooseExtension | Command::PrepareChromeStoreExtension { .. } | Command::ReviewExtension { .. } | Command::DismissExtensionPopup
+        if matches!(c, Command::ListExtensions | Command::SetExtensionPinned { .. } | Command::ChooseExtension | Command::PrepareChromeStoreExtension { .. } | Command::ReviewExtension { .. } | Command::DismissExtensionPopup
             | Command::EnableExtension { .. } | Command::RemoveExtension { .. }) {
             self.extension_command(c);
             return;
@@ -3732,6 +3763,9 @@ impl App {
                 if let Err(e) = self.sync() {
                     self.error(e);
                 }
+                if self.state.onboarding.completed && !self.state.extension_pins.is_empty() {
+                    self.extension_command(Command::ListExtensions);
+                }
                 if self.icon_refresh {
                     self.icon_refresh = false;
                     self.refresh_saved_icons();
@@ -3849,7 +3883,11 @@ impl App {
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
                 self.emit(json!({"type":"quitConfirmation","visible":self.quit_pending}));
-                self.publish_extensions(None);
+                if self.ready && self.state.onboarding.completed && !self.state.extension_pins.is_empty() {
+                    self.extension_command(Command::ListExtensions);
+                } else {
+                    self.publish_extensions(None);
+                }
                 self.publish_downloads();
                 self.publish_peek();
                 self.publish_sleep_state();

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { host } from "../../lib/address";
 import { isSettingsUrl } from "../../lib/settings";
 import type { Tab } from "../../lib/types";
@@ -16,19 +16,16 @@ const canRead = computed(() => id.value && (reading.value || waiting.value || b.
 const address = computed(() => isSettingsUrl(tab.value?.url) ? b.t("设置")
   : tab.value?.url.startsWith("chrome-extension:") ? tab.value.title || b.t("扩展")
   : host(tab.value?.url || "") || (props.pane ? b.t("新标签页") : "Search or enter address"));
-const extensionsOpen = computed(() => Boolean(b.extensionMenuAnchor && b.extensionMenuAnchor.tabId === id.value));
+const extensionsOpen = computed(() => Boolean(
+  b.extensionMenuAnchor && !b.extensionMenuAnchor.extensionId && b.extensionMenuAnchor.tabId === id.value,
+));
+const extensionTrigger = ref<HTMLButtonElement>();
+watch(() => b.pinnedExtensions.length, () => {
+  if (extensionsOpen.value && extensionTrigger.value) b.placeExtensionMenu(extensionTrigger.value, id.value);
+}, { flush: "post" });
 
 function act(type: "back" | "forward" | "reload" | "reader") {
   b.send({ type, id: props.pane?.id });
-}
-
-function toggleExtensions(event: MouseEvent) {
-  if (b.extensionMenuAnchor) {
-    b.extensionMenuAnchor = undefined;
-    return;
-  }
-  const { x, y, width, height } = (event.currentTarget as HTMLElement).getBoundingClientRect();
-  b.extensionMenuAnchor = { x, y, width, height, tabId: id.value };
 }
 </script>
 
@@ -52,9 +49,10 @@ function toggleExtensions(event: MouseEvent) {
       <Icon v-if="!pane" name="settings" :size="13" />
     </button>
     <div class="toolbar-actions" data-window-control>
-      <button v-if="b.native && !b.onboardingOpen" type="button" class="icon-button extension-menu-trigger"
+      <button v-if="b.native && !b.onboardingOpen" ref="extensionTrigger" type="button" class="icon-button extension-menu-trigger"
         :class="{ chosen: extensionsOpen }" :aria-label="b.t('扩展')" :title="b.t('扩展')"
-        aria-haspopup="dialog" :aria-expanded="extensionsOpen" @click="toggleExtensions">
+        aria-haspopup="dialog" :aria-expanded="extensionsOpen"
+        @click="b.toggleExtensionMenu($event.currentTarget as HTMLElement, id)">
         <Icon name="extension" :size="15" />
       </button>
       <button v-if="canRead" class="icon-button reader-toggle" :class="{ chosen: reading }"

@@ -131,6 +131,8 @@ pub struct State {
     pub favorites: Vec<Favorite>,
     #[serde(default)]
     pub pins: Vec<Favorite>,
+    #[serde(default)]
+    pub extension_pins: Vec<String>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub pin_layouts: std::collections::BTreeMap<String, crate::pin_folders::PinLayout>,
     #[serde(default)]
@@ -235,6 +237,8 @@ pub enum Command {
     UpdateSettings { settings: crate::settings::Settings },
     #[serde(rename = "extensionsList")]
     ListExtensions,
+    #[serde(rename = "extensionPin")]
+    SetExtensionPinned { id: String, pinned: bool },
     #[serde(rename = "extensionViewOpen")]
     OpenExtensionView { id: String, rect: Rect },
     #[serde(rename = "extensionViewBounds")]
@@ -628,9 +632,12 @@ pub fn extension_id(url: &url::Url) -> Option<&str> {
             && url.username().is_empty()
             && url.password().is_none()
             && url.port().is_none()
-            && id.len() == 32
-            && id.bytes().all(|c| (b'a'..=b'p').contains(&c))
+            && valid_extension_id(id)
     })
+}
+
+fn valid_extension_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|c| (b'a'..=b'p').contains(&c))
 }
 
 pub fn is_extension_page(url: &str) -> bool {
@@ -753,6 +760,7 @@ impl Default for State {
             active_tab: String::new(),
             favorites,
             pins: vec![],
+            extension_pins: vec![],
             pin_layouts: Default::default(),
             library_version: 0,
             icon_version: 0,
@@ -1044,6 +1052,9 @@ impl State {
         self.remember_active();
     }
     pub fn repair(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.extension_pins.retain(|id| valid_extension_id(id) && seen.insert(id.clone()));
+        self.extension_pins.truncate(crate::extensions::MAX_PINNED);
         // A missing removable download folder must not reset unrelated preferences.
         self.settings.repair();
         if self.new_tab.validate().is_err() { self.new_tab = crate::new_tab::NewTab::default(); }

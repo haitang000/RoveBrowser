@@ -94,6 +94,7 @@ export interface BrowserState {
   activeTab: string;
   favorites: Favorite[];
   pins?: Favorite[];
+  extensionPins?: string[];
   pinLayouts?: Record<string, PinLayout>;
   libraryVersion?: number;
   closed: Tab[];

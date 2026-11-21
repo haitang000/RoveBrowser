@@ -1,4 +1,5 @@
 export const CHROME_STORE_URL = "https://chromewebstore.google.com/";
+export const MAX_PINNED_EXTENSIONS = 4;
 
 export function chromeStoreDetailId(value?: string) {
   if (!value) return undefined;

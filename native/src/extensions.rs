@@ -42,6 +42,7 @@ const MAX_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
 const MAX_MANIFEST: u64 = 1024 * 1024;
 const MAX_ICON: u64 = 512 * 1024;
+pub const MAX_PINNED: usize = 4;
 
 #[derive(Deserialize)]
 struct Manifest {
@@ -117,7 +118,7 @@ struct Record {
 
 #[derive(Serialize)]
 pub struct Item {
-    id: String,
+    pub id: String,
     name: String,
     version: String,
     enabled: bool,
@@ -675,13 +676,18 @@ impl Profile {
         Ok((path, extension))
     }
 
-    pub fn action_page(&self, root: &Path, id: &str) -> Result<ActionPage> {
+    pub fn enabled_package(&self, root: &Path, id: &str) -> Result<PathBuf> {
         let (package, extension) = self.managed(root, id)?;
         let mut enabled = windows::core::BOOL::default();
         unsafe { extension.IsEnabled(&mut enabled)?; }
         if !enabled.as_bool() {
             return Err("扩展已停用".into());
         }
+        Ok(package)
+    }
+
+    pub fn action_page(&self, root: &Path, id: &str) -> Result<ActionPage> {
+        let package = self.enabled_package(root, id)?;
         let (payload, manifest) = package_manifest(&package).ok_or("无法读取扩展清单")?;
         extension_page(&payload, &manifest, id).ok_or_else(|| "此扩展没有可打开的页面".into())
     }
