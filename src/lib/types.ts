@@ -148,6 +148,9 @@ declare global {
       entries?: HistoryEntry[];
       suggestions?: string[];
       message?: string;
+      phase?: string;
+      channel?: string;
+      version?: string;
       action?: string;
       peek?: Tab | null;
       id?: string;

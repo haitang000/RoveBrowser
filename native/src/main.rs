@@ -37,6 +37,7 @@ mod storage;
 mod split;
 mod suggestions;
 mod thumbnails;
+mod updates;
 mod web_settings;
 fn main() {
     if let Err(e) = host::run() {

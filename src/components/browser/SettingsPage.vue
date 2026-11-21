@@ -7,7 +7,9 @@ import {
   SETTINGS_PANES,
   SEARCH_ENGINES,
   SHORTCUTS,
+  UPDATE_CHANNELS,
   settingsPane,
+  updateChannelDetail,
   shortcutFor,
   shortcutText,
   shortcutFromEvent,
@@ -238,6 +240,29 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "general",
+    title: "更新",
+    rows: [
+      {
+        id: "channel",
+        title: "更新通道",
+        detail: updateChannelDetail(b.settings.updateChannel),
+        kind: "select",
+        setting: "updateChannel",
+        options: UPDATE_CHANNELS,
+        keywords: "update channel preview canary github gitlab 更新 通道",
+      },
+      {
+        id: "updates",
+        title: "检查更新",
+        detail: b.updateStatus.message || `当前版本 ${__APP_VERSION__}。`,
+        kind: "button",
+        action: b.updateStatus.phase === "available" ? "下载并安装" : "检查更新",
+        keywords: "check for updates 检查更新 安装",
+      },
+    ],
+  },
+  {
+    pane: "general",
     title: "关于",
     rows: [
       {
@@ -427,6 +452,11 @@ function saveInput(id: string) {
   } else update("downloadFolder", folder.value.trim());
 }
 function action(row: Row) {
+  if (row.id === "updates") {
+    if (b.updateStatus.phase === "available") b.installUpdate();
+    else b.checkUpdates();
+    return;
+  }
   if (row.id === "onboarding") { b.openOnboarding(); return; }
   if (row.id === "default") {
     if (!b.native) { notice.value = "请在 Rove 桌面版中设置默认浏览器。"; return; }
@@ -610,6 +640,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   v-else-if="row.kind === 'select'"
                   :id="`setting-${row.id}-${tabId}`"
                   :aria-label="row.title"
+                  :disabled="row.id === 'channel' && (b.updateStatus.phase === 'checking' || b.updateStatus.phase === 'downloading')"
                   :value="value(row)"
                   @change="select(row, $event)"
                 >
@@ -647,8 +678,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   v-else-if="row.kind === 'button'"
                   :id="`setting-${row.id}-${tabId}`"
                   class="setting-button"
-                  :disabled="row.id === 'default' && !b.native"
-                  :aria-label="row.id === 'default' ? row.action : `${row.action}${row.title}`"
+                  :disabled="(row.id === 'default' && !b.native) || (row.id === 'updates' && (b.updateStatus.phase === 'checking' || b.updateStatus.phase === 'downloading'))"
+                  :aria-label="row.id === 'default' || row.id === 'updates' ? row.action : `${row.action}${row.title}`"
                   @click="action(row)"
                 >
                   <SearchHighlight :text="row.action!" :words="words" />

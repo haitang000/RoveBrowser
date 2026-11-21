@@ -60,6 +60,8 @@ pub struct Settings {
     /// their memory back. On unless the user turns it off.
     pub sleep_tabs: bool,
     pub download_folder: String,
+    /// `preview` reads GitHub Releases. `canary` reads the GitLab `windows-installer` job.
+    pub update_channel: String,
     pub shortcuts: HashMap<String, Option<Shortcut>>,
 }
 impl Default for Settings {
@@ -77,6 +79,7 @@ impl Default for Settings {
             remember_history: true,
             sleep_tabs: true,
             download_folder: String::new(),
+            update_channel: "preview".into(),
             shortcuts: HashMap::new(),
         }
     }
@@ -130,6 +133,7 @@ fn encode(value: &str) -> String {
 }
 impl Settings {
     pub fn repair(&mut self) {
+        self.normalize_channel();
         if !self.download_folder.is_empty() && !std::path::Path::new(&self.download_folder).is_dir()
         {
             self.download_folder.clear();
@@ -145,7 +149,13 @@ impl Settings {
             self.shortcuts.clear();
         }
     }
+    fn normalize_channel(&mut self) {
+        if self.update_channel != "preview" && self.update_channel != "canary" {
+            self.update_channel = "preview".into();
+        }
+    }
     pub fn validate(&mut self) -> Result<(), String> {
+        self.normalize_channel();
         if ![
             "google",
             "duckDuckGo",
@@ -369,6 +379,17 @@ mod tests {
                 .as_deref(),
             Some("address")
         );
+    }
+    #[test]
+    fn update_channel_defaults_to_preview_and_drops_unknown_values() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.update_channel, "preview");
+        let mut settings: Settings = serde_json::from_str(r#"{"updateChannel":"canary"}"#).unwrap();
+        settings.validate().unwrap();
+        assert_eq!(settings.update_channel, "canary");
+        let mut settings: Settings = serde_json::from_str(r#"{"updateChannel":"nightly"}"#).unwrap();
+        settings.validate().unwrap();
+        assert_eq!(settings.update_channel, "preview");
     }
     #[test]
     fn deleting_space_keeps_shared_favorites_and_breaks_stale_splits() {

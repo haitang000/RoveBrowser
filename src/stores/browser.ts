@@ -17,7 +17,7 @@ import type { ReaderState } from "../lib/reader";
 import type { PermissionPrompt, PermissionRule } from "../lib/permissions";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
-import { SHORTCUTS, sameShortcut, settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
+import { SHORTCUTS, sameShortcut, settingsFor, shortcutFor, shortcutText, type SettingsPane, type UpdateChannel } from "../lib/settings";
 import { upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
 import type { LookFields } from "../lib/space-look";
@@ -154,6 +154,24 @@ export const useBrowser = defineStore("browser", () => {
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedBookmarks.value.get(active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
+  const updateStatus = ref<{ phase: "idle" | "checking" | "current" | "available" | "ahead" | "downloading" | "launched" | "error"; channel?: UpdateChannel; version?: string; message: string }>({ phase: "idle", message: "" });
+  function checkUpdates() {
+    const channel = settings.value.updateChannel;
+    if (!native) {
+      updateStatus.value = { phase: "error", channel, message: "请在 Rove 桌面版中检查更新。" };
+      return;
+    }
+    updateStatus.value = { phase: "checking", channel, message: "正在检查更新…" };
+    send({ type: "updateCheck" });
+  }
+  function installUpdate() {
+    if (!native || updateStatus.value.phase !== "available") return;
+    updateStatus.value = { ...updateStatus.value, phase: "downloading", message: "正在下载安装程序…" };
+    send({ type: "updateInstall" });
+  }
+  watch(() => settings.value.updateChannel, (next, previous) => {
+    if (next !== previous) updateStatus.value = { phase: "idle", message: "" };
+  });
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
   const defaultBrowser = ref<{ http: boolean; https: boolean }>();
@@ -657,6 +675,12 @@ export const useBrowser = defineStore("browser", () => {
       if (e.importSources) importSources.value = e.importSources;
     }
     if (e.type === "defaultBrowser" && e.defaultBrowser) defaultBrowser.value = e.defaultBrowser;
+    if (e.type === "updateStatus" && typeof e.message === "string") {
+      const phase = e.phase === "checking" || e.phase === "current" || e.phase === "available" || e.phase === "ahead" || e.phase === "downloading" || e.phase === "launched" || e.phase === "error" ? e.phase : "error";
+      const channel = e.channel === "canary" || e.channel === "preview" ? e.channel : settings.value.updateChannel;
+      if (channel === settings.value.updateChannel) updateStatus.value = { phase, channel, version: e.version || "", message: e.message };
+      else if (phase === "launched") notify(e.message);
+    }
     if (e.type === "state" && e.state) {
       const sources = (s: typeof state.value) => new Map([...s.tabs, ...(s.pins || []), ...s.favorites].map(t => [t.id, t.url]));
       const previous = sources(state.value);
@@ -820,6 +844,9 @@ export const useBrowser = defineStore("browser", () => {
     peekSurface,
     state,
     settings,
+    updateStatus,
+    checkUpdates,
+    installUpdate,
     shortcutLabel,
     shortcutTitle,
     dataStatus,

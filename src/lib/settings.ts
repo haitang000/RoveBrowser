@@ -5,7 +5,7 @@ export const SETTINGS_PANES = [
     id: "general",
     title: "通用",
     icon: "settings",
-    keywords: "general 搜索 外观 窗口 下载",
+    keywords: "general 搜索 外观 窗口 下载 更新",
   },
   {
     id: "spaces",
@@ -127,6 +127,8 @@ export interface Settings {
   /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
   sleepTabs: boolean;
   downloadFolder: string;
+  /** Preview reads GitHub releases. Canary reads the GitLab windows-installer job. */
+  updateChannel: "preview" | "canary";
   shortcuts: Record<string, Shortcut | null>;
 }
 export const defaultSettings = (): Settings => ({
@@ -142,10 +144,23 @@ export const defaultSettings = (): Settings => ({
   rememberHistory: true,
   sleepTabs: true,
   downloadFolder: "",
+  updateChannel: "preview",
   shortcuts: {},
 });
+export const UPDATE_CHANNELS = [
+  ["preview", "Preview"],
+  ["canary", "Canary"],
+] as const;
+export type UpdateChannel = Settings["updateChannel"];
+export function updateChannelDetail(channel: UpdateChannel): string {
+  return channel === "canary"
+    ? "Canary 使用 GitLab CI 的 windows-installer（hub.haitang000.cn/haitang000/rovebrowser 的 main）。"
+    : "Preview 从 GitHub（haitang000/RoveBrowser）获取稳定版本。";
+}
 export function settingsFor(value?: Partial<Settings>): Settings {
-  return { ...defaultSettings(), ...value };
+  const settings = { ...defaultSettings(), ...value };
+  settings.updateChannel = settings.updateChannel === "canary" ? "canary" : "preview";
+  return settings;
 }
 export function isSettingsUrl(value = ""): boolean {
   try {

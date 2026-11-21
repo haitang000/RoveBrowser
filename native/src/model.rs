@@ -231,6 +231,10 @@ pub enum Command {
     OpenSettings { pane: Option<String> },
     #[serde(rename = "settingsUpdate")]
     UpdateSettings { settings: crate::settings::Settings },
+    #[serde(rename = "updateCheck")]
+    UpdateCheck,
+    #[serde(rename = "updateInstall")]
+    UpdateInstall,
     #[serde(rename = "newTabUpdate")]
     UpdateNewTab { settings: crate::new_tab::NewTab },
     #[serde(rename = "settingsPane")]

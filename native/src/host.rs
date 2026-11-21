@@ -155,6 +155,7 @@ enum Event {
     SleepDone(String, bool),
     StorageWriteError(String),
     PermissionsChanged,
+    UpdateReport { install: bool, ticket: u64, report: crate::updates::Report },
 }
 struct Page {
     permission_document: Rc<permissions::Document>,
@@ -2927,6 +2928,35 @@ impl App {
                     | Command::Move { .. }
             );
         match c {
+            Command::UpdateCheck => {
+                let channel = crate::updates::Channel::parse(&self.state.settings.update_channel);
+                let Some(ticket) = crate::updates::begin_check() else {
+                    self.emit(json!({"type":"updateStatus","phase":"downloading","channel":channel.as_str(),"version":"","message":"正在下载安装程序，请稍候。"}));
+                    return;
+                };
+                self.emit(json!({"type":"updateStatus","phase":"checking","channel":channel.as_str(),"version":"","message":"正在检查更新…"}));
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let report = crate::updates::check(channel);
+                    let _ = proxy.send_event(Event::UpdateReport { install: false, ticket, report });
+                });
+                return;
+            }
+            Command::UpdateInstall => {
+                let channel = crate::updates::Channel::parse(&self.state.settings.update_channel);
+                let Some(ticket) = crate::updates::begin_install() else {
+                    self.emit(json!({"type":"updateStatus","phase":"downloading","channel":channel.as_str(),"version":"","message":"正在下载安装程序，请稍候。"}));
+                    return;
+                };
+                self.emit(json!({"type":"updateStatus","phase":"downloading","channel":channel.as_str(),"version":"","message":"正在下载安装程序…"}));
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let _guard = crate::updates::InstallGuard;
+                    let report = crate::updates::install(channel);
+                    let _ = proxy.send_event(Event::UpdateReport { install: true, ticket, report });
+                });
+                return;
+            }
             Command::SystemSettings => {
                 if let Err(e) = crate::default_browser::open_settings() { self.error(e); }
                 self.publish_default_browser();
@@ -3830,6 +3860,12 @@ impl ApplicationHandler<Event> for App {
             Event::DataCleared(kind, ok) => {
                 self.data_clear_view = None;
                 self.emit(json!({"type":"dataCleared","action":kind,"message":if ok { "已清除浏览数据" } else { "清除失败，请重试" }}));
+            }
+            Event::UpdateReport { install, ticket, report } => {
+                let fresh = if install { crate::updates::install_current(ticket) } else { crate::updates::check_current(ticket) };
+                if fresh {
+                    self.emit(json!({"type":"updateStatus","phase":report.phase,"channel":report.channel,"version":report.version,"message":report.message}));
+                }
             }
             Event::HistoryCleared(ok) => {
                 if ok {

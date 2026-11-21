@@ -10,6 +10,8 @@ import {
   settingsPane,
   isSettingsUrl,
   defaultSettings,
+  settingsFor,
+  updateChannelDetail,
   searchUrl,
   validSearchTemplate,
   validateShortcuts,
@@ -19,6 +21,13 @@ import {
 describe("Zigzag settings port", () => {
   it("keeps background tab sleeping on by default", () => {
     expect(defaultSettings().sleepTabs).toBe(true);
+  });
+  it("keeps the update channel on Preview or Canary", () => {
+    expect(defaultSettings().updateChannel).toBe("preview");
+    expect(updateChannelDetail("preview")).toContain("GitHub");
+    expect(settingsFor({ updateChannel: "canary" }).updateChannel).toBe("canary");
+    expect(updateChannelDetail("canary")).toContain("windows-installer");
+    expect(settingsFor({ updateChannel: "nightly" as "preview" }).updateChannel).toBe("preview");
   });
   it("maps every section to an internal address and preserves it as a tab", () => {
     for (const pane of SETTINGS_PANES)

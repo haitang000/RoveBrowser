@@ -254,6 +254,16 @@ test("sidebar Space editor uses the shared form and preserves the theme on renam
   await expect(page.locator(".sidebar-header .space-name")).toHaveText("研究空间");
 });
 
+test("update channel switches between Preview and Canary", async ({ page }) => {
+  const channel = page.getByRole("combobox", { name: "更新通道", exact: true });
+  await expect(channel).toHaveValue("preview");
+  await expect(page.locator(".settings-page")).toContainText("GitHub");
+  await channel.selectOption("canary");
+  await expect(page.locator(".settings-page")).toContainText("windows-installer");
+  await page.getByRole("button", { name: "检查更新", exact: true }).click();
+  await expect(page.locator(".settings-page")).toContainText("请在 Rove 桌面版中检查更新");
+});
+
 test("settings adapt to narrow panes without horizontal overflow", async ({
   page,
 }) => {
