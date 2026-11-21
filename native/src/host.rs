@@ -20,7 +20,7 @@ use std::{
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler, DOMContentLoadedEventHandler,
     ContainsFullScreenElementChangedEventHandler, DownloadStartingEventHandler, FaviconChangedEventHandler,
-    IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
+    FocusChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
@@ -44,8 +44,9 @@ use windows::{
             Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
             Shell::ShellExecuteW,
             WindowsAndMessaging::{
-                GetCursorPos, SetWindowPos, HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE,
-                SWP_NOSIZE, SWP_NOZORDER, SW_SHOWNORMAL,
+                GetCursorPos, GetGUIThreadInfo, IsChild, IsWindowVisible, SetWindowPos,
+                GUITHREADINFO, HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                SWP_NOZORDER, SW_SHOWNORMAL,
             },
         },
     },
@@ -107,6 +108,7 @@ enum Event {
     ImportSources(Vec<crate::import::Source>),
     ImportRead(Vec<crate::import::Batch>),
     ExtensionPrepared(Result<extensions::Prepared, String>),
+    RestoreKeyboardFocus,
     Layout,
     SplitResize,
     SidebarResize,
@@ -382,12 +384,14 @@ struct App {
     download_popup_visible: bool,
     pending_download_review: Option<String>,
     popup: Option<WebView>,
+    popup_has_regions: bool,
     page_save: Option<crate::page_output::SaveRequest>,
     popup_state: serde_json::Map<String, serde_json::Value>,
     permissions: permissions::Requests,
     permission_state: serde_json::Value,
     permission_shown_at: Instant,
     ui: Option<WebView>,
+    last_focused_view: Rc<Cell<HWND>>,
     window: Option<Window>,
     context: WebContext,
     state: State,
@@ -545,12 +549,14 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         download_popup_visible: false,
         pending_download_review: None,
         popup: None,
+        popup_has_regions: false,
         popup_state: serde_json::Map::new(),
         permissions: permissions::Requests::load(&storage)?,
         permission_state: json!({"type":"permissionState", "permissionPrompt":null, "permissionTabs":[]}),
         permission_shown_at: Instant::now(),
         page_save: None,
         ui: None,
+        last_focused_view: Rc::default(),
         window: None,
         context: WebContext::new(Some(data.join("WebView2"))),
         state,
@@ -1123,6 +1129,7 @@ impl App {
             Ok(())
         }));
         unsafe { view.webview().cast::<ICoreWebView2_2>()?.add_DOMContentLoaded(&handler, &mut 0)?; }
+        self.track_webview_focus(&view)?;
         register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.live_settings.clone(), None)?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
@@ -1300,6 +1307,47 @@ impl App {
             let _ = page.focus();
         } else if let Some(ui) = &self.ui {
             let _ = ui.focus();
+        }
+    }
+    fn track_webview_focus(&self, view: &WebView) -> windows::core::Result<()> {
+        let last_focused = self.last_focused_view.clone();
+        let hwnd = view.hwnd();
+        let got_focus = FocusChangedEventHandler::create(Box::new(move |_, _| {
+            last_focused.set(hwnd);
+            Ok(())
+        }));
+        unsafe { view.controller().add_GotFocus(&got_focus, &mut 0) }
+    }
+    fn restore_keyboard_focus(&self) {
+        let Some(handle) = self.window.as_ref().and_then(|window| window.window_handle().ok()) else {
+            return;
+        };
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else { return };
+        let hwnd = HWND(handle.hwnd.get() as *mut _);
+        let mut state = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        // Query the foreground input queue so focus in WebView2's renderer
+        // window is also visible here, even when it belongs to another thread.
+        unsafe {
+            if GetGUIThreadInfo(0, &mut state).is_err() || state.hwndActive != hwnd
+                || (IsChild(hwnd, state.hwndFocus).as_bool() && IsWindowVisible(state.hwndFocus).as_bool())
+            {
+                return;
+            }
+        }
+        let visible = |view: &&WebView| unsafe { IsWindowVisible(view.hwnd()).as_bool() };
+        let page = self.page().filter(visible);
+        let last = self.last_focused_view.get();
+        let previous = self.ui.iter()
+            .chain(self.popup.iter().filter(|_| self.popup_has_regions))
+            .chain(self.peek.iter().map(|peek| &peek.page.view))
+            .chain(self.pages.values().map(|page| &page.view))
+            .find(|view| view.hwnd() == last && visible(view));
+        let target = if self.fullscreen_page.is_some() { page } else { previous.or(page) };
+        if let Some(view) = target.or(self.ui.as_ref()) {
+            let _ = view.focus();
         }
     }
     /// Closes a set of tabs as one undoable batch, keeping enough geometry to put
@@ -1632,6 +1680,7 @@ impl App {
             })
             // The script only adapts standard link opening. There is still no IPC/host API on websites.
             .build_as_child(self.window.as_ref().unwrap())?;
+        self.track_webview_focus(&view)?;
         // Wry's zoom option also enables pinch, which is handled separately by WebView2.
         unsafe { view.webview().Settings()?.SetIsZoomControlEnabled(true)?; }
         crate::web_settings::apply(&view, &self.state.settings)?;
@@ -3619,7 +3668,10 @@ impl App {
                 self.download_popup_visible = downloads;
                 if let (Some(popup), Some(window)) = (&self.popup, &self.window) {
                     let result = WindowClip::popup(popup.hwnd(), &regions, cutout, window.scale_factor());
-                    if result.is_ok() && focus && self.fullscreen_page.is_none() { let _ = popup.focus(); }
+                    if result.is_ok() {
+                        self.popup_has_regions = !regions.is_empty();
+                        if focus && self.fullscreen_page.is_none() { let _ = popup.focus(); }
+                    }
                     if let Err(e) = result { self.error(e); }
                 }
                 if regions.is_empty() {
@@ -4026,6 +4078,7 @@ impl ApplicationHandler<Event> for App {
                         } else { let _=proxy.send_event(Event::Command(c)); }
                     }
                 }).build_as_child(&window)?;
+            self.track_webview_focus(&ui)?;
             let proxy = self.proxy.clone();
             let popup=WebViewBuilder::new_with_web_context(&mut ui_context)
                 .with_custom_protocol("era".into(),|_,req|{
@@ -4048,6 +4101,7 @@ impl ApplicationHandler<Event> for App {
                     if req.uri().scheme_str()!=Some("https")||req.uri().host()!=Some("era.ui")||req.uri().path()!="/index.html"||req.body().len()>16384{return}
                     if let Ok(c)=serde_json::from_str::<Command>(req.body()){let _=proxy.send_event(Event::Command(c));}
                 }).build_as_child(&window)?;
+            self.track_webview_focus(&popup)?;
             popup.set_bounds(wry::Rect { position: LogicalPosition::new(0, 0).into(), size: window.inner_size().into() })?;
             WindowClip::popup(popup.hwnd(), &[], None, window.scale_factor())?;
             self.popup = Some(popup);
@@ -4107,6 +4161,7 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::RestoreKeyboardFocus => self.restore_keyboard_focus(),
             Event::ExtensionPrepared(result) => {
                 self.extension_busy = false;
                 match result {
@@ -4630,7 +4685,12 @@ impl ApplicationHandler<Event> for App {
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::Focused(true) => self.publish_default_browser(),
+            WindowEvent::Focused(true) => {
+                // Let Windows finish activating the window and assigning focus
+                // before deciding whether a WebView needs to receive it.
+                let _ = self.proxy.send_event(Event::RestoreKeyboardFocus);
+                self.publish_default_browser();
+            }
             WindowEvent::Focused(false) => self.dismiss_tab_preview(),
             WindowEvent::CloseRequested => {
                 if !self.confirm_quit() { return; }
