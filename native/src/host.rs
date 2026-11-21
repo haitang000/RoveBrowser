@@ -111,6 +111,7 @@ enum Event {
     ImportRead(Vec<crate::import::Batch>),
     ExtensionPrepared(uuid::Uuid, Result<extensions::Prepared, String>),
     ExtensionBackground(uuid::Uuid, Rect, String),
+    ExtensionView(uuid::Uuid, crate::extension_view::Event),
     RestoreKeyboardFocus,
     Layout,
     SplitResize,
@@ -338,6 +339,16 @@ struct UndoBatch {
     /// A blank tab that closing everything auto-created; undo takes it back.
     auto_created: Option<String>,
 }
+struct ExtensionView {
+    ticket: uuid::Uuid,
+    view: WebView,
+    fit_content: bool,
+    ready: bool,
+    visible: bool,
+    size: Option<[u32; 2]>,
+    next_measure: Option<Instant>,
+}
+
 struct App {
     _instance: crate::instance::Instance,
     agent_tabs: Option<crate::agent_tabs::Tabs>,
@@ -353,6 +364,7 @@ struct App {
     extension_preparation: Option<uuid::Uuid>,
     extension_popup: Option<uuid::Uuid>,
     extension_error: Option<String>,
+    extension_view: Option<ExtensionView>,
     // Drop child controllers before their parent HWND and shared context.
     split_handle: Option<crate::split::SplitHandle>,
     sidebar_handle: Option<crate::sidebar::SidebarHandle>,
@@ -529,6 +541,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         extension_preparation: None,
         extension_popup: None,
         extension_error: None,
+        extension_view: None,
         split_handle: None,
         sidebar_handle: None,
         resize_appearance: crate::resize_surface::Appearance::default(),
@@ -698,6 +711,7 @@ impl App {
     fn confirm_quit(&mut self) -> bool {
         if self.quit_pending { return false; }
         if !self.state.settings.ask_before_quit { return true; }
+        self.close_extension_menu();
         if self.fullscreen_page.is_some() {
             if let Err(error) = self.restore_page_window(true).and_then(|_| self.sync_layout()) {
                 self.error(error);
@@ -910,6 +924,7 @@ impl App {
         }
         self.finish_split_resize();
         self.dismiss_tab_preview();
+        self.close_extension_menu();
         if let Some(handle) = &self.split_handle { handle.configure(None)?; }
         if let Some(handle) = &self.sidebar_handle { handle.configure(None)?; }
         let Some(window) = &self.window else { return Ok(()); };
@@ -2894,6 +2909,9 @@ impl App {
         if let Some(popup) = &self.popup {
             unsafe { SetWindowPos(popup.hwnd(), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
         }
+        if let Some(extension) = &self.extension_view {
+            unsafe { SetWindowPos(extension.view.hwnd(), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
+        }
         for id in watched {
             if let Some(page) = self.pages.get(&id) {
                 // Below the UI, including its new-tab surface; never over an active page.
@@ -2988,6 +3006,94 @@ impl App {
         }));
     }
 
+    fn close_extension_menu(&mut self) {
+        self.extension_view.take();
+        if self.popup_state.remove("extensionMenuAnchor").is_some_and(|anchor| !anchor.is_null()) {
+            self.emit(json!({"type":"popupState","popup":{"extensionMenuAnchor":null}}));
+        }
+    }
+
+    fn can_show_extension_view(&self, rect: Rect) -> bool {
+        rect.valid() && rect.width > 0. && rect.height > 0.
+            && !self.overlay && !self.quit_pending
+            && self.fullscreen_page.is_none() && self.extension_popup.is_none()
+    }
+
+    fn extension_menu_tab(&self) -> Option<&str> {
+        self.popup_state.get("extensionMenuAnchor")?.get("tabId")?.as_str()
+    }
+
+    fn open_extension_view(&mut self, id: &str, rect: Rect) -> Result<(), Box<dyn std::error::Error>> {
+        self.extension_view.take();
+        let page = self.extension_profile(|profile, root| profile.action_page(root, id))?;
+        let active_url = self.extension_menu_tab()
+            .filter(|id| self.state.visible_tab(id))
+            .and_then(|id| self.pages.get(id))
+            .map(|page| page.navigation.current.borrow().clone())
+            .filter(|url| model::is_web(url));
+        let window = self.window.as_ref().ok_or("窗口尚未就绪")?;
+        // The initial WebView is hidden while measuring. Lay it out toward the
+        // window interior so the toolbar anchor doesn't restrict the probe width.
+        let bounds = self.bounds(Rect { x: 0., height: 470., width: 458., ..rect });
+        let ticket = uuid::Uuid::new_v4();
+        let proxy = self.proxy.clone();
+        let view = crate::extension_view::build(browsing_webview(&mut self.context), window, &page.url, active_url.as_deref(), bounds, move |event| {
+            let _ = proxy.send_event(Event::ExtensionView(ticket, event));
+        })?;
+        self.extension_view = Some(ExtensionView {
+            ticket, view, fit_content: page.fit_content, ready: false,
+            visible: false, size: None, next_measure: None,
+        });
+        Ok(())
+    }
+
+    fn measure_extension_view(&mut self) {
+        let Some(extension) = self.extension_view.as_mut() else { return };
+        let proxy = self.proxy.clone();
+        let ticket = extension.ticket;
+        extension.next_measure = None;
+        if crate::extension_view::measure(&extension.view, move |event| {
+            let _ = proxy.send_event(Event::ExtensionView(ticket, event));
+        }).is_err() {
+            let _ = self.proxy.send_event(Event::ExtensionView(ticket, crate::extension_view::Event::Measured(None)));
+        }
+    }
+
+    fn update_extension_size(&mut self, size: Option<[u32; 2]>) {
+        let Some(extension) = self.extension_view.as_mut() else { return };
+        let size = size.or(extension.size);
+        let changed = !extension.ready || extension.size != size;
+        extension.size = size;
+        extension.ready = true;
+        if extension.fit_content {
+            extension.next_measure = Some(Instant::now() + Duration::from_millis(200));
+        }
+        if changed {
+            self.emit(json!({"type":"extensionView","phase":"ready","size":size}));
+        }
+    }
+
+    fn resize_extension_view(&mut self, rect: Rect) {
+        if !self.can_show_extension_view(rect) { return }
+        let bounds = self.bounds(rect);
+        let Some(extension) = self.extension_view.as_mut() else { return };
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            extension.view.set_bounds(bounds)?;
+            if extension.ready && !extension.visible {
+                unsafe { SetWindowPos(extension.view.hwnd(), Some(HWND_TOP), 0, 0, 0, 0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
+                extension.view.set_visible(true)?;
+                extension.view.focus()?;
+                extension.visible = true;
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.extension_view.take();
+            self.emit(json!({"type":"extensionView","phase":"error","message":error.to_string()}));
+        }
+    }
+
     fn emit_extensions(&mut self, items: Option<Vec<extensions::Item>>, error: Option<String>) {
         self.extension_error = error;
         self.publish_extensions(items);
@@ -3051,6 +3157,9 @@ impl App {
             return;
         }
         if self.extension_preparation.is_some() && !matches!(command, Command::ListExtensions) { return; }
+        if matches!(command, Command::EnableExtension { .. } | Command::RemoveExtension { .. }) {
+            self.close_extension_menu();
+        }
         let result = match command {
             Command::ChooseExtension => {
                 let owner = self.window.as_ref().and_then(|window| window.window_handle().ok())
@@ -3257,6 +3366,7 @@ impl App {
                     chrome_store::detail_id(&url::Url::parse(&current).ok()?).map(str::to_owned)
                 });
             if let Some(input) = extension_id {
+                self.close_extension_menu();
                 let popup = uuid::Uuid::new_v4();
                 self.extension_popup = Some(popup);
                 self.extension_candidate = None;
@@ -3305,6 +3415,14 @@ impl App {
             self.close_find(true);
         }
         if matches!(c, Command::OpenSettings { .. }) { self.close_peek(); }
+        if matches!(c,
+            Command::New { .. } | Command::Activate { .. } | Command::OpenBookmark { .. } | Command::Navigate { .. }
+            | Command::Close { .. } | Command::CloseOthers { .. } | Command::CloseBelow { .. }
+            | Command::SwitchSpace { .. } | Command::CreateSpace { .. } | Command::Restore | Command::Move { .. }
+            | Command::OpenSettings { .. } | Command::Split { .. } | Command::SwapSplit { .. } | Command::Unsplit
+        ) {
+            self.close_extension_menu();
+        }
         // The page behind a switch may already exist with its own zoom; the
         // UI only learns a factor from an event, so send the shown page's zoom.
         let zoom_after_transition = matches!(
@@ -3675,6 +3793,7 @@ impl App {
             }
             Command::Overlay { visible, command } => {
                 if visible {
+                    self.close_extension_menu();
                     self.finish_split_resize();
                     self.dismiss_tab_preview();
                 }
@@ -3730,6 +3849,9 @@ impl App {
             Command::PopupState { popup } => {
                 if let Some(patch) = popup.as_object() {
                     let was_open = self.space_form_open();
+                    if patch.get("extensionMenuAnchor").is_some() {
+                        self.extension_view.take();
+                    }
                     for (key, value) in patch { self.popup_state.insert(key.clone(), value.clone()); }
                     self.emit(json!({"type":"popupState","popup":patch}));
                     let form_open = self.space_form_open();
@@ -3741,6 +3863,26 @@ impl App {
                         }
                     }
                 }
+                return;
+            }
+            Command::OpenExtensionView { id, rect } => {
+                if !self.popup_state.get("extensionMenuAnchor").is_some_and(|anchor| anchor.is_object()) {
+                    return;
+                }
+                if !self.can_show_extension_view(rect) {
+                    self.emit(json!({"type":"extensionView","phase":"error"}));
+                } else if let Err(error) = self.open_extension_view(&id, rect) {
+                    self.emit(json!({"type":"extensionView","phase":"error","message":error.to_string()}));
+                }
+                return;
+            }
+            Command::ExtensionViewBounds { rect } => {
+                self.resize_extension_view(rect);
+                return;
+            }
+            Command::CloseExtensionView => {
+                self.extension_view.take();
+                if let Some(popup) = &self.popup { let _ = popup.focus(); }
                 return;
             }
             Command::PopupLayer { regions, cutout, focus, downloads } => {
@@ -4275,6 +4417,26 @@ impl ApplicationHandler<Event> for App {
                     }));
                 }
             }
+            Event::ExtensionView(ticket, event) => {
+                use crate::extension_view::Event as ViewEvent;
+                let Some(extension) = self.extension_view.as_ref().filter(|view| view.ticket == ticket) else { return };
+                match event {
+                    ViewEvent::Loaded => {
+                        if extension.fit_content {
+                            self.measure_extension_view();
+                        } else {
+                            self.update_extension_size(None);
+                        }
+                    }
+                    ViewEvent::Measured(size) => self.update_extension_size(size),
+                    ViewEvent::Failed => {
+                        self.extension_view.take();
+                        self.emit(json!({"type":"extensionView","phase":"error"}));
+                    }
+                    ViewEvent::Close => self.close_extension_menu(),
+                    ViewEvent::Link(url) => self.command(Command::New { url }, Some(event_loop)),
+                }
+            }
             Event::PermissionsChanged => {}, // Wake the event loop so about_to_wait reconciles once.
             Event::ExternalUrls(urls) => {
                 self.external_urls.extend(urls.into_iter().take(32usize.saturating_sub(self.external_urls.len())));
@@ -4698,6 +4860,9 @@ impl ApplicationHandler<Event> for App {
             Event::Source(id, url) => {
                 if self.reader.as_ref().is_some_and(|r| r.id == id && r.url != url) { self.close_reader(); }
                 let source_changed = self.pages.get(&id).is_some_and(|p| p.url != url);
+                if source_changed && self.extension_menu_tab() == Some(id.as_str()) {
+                    self.close_extension_menu();
+                }
                 if source_changed { self.reader_available.remove(&id); self.publish_reader(); }
                 if let Some(p) = self.peek.as_mut().filter(|p| p.tab.id == id) {
                     if model::is_web(&url) {
@@ -4795,6 +4960,7 @@ impl ApplicationHandler<Event> for App {
                 self.publish_default_browser();
             }
             WindowEvent::Focused(false) => {
+                self.close_extension_menu();
                 self.emit(json!({"type":"windowDeactivated"}));
                 self.dismiss_tab_preview();
             }
@@ -4869,7 +5035,11 @@ impl ApplicationHandler<Event> for App {
         if self.download_ops.borrow().is_empty() {
             self.next_download_poll = None;
         }
-        let due = self.next_download_poll.into_iter().chain(self.next_session_save).min();
+        if self.extension_view.as_ref().and_then(|view| view.next_measure).is_some_and(|due| Instant::now() >= due) {
+            self.measure_extension_view();
+        }
+        let due = self.next_download_poll.into_iter().chain(self.next_session_save)
+            .chain(self.extension_view.as_ref().and_then(|view| view.next_measure)).min();
         event_loop.set_control_flow(due.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {

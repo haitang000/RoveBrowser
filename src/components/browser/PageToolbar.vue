@@ -15,9 +15,19 @@ const waiting = computed(() => Boolean(id.value && b.reader.waiting === id.value
 const canRead = computed(() => id.value && (reading.value || waiting.value || b.reader.available.includes(id.value)));
 const address = computed(() => isSettingsUrl(tab.value?.url) ? b.t("设置")
   : host(tab.value?.url || "") || (props.pane ? b.t("新标签页") : "Search or enter address"));
+const extensionsOpen = computed(() => Boolean(b.extensionMenuAnchor && b.extensionMenuAnchor.tabId === id.value));
 
 function act(type: "back" | "forward" | "reload" | "reader") {
   b.send({ type, id: props.pane?.id });
+}
+
+function toggleExtensions(event: MouseEvent) {
+  if (b.extensionMenuAnchor) {
+    b.extensionMenuAnchor = undefined;
+    return;
+  }
+  const { x, y, width, height } = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  b.extensionMenuAnchor = { x, y, width, height, tabId: id.value };
 }
 </script>
 
@@ -41,6 +51,11 @@ function act(type: "back" | "forward" | "reload" | "reader") {
       <Icon v-if="!pane" name="settings" :size="13" />
     </button>
     <div class="toolbar-actions" data-window-control>
+      <button v-if="b.native && !b.onboardingOpen" type="button" class="icon-button extension-menu-trigger"
+        :class="{ chosen: extensionsOpen }" :aria-label="b.t('扩展')" :title="b.t('扩展')"
+        aria-haspopup="dialog" :aria-expanded="extensionsOpen" @click="toggleExtensions">
+        <Icon name="extension" :size="15" />
+      </button>
       <button v-if="canRead" class="icon-button reader-toggle" :class="{ chosen: reading }"
         :aria-label="reading ? b.t('退出阅读模式') : waiting ? b.t('取消阅读模式') : b.t('进入阅读模式')"
         :title="b.shortcutTitle(reading ? b.t('退出阅读模式') : b.t('阅读模式'), 'reader')"

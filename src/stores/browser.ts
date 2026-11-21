@@ -202,6 +202,8 @@ export const useBrowser = defineStore("browser", () => {
   const importBusy = ref(false);
   const extensions = ref<ExtensionsState>({ items: null, review: null, popup: false, busy: false, error: null });
   const extensionBackground = shallowRef<{ rect: Rect; image: string }[]>([]);
+  const extensionMenuAnchor = ref<Rect & { tabId?: string }>();
+  const extensionView = ref<{ phase: "ready" | "error"; size?: [number, number]; message?: string }>();
   const defaultBrowser = ref<{ http: boolean; https: boolean }>();
   const importPhase = ref("checking");
   function scanImports() { importPhase.value = "checking"; if (native) send({ type: "importScan" }); }
@@ -710,6 +712,9 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "extensionBackground" && extensions.value.popup && e.rect && e.image) {
       extensionBackground.value = [...extensionBackground.value, { rect: e.rect, image: e.image }];
     }
+    if (e.type === "extensionView" && (e.phase === "ready" || e.phase === "error")) {
+      extensionView.value = { phase: e.phase, size: e.size ?? undefined, message: e.message };
+    }
     if (e.type === "defaultBrowser" && e.defaultBrowser) defaultBrowser.value = e.defaultBrowser;
     if (e.type === "updateStatus" && typeof e.message === "string" && (e.channel === "canary" || e.channel === "preview")) {
       const phase = updatePhases.find(phase => phase === e.phase) ?? "error";
@@ -808,11 +813,11 @@ export const useBrowser = defineStore("browser", () => {
   // Only transient UI state crosses the trusted popup bridge. Each renderer keeps
   // its own DOM; native browser state continues to come from the host.
   let receivingPopup = false;
-  watch([commandOpen, deskOpen, settingsOpen, contextMenu, spaceEditor, browserMenuOpen, spaceCreation], (surfaces) => {
+  watch([commandOpen, deskOpen, settingsOpen, contextMenu, spaceEditor, browserMenuOpen, spaceCreation, extensionMenuAnchor], (surfaces) => {
     if (surfaces.some(Boolean)) closeDownloads();
   });
   watch(() => peek.value?.id, (id) => { if (id) closeDownloads(); });
-  const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, browserMenuOpen, browserMenuAnchor, spaceCreation, spaceEditor, contextMenu, popupArea, splitControls, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen };
+  const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, browserMenuOpen, browserMenuAnchor, spaceCreation, spaceEditor, contextMenu, popupArea, splitControls, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, extensionMenuAnchor };
   function receivePopup(patch: Record<string, unknown>) {
     receivingPopup = true;
     for (const [key, value] of Object.entries(patch)) {
@@ -852,6 +857,7 @@ export const useBrowser = defineStore("browser", () => {
   return {
     canOutputPage, pageOutputShortcut, outputPage,
     importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser, extensions, extensionBackground,
+    extensionMenuAnchor, extensionView,
     onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,
     native,
     popupWindow,

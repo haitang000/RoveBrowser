@@ -9,6 +9,7 @@ mod clip;
 mod chrome_store;
 mod downloads;
 mod error_page;
+mod extension_view;
 mod extensions;
 mod default_browser;
 mod favicon;

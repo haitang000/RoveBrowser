@@ -122,6 +122,8 @@ pub struct Item {
     version: String,
     enabled: bool,
     source: Source,
+    #[serde(rename = "hasPage")]
+    has_page: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     icon: Option<String>,
 }
@@ -177,12 +179,17 @@ fn json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     Ok(serde_json::from_slice(bytes)?)
 }
 
-fn icon_file(payload: &Path, name: &str) -> Option<String> {
+fn package_file(payload: &Path, name: &str) -> Option<PathBuf> {
     let relative = chrome_store::package_path(name.strip_prefix('/').unwrap_or(name))?;
     let path = payload.join(relative);
-    if !fs::canonicalize(&path).ok()?.starts_with(payload) {
+    if !fs::canonicalize(&path).ok()?.starts_with(payload) || !path.is_file() {
         return None;
     }
+    Some(path)
+}
+
+fn icon_file(payload: &Path, name: &str) -> Option<String> {
+    let path = package_file(payload, name)?;
     let mut bytes = Vec::new();
     regular_file(&path)
         .ok()?
@@ -192,19 +199,23 @@ fn icon_file(payload: &Path, name: &str) -> Option<String> {
     crate::favicon::raster_icon_url(&bytes)
 }
 
-fn extension_icon(package: &Path) -> Option<String> {
+fn package_manifest(package: &Path) -> Option<(PathBuf, serde_json::Value)> {
     let payload = package.join("payload");
     if reparse(&fs::symlink_metadata(&payload).ok()?) {
         return None;
     }
     let payload = fs::canonicalize(payload).ok()?;
-    let manifest: serde_json::Value = json_file(&payload.join("manifest.json")).ok()?;
+    let manifest = json_file(&payload.join("manifest.json")).ok()?;
+    Some((payload, manifest))
+}
+
+fn extension_icon(payload: &Path, manifest: &serde_json::Value) -> Option<String> {
     for icons in [manifest.get("icons"), manifest.pointer("/action/default_icon")]
         .into_iter()
         .flatten()
     {
         if let Some(path) = icons.as_str() {
-            if let Some(icon) = icon_file(&payload, path) {
+            if let Some(icon) = icon_file(payload, path) {
                 return Some(icon);
             }
             continue;
@@ -216,11 +227,41 @@ fn extension_icon(package: &Path) -> Option<String> {
             .collect();
         let target = crate::favicon::MAX_SIDE;
         candidates.sort_unstable_by_key(|(size, _)| (*size < target, size.abs_diff(target)));
-        if let Some(icon) = candidates.into_iter().take(8).find_map(|(_, path)| icon_file(&payload, path)) {
+        if let Some(icon) = candidates.into_iter().take(8).find_map(|(_, path)| icon_file(payload, path)) {
             return Some(icon);
         }
     }
     None
+}
+
+pub struct ActionPage {
+    pub url: url::Url,
+    pub fit_content: bool,
+}
+
+fn extension_page(payload: &Path, manifest: &serde_json::Value, id: &str) -> Option<ActionPage> {
+    if id.len() != 32 || !id.bytes().all(|c| (b'a'..=b'p').contains(&c)) {
+        return None;
+    }
+    let origin = url::Url::parse(&format!("chrome-extension://{id}/")).ok()?;
+    ["/action/default_popup", "/options_ui/page", "/options_page"]
+        .into_iter()
+        .find_map(|field| {
+            let value = manifest.pointer(field)?.as_str()?;
+            let end = value.find(['?', '#']).unwrap_or(value.len());
+            let path = &value[..end];
+            let path = path.trim_start_matches('/').trim_start_matches("./");
+            package_file(payload, path)?;
+            let mut page = origin.clone();
+            page.path_segments_mut().ok()?.clear().extend(path.split('/'));
+            let (query, fragment) = value[end..].split_once('#').unwrap_or((&value[end..], ""));
+            page.set_query(query.strip_prefix('?'));
+            page.set_fragment(value[end..].contains('#').then_some(fragment));
+            Some(ActionPage {
+                url: page,
+                fit_content: field == "/action/default_popup",
+            })
+        })
 }
 
 fn copy_directory(
@@ -424,7 +465,8 @@ fn finish(mut prepared: Prepared, expected_id: Option<&str>) -> Result<Prepared>
         return Err("商店扩展的安装 ID 与已验证的扩展 ID 不一致".into());
     }
     prepared.review.name = localized_name(&manifest, &payload);
-    prepared.review.icon = extension_icon(&prepared.stage);
+    prepared.review.icon = package_manifest(&prepared.stage)
+        .and_then(|(payload, manifest)| extension_icon(&payload, &manifest));
     prepared.review.version = manifest.version;
     prepared.review.permissions = manifest
         .permissions
@@ -544,18 +586,22 @@ impl Profile {
             let Some(extension) = installed.get(&record.id) else {
                 continue;
             };
+            let package = package_manifest(&package);
             unsafe {
                 let mut name = PWSTR::null();
                 let mut enabled = windows::core::BOOL::default();
                 extension.IsEnabled(&mut enabled)?;
                 extension.Name(&mut name)?;
                 items.push(Item {
+                    has_page: package.as_ref().is_some_and(|(payload, manifest)| {
+                        extension_page(payload, manifest, &record.id).is_some()
+                    }),
                     id: record.id,
                     name: take_pwstr(name),
                     version: record.version,
                     enabled: enabled.as_bool(),
                     source: record.source,
-                    icon: extension_icon(&package),
+                    icon: package.and_then(|(payload, manifest)| extension_icon(&payload, &manifest)),
                 });
             }
         }
@@ -619,6 +665,17 @@ impl Profile {
             .remove(id)
             .ok_or("该扩展已从浏览资料中移除")?;
         Ok((path, extension))
+    }
+
+    pub fn action_page(&self, root: &Path, id: &str) -> Result<ActionPage> {
+        let (package, extension) = self.managed(root, id)?;
+        let mut enabled = windows::core::BOOL::default();
+        unsafe { extension.IsEnabled(&mut enabled)?; }
+        if !enabled.as_bool() {
+            return Err("扩展已停用".into());
+        }
+        let (payload, manifest) = package_manifest(&package).ok_or("无法读取扩展清单")?;
+        extension_page(&payload, &manifest, id).ok_or_else(|| "此扩展没有可打开的页面".into())
     }
 
     pub fn enable(&self, root: &Path, id: &str, enabled: bool) -> Result<()> {

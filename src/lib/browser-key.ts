@@ -3,6 +3,11 @@ import { SHORTCUTS, sameShortcut, shortcutFor, shortcutFromEvent } from "./setti
 export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing) return;
   if (b.quitOpen || b.extensions.popup) return;
+  if (e.key === "Escape" && b.extensionMenuAnchor) {
+    e.preventDefault();
+    b.extensionMenuAnchor = undefined;
+    return;
+  }
   if (b.onboardingOpen) return;
   if (e.key === "Escape" && b.splitControls) {
     e.preventDefault();

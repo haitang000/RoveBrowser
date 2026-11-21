@@ -235,6 +235,12 @@ pub enum Command {
     UpdateSettings { settings: crate::settings::Settings },
     #[serde(rename = "extensionsList")]
     ListExtensions,
+    #[serde(rename = "extensionViewOpen")]
+    OpenExtensionView { id: String, rect: Rect },
+    #[serde(rename = "extensionViewBounds")]
+    ExtensionViewBounds { rect: Rect },
+    #[serde(rename = "extensionViewClose")]
+    CloseExtensionView,
     #[serde(rename = "extensionsChoose")]
     ChooseExtension,
     #[serde(rename = "extensionsChromeStore")]

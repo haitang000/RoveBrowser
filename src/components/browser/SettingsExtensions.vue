@@ -78,7 +78,7 @@ onMounted(() => {
       <div class="setting-description">
         <strong>{{ b.t('本地扩展') }}</strong>
         <p>{{ b.t('选择包含 manifest.json 的 Manifest V3 扩展目录。扩展会作用于所有工作区中的匹配网页。') }}</p>
-        <p>{{ b.t('扩展工具栏弹窗和自动更新暂不可用。') }}</p>
+        <p>{{ b.t('扩展自动更新暂不可用。') }}</p>
         <p v-if="!b.native">{{ b.t('请在 Windows 桌面应用中管理扩展。') }}</p>
       </div>
       <button

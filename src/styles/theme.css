@@ -442,6 +442,8 @@ kbd {
 }
 .reader-toggle { app-region:no-drag; flex-shrink:0; }
 .reader-toggle.chosen { background:var(--field-hover); }
+.extension-menu-trigger { flex-shrink: 0; }
+.extension-menu-trigger.chosen { background: var(--field-hover); }
 .favorites {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

@@ -21,6 +21,7 @@ export interface ExtensionItem {
   name: string;
   version: string;
   enabled: boolean;
+  hasPage: boolean;
   source: ExtensionSource;
   icon?: string;
 }
