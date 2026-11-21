@@ -58,48 +58,31 @@ test("zoom events update the menu label and reset becomes available", async ({
   await page.keyboard.press("Escape");
 });
 
-test("the zoom toast drops in and slides out", async ({ page }) => {
+test("the zoom toast slides in and out and updates in place", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(() => {
-    const seen: string[] = [];
-    (window as unknown as { __toastAnimations: string[] }).__toastAnimations =
-      seen;
-    document.addEventListener(
-      "animationstart",
-      (event) => {
-        const target = event.target as Element;
-        if (
-          target.classList.contains("status-toast") ||
-          target.classList.contains("status-toast-surface")
-        )
-          seen.push((event as AnimationEvent).animationName);
-      },
-      true,
-    );
+    document.addEventListener("transitionrun", (event) => {
+      const target = event.target;
+      if (event.propertyName !== "transform" || !(target instanceof Element)) return;
+      const toast = target.parentElement;
+      if (!toast?.matches(".status-toast") || !target.matches(".toast-surface")) return;
+      const root = document.documentElement;
+      const phase = toast.classList.contains("toast-enter-active") ? "enter" : "leave";
+      root.dataset.zoomToastMotion = `${root.dataset.zoomToastMotion ?? ""} ${phase}`.trim();
+    });
   });
   await page.evaluate(() =>
     window.__ERA_RECEIVE__?.({ type: "zoomNotice", factor: 1.1 }),
   );
   const toast = page.locator(".status-toast");
   await expect(toast).toHaveText("110%");
-  await expect
-    .poll(async () =>
-      page.evaluate(
-        () =>
-          (
-            window as unknown as { __toastAnimations: string[] }
-          ).__toastAnimations.includes("zoom-toast-drop-in"),
-      ),
-    )
-    .toBe(true);
-  // The capsule hides itself after 1.2s; the slide-up exit starts first.
-  await expect(toast).toHaveCount(0, { timeout: 3000 });
-  const names = await page.evaluate(
-    () =>
-      (window as unknown as { __toastAnimations: string[] }).__toastAnimations,
+  await expect(toast.locator(".toast-surface > svg:first-child")).toBeVisible();
+  await page.evaluate(() =>
+    window.__ERA_RECEIVE__?.({ type: "zoomNotice", factor: 1.25 }),
   );
-  expect(names).toContain("zoom-toast-fade-in");
-  expect(names).toContain("zoom-toast-slide-out");
+  await expect(toast).toHaveText("125%");
+  await expect(toast).toHaveCount(0, { timeout: 3000 });
+  await expect(page.locator("html")).toHaveAttribute("data-zoom-toast-motion", "enter leave");
 });
 
 test("zoom and mute appear in the command bar for the current page", async ({

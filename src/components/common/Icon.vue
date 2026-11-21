@@ -32,6 +32,7 @@ const paths: Record<string, string> = {
     "M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0M2 8h12M8 2c-4 4-4 8 0 12 4-4 4-8 0-12",
   history: "M2 7a6 6 0 1 1 1 5M1 3v4h4M8 4v4l3 2",
   check: "m3 8 3 3 7-7",
+  warning: "M7.1 2.5a1 1 0 0 1 1.8 0l5.7 10a1 1 0 0 1-.9 1.5H2.3a1 1 0 0 1-.9-1.5zM8 6v3m0 2.5v.1",
   minimize: "M3 8h10",
   maximize: "M3 3h10v10H3z",
   expand: "M2 6V2h4M10 14h4v-4M2 2l4 4M14 14l-4-4",

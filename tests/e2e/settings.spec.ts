@@ -70,6 +70,28 @@ test("settings are a reusable tab with searchable sections and live preferences"
   );
 });
 
+test("the action toast follows the selected appearance and fades with reduced motion", async ({ page }) => {
+  await page.getByRole("switch", { name: "减少动态效果", exact: true }).click();
+  await page.evaluate(() => {
+    document.addEventListener("transitionrun", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const toast = target.closest<HTMLElement>(".action-toast");
+      if (!toast || (target !== toast && !target.matches(".toast-surface"))) return;
+      const motion = `${event.propertyName} ${getComputedStyle(target).transitionDuration}`;
+      toast.dataset.motion = `${toast.dataset.motion ?? ""} ${motion}`.trim();
+    });
+    window.__ERA_RECEIVE__?.({ type: "toast", message: "已复制链接" });
+  });
+  const toast = page.locator(".action-toast");
+  const surface = toast.locator(".toast-surface");
+  await expect(surface).toHaveCSS("background-image", /linear-gradient.*rgb\(255, 255, 255\)/);
+  await expect(surface.locator("svg")).toBeVisible();
+  await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
+  await expect(surface).toHaveCSS("background-image", /linear-gradient.*rgb\(52, 54, 60\)/);
+  await expect(toast).toHaveAttribute("data-motion", "opacity 0.08s");
+});
+
 test("custom engine validates its address and shortcut recording changes actual keys", async ({
   page,
 }) => {

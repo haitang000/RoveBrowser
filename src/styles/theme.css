@@ -1292,120 +1292,130 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
   padding-bottom: 6px;
   color: var(--ink);
 }
-/* Zigzag's zoom Toast: a small capsule near the page's top. The wrapper keeps
- * the layout box (and so the native popup region) still; the capsule inside
- * drops in from above and slides back up on the way out. */
-.status-toast {
-  position: absolute;
-  top: 12px;
+/* Keep the native popup region anchored while the toast surface moves. */
+.toast {
+  --toast-start: #fff;
+  --toast-end: #f0f2f5;
+  --toast-ink: #24272d;
+  --toast-icon: #555c68;
+  --toast-edge: rgb(0 0 0 / 0.10);
+  --toast-shadow: rgb(0 0 0 / 0.16);
+  --toast-button-fill: rgb(0 0 0 / 0.07);
+  --toast-button-hover: rgb(0 0 0 / 0.12);
+  --toast-offset: 12px;
   left: 50%;
+  width: max-content;
+  max-width: min(480px, calc(100% - 24px));
   z-index: 92;
   transform: translateX(-50%);
   pointer-events: none;
 }
-.status-toast-surface {
-  height: 32px;
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  border-radius: 16px;
-  box-shadow: 0 2px 12px var(--panel-shadow);
-  color: var(--ink);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.toast[data-theme="dark"] {
+  --toast-start: #34363c;
+  --toast-end: #23252a;
+  --toast-ink: #f5f6f8;
+  --toast-icon: #bbc0c9;
+  --toast-edge: rgb(255 255 255 / 0.13);
+  --toast-shadow: rgb(0 0 0 / 0.40);
+  --toast-button-fill: rgb(255 255 255 / 0.09);
+  --toast-button-hover: rgb(255 255 255 / 0.16);
 }
-.zoom-toast-enter-active { animation: zoom-toast-fade-in 160ms var(--ease-out) both; }
-.zoom-toast-leave-active { animation: zoom-toast-fade-out 120ms ease both; }
-.zoom-toast-enter-active .status-toast-surface {
-  animation: zoom-toast-drop-in 160ms var(--ease-out) both;
-}
-.zoom-toast-leave-active .status-toast-surface {
-  animation: zoom-toast-slide-out 120ms ease both;
-}
-@keyframes zoom-toast-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes zoom-toast-fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes zoom-toast-drop-in {
-  from { opacity: 0.6; transform: translateY(-10px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes zoom-toast-slide-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(-10px); }
-}
-/* Reduce Motion: the capsule only fades, at the quick duration used elsewhere. */
-@media (prefers-reduced-motion: reduce) {
-  .zoom-toast-enter-active,
-  .zoom-toast-leave-active { animation-duration: 80ms; }
-  .zoom-toast-enter-active .status-toast-surface,
-  .zoom-toast-leave-active .status-toast-surface { animation: none; }
-}
-html[data-reduce-motion="true"] .zoom-toast-enter-active,
-html[data-reduce-motion="true"] .zoom-toast-leave-active { animation-duration: 80ms; }
-html[data-reduce-motion="true"] .zoom-toast-enter-active .status-toast-surface,
-html[data-reduce-motion="true"] .zoom-toast-leave-active .status-toast-surface {
-  animation: none;
-}
-/* Batch action bar at the page's bottom edge: Clear/Close Others confirmations
- * with an Undo button, and small hints such as "link copied". It rises into
- * place and drops away, the mirror of the zoom capsule up top. */
+.status-toast,
 .action-toast {
   position: absolute;
-  bottom: 16px;
-  left: 50%;
-  z-index: 92;
-  transform: translateX(-50%);
-  pointer-events: none;
 }
-.action-toast-surface {
+.status-toast {
+  --toast-offset: -12px;
+  top: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.action-toast {
+  bottom: 16px;
+}
+.error-toast {
+  position: fixed;
+  z-index: 150;
+  bottom: 20px;
+}
+.toast-surface {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 34px;
-  padding: 0 6px 0 14px;
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  border-radius: 17px;
-  box-shadow: 0 2px 14px var(--panel-shadow);
-  color: var(--ink);
+  gap: 8px;
+  min-height: 36px;
+  padding: 5px 11px;
+  background: linear-gradient(160deg, var(--toast-start), var(--toast-end));
+  border: 1px solid var(--toast-edge);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px var(--toast-shadow);
+  color: var(--toast-ink);
   font-size: 13px;
-  white-space: nowrap;
+  line-height: 1.4;
 }
-.action-toast-message {
-  line-height: 1;
+.toast-surface svg {
+  color: var(--toast-icon);
+}
+.toast-message {
+  overflow-wrap: anywhere;
+}
+.toast-button {
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+.toast-button:focus-visible {
+  outline-color: var(--toast-icon);
 }
 .action-toast-undo {
-  pointer-events: auto;
   height: 24px;
-  padding: 0 10px;
-  border-radius: 12px;
-  background: var(--chosen);
-  color: var(--ink);
+  padding: 0 8px;
+  border-radius: 5px;
+  background: var(--toast-button-fill);
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
 }
-.action-toast-undo:hover {
-  background: var(--pressed);
+.toast-button:hover {
+  background: var(--toast-button-hover);
 }
-.toast-bar-enter-active { animation: toast-bar-fade-in 160ms var(--ease-out) both; }
-.toast-bar-leave-active { animation: toast-bar-fade-out 120ms ease both; }
-.toast-bar-enter-active .action-toast-surface {
-  animation: toast-bar-rise-in 160ms var(--ease-out) both;
+.toast-enter-active {
+  --toast-duration: 260ms;
+  --toast-slide-ease: cubic-bezier(.22, 1.45, .38, 1);
+  --toast-fade-ease: ease-out;
 }
-.toast-bar-leave-active .action-toast-surface {
-  animation: toast-bar-drop-out 120ms ease both;
+.toast-leave-active {
+  --toast-duration: 190ms;
+  --toast-slide-ease: cubic-bezier(.32, -.7, .54, 1);
+  --toast-fade-ease: ease-in;
 }
-@keyframes toast-bar-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes toast-bar-fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes toast-bar-rise-in {
-  from { opacity: 0.6; transform: translateY(10px); }
-  to { opacity: 1; transform: none; }
+.toast-leave-active .toast-button {
+  pointer-events: none;
 }
-@keyframes toast-bar-drop-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(8px); }
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity var(--toast-duration) var(--toast-fade-ease);
+}
+:is(.toast-enter-active, .toast-leave-active) .toast-surface {
+  transition: transform var(--toast-duration) var(--toast-slide-ease);
+}
+:is(.toast-enter-from, .toast-leave-to) {
+  opacity: 0;
+}
+:is(.toast-enter-from, .toast-leave-to) .toast-surface {
+  transform: var(--toast-motion-transform, translateY(var(--toast-offset)));
+}
+:root[data-reduce-motion="true"] {
+  --toast-motion-transform: none;
+}
+/* Keep the fade when the global Reduce Motion rule shortens transitions. */
+:root[data-reduce-motion="true"] :is(.toast-enter-active, .toast-leave-active) {
+  transition-duration: 80ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --toast-motion-transform: none;
+  }
+  :is(.toast-enter-active, .toast-leave-active) {
+    transition-duration: 80ms !important;
+  }
 }
 hr {
   border: 0;
@@ -1779,21 +1789,6 @@ hr {
 .empty-space {
   font-size: 12px;
   color: var(--quiet);
-}
-.error-toast {
-  position: fixed;
-  z-index: 150;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  padding: 12px 16px;
-  border-radius: 10px;
-  box-shadow: 0 3px 16px var(--panel-shadow);
-  display: flex;
-  gap: 16px;
-  max-width: 80%;
 }
 .inline-error {
   padding: 12px;
