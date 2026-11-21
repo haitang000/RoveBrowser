@@ -29,20 +29,8 @@ const b = useBrowser(),
   ratio = ref(0.5),
   resizing = ref(false),
   swapping = ref(false),
-  sidebarMotion = ref(false),
-  dropTarget = ref<HTMLElement>();
+  sidebarMotion = ref(false);
 const other = computed(() => b.splitPartner);
-const canDrop = computed(() => b.dragging && !!b.active && !b.spaceFormOpen && !b.peek);
-watch([dropTarget, () => dropTarget.value && b.popupArea], ([target]) => {
-  if (!b.native) return;
-  if (!target) {
-    b.send({ type: "tabDropTarget", rect: null });
-    return;
-  }
-  const { x, y, width, height } = target.getBoundingClientRect();
-  const radius = parseFloat(getComputedStyle(target).borderTopLeftRadius);
-  b.send({ type: "tabDropTarget", rect: { x, y, width, height, corners: [radius, radius, radius, radius] } });
-}, { flush: "post" });
 let ro: ResizeObserver;
 let finishResize: (() => void) | undefined;
 let paneAnimations: Animation[] = [];
@@ -270,23 +258,6 @@ function resize(e: PointerEvent) {
   handle.onpointercancel = finish;
   handle.onlostpointercapture = finish;
 }
-function allowTabDrop(e: DragEvent) {
-  if (!canDrop.value || !e.dataTransfer?.types.includes("text/era-tab")) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-}
-async function split(e: DragEvent) {
-  if (!canDrop.value) return;
-  const id = e.dataTransfer?.getData("text/era-tab");
-  const active = b.active;
-  if (!id || !active) return;
-  e.preventDefault();
-  b.dragging = false;
-  if (id === active.id || id === active.bookmarkId) return;
-  // Restore the live page region before the host captures its split entrance.
-  await nextTick();
-  b.send({ type: "split", id: active.id, other: id });
-}
 </script>
 <template>
   <main
@@ -296,8 +267,6 @@ async function split(e: DragEvent) {
     :aria-hidden="b.spaceFormOpen ? true : undefined"
     :class="{ split: other, resizing: resizing || b.sidebarResizing, 'sidebar-motion-preview': sidebarMotion && !b.native }"
     :style="{ '--split-ratio': ratio }"
-    @dragover="allowTabDrop"
-    @drop="split"
   >
     <div ref="leftPane" class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? '左侧窗格' : undefined">
       <PageToolbar v-if="other && b.active" :pane="b.active" data-chrome-motion="left-pane">
@@ -373,7 +342,7 @@ async function split(e: DragEvent) {
       </div></template
     >
     <SplitControls v-if="!b.native" />
-    <div v-if="canDrop" ref="dropTarget" class="split-drop-target">
+    <div v-if="b.tabSplitGuide" class="split-drop-target">
       <Icon name="split" :size="24" /><span>拖到这里，打开左右分屏</span>
     </div>
     <Peek v-if="!b.native" />

@@ -10,7 +10,6 @@ const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const group = ref<{ $el: HTMLElement }>();
 const drag = useTabDrag();
 const keyOf = (tab: Tab) => tab.bookmarkId || tab.id;
-const tabs = computed(() => props.rows.map(({ tab }) => tab));
 const sourceHere = computed(() => drag?.state.value?.source === group.value?.$el);
 const sourceAway = computed(() => sourceHere.value && drag?.state.value?.target && drag.state.value.target !== group.value?.$el);
 const entries = computed(() => {
@@ -44,9 +43,6 @@ function beforeLeave(element: Element) {
     class="tab-list"
     role="tablist"
     @before-leave="beforeLeave"
-    @dragenter="drag?.over($event, tabs)"
-    @dragover="drag?.over($event, tabs)"
-    @drop.stop="drag?.drop($event, tabs)"
   >
     <template v-for="entry in entries" :key="entry.key">
       <TabItem

@@ -71,7 +71,6 @@ function activate() {
     :tabindex="selected ? 0 : -1"
     :title="previewed ? undefined : rowTitle"
     :aria-describedby="previewed ? 'tab-hover-preview' : undefined"
-    draggable="true"
     @mousedown.middle.prevent
     @auxclick.middle.prevent.stop="unload(primary)"
     @click="activate"

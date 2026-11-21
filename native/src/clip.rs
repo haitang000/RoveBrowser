@@ -43,8 +43,8 @@ struct Shape {
     width: i32,
     height: i32,
     radii: [i32; 4],
-    // Rounded UI card exposed through this child, in physical local coordinates.
-    cutout: Option<[i32; 5]>,
+    // Rounded UI surfaces exposed through this child, in physical local coordinates.
+    cutouts: [Option<[i32; 5]>; 2],
 }
 impl Shape {
     fn new(width: i32, height: i32, corners: [f64; 4], scale: f64) -> Self {
@@ -53,7 +53,7 @@ impl Shape {
             width,
             height,
             radii: corners.map(|r| ((r * scale).round() as i32).clamp(0, limit)),
-            cutout: None,
+            cutouts: [None; 2],
         }
     }
     fn region(self) -> Result<Region> {
@@ -89,7 +89,7 @@ impl Shape {
                     return Err(Error::from_thread());
                 }
             }
-            if let Some([left, top, right, bottom, radius]) = self.cutout {
+            for [left, top, right, bottom, radius] in self.cutouts.into_iter().flatten() {
                 let cut = Region::new(CreateRoundRectRgn(
                     left,
                     top,
@@ -207,15 +207,15 @@ impl WindowClip {
     }
 
     pub fn apply(&self, hwnd: HWND, corners: [f64; 4], scale: f64) -> Result<()> {
-        self.apply_with_cutout(hwnd, corners, scale, None)
+        self.apply_with_cutouts(hwnd, corners, scale, [None; 2])
     }
 
-    pub fn apply_with_cutout(
+    pub fn apply_with_cutouts(
         &self,
         hwnd: HWND,
         corners: [f64; 4],
         scale: f64,
-        cutout: Option<crate::model::Rect>,
+        cutouts: [Option<crate::model::Rect>; 2],
     ) -> Result<()> {
         let mut bounds = RECT::default();
         // SAFETY: hwnd is the live borderless child returned by wry, not the root
@@ -224,14 +224,14 @@ impl WindowClip {
             GetClientRect(hwnd, &mut bounds)?;
         }
         let mut shape = Shape::new(bounds.right, bounds.bottom, corners, scale);
-        shape.cutout = cutout.map(|r| {
-            [
+        shape.cutouts = cutouts.map(|cutout| {
+            cutout.map(|r| [
                 (r.x * scale).floor() as i32,
                 (r.y * scale).floor() as i32,
                 ((r.x + r.width) * scale).ceil() as i32,
                 ((r.y + r.height) * scale).ceil() as i32,
                 (r.corners[0] * scale).round() as i32,
-            ]
+            ])
         });
         self.apply_shape(hwnd, shape)
     }
@@ -288,7 +288,7 @@ mod tests {
         for scale in [1., 1.5, 2.] {
             let mut shape =
                 Shape::new((400. * scale) as i32, (300. * scale) as i32, [7.; 4], scale);
-            shape.cutout =
+            shape.cutouts[0] =
                 Some([-20, 30, 120, 200, 14].map(|v| (f64::from(v) * scale).round() as i32));
             let region = shape.region().unwrap();
             let point = |x: f64, y: f64| contains(&region, (x * scale) as i32, (y * scale) as i32);
@@ -377,7 +377,7 @@ mod tests {
             corners: [6.; 4],
         };
         for cutout in [Some(cutout), None, Some(cutout), None] {
-            clip.apply_with_cutout(window.0, [0.; 4], 1., cutout)
+            clip.apply_with_cutouts(window.0, [0.; 4], 1., [cutout, None])
                 .unwrap();
             let actual = Region::new(unsafe { CreateRectRgn(0, 0, 0, 0) }).unwrap();
             assert_ne!(unsafe { GetWindowRgn(window.0, actual.handle()) }.0, 0);

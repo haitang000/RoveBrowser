@@ -406,7 +406,7 @@ struct App {
     live_resize: bool,
     sidebar_motion: bool,
     overlay: bool,
-    tab_drop_target: Option<Rect>,
+    tab_drag_cutouts: [Option<Rect>; 2],
     quit_pending: bool,
     ready: bool,
     last_error: Option<String>,
@@ -569,7 +569,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         live_resize: false,
         sidebar_motion: false,
         overlay: false,
-        tab_drop_target: None,
+        tab_drag_cutouts: [None; 2],
         quit_pending: false,
         ready: false,
         last_error: None,
@@ -2392,12 +2392,11 @@ impl App {
         let mut visibility = Vec::new();
         let mut focus_peek = false;
         let second = self.state.active().and_then(|t| t.split_with.as_ref());
-        // A native page sits above the trusted shell. Expose just the shell's
-        // drop target, retaining the live page and its viewport around it.
-        let drop_cutout = |pane: Rect| self.tab_drop_target.map(|target| Rect {
-            x: target.x - pane.x,
-            y: target.y - pane.y,
-            ..target
+        // Expose the guide and dragged row without moving or resizing the live panes.
+        let drag_cutouts = |pane: Rect| self.tab_drag_cutouts.map(|cutout| {
+            cutout.filter(|r| r.x < pane.x + pane.width && r.x + r.width > pane.x
+                && r.y < pane.y + pane.height && r.y + r.height > pane.y)
+                .map(|r| Rect { x: r.x - pane.x, y: r.y - pane.y, ..r })
         });
         let watched = self
             .tab_preview
@@ -2424,7 +2423,7 @@ impl App {
                 if self.live_resize { page.clip.clear(page.view.hwnd())?; }
                 page.set_window_bounds(self.bounds(r), window.scale_factor())?;
                 if !self.live_resize && !page.resize_surface.dragging() {
-                    page.clip.apply_with_cutout(page.view.hwnd(), r.corners, window.scale_factor(), drop_cutout(r))?;
+                    page.clip.apply_with_cutouts(page.view.hwnd(), r.corners, window.scale_factor(), drag_cutouts(r))?;
                 }
                 visibility_changed |= !page.visible.get();
                 visibility.push((Some(id.as_str()), page, true));
@@ -2463,7 +2462,7 @@ impl App {
                 let original = &reader.original;
                 original.set_window_bounds(self.bounds(rect), window.scale_factor())?;
                 original.sync_viewport()?;
-                original.clip.apply_with_cutout(original.view.hwnd(), rect.corners, window.scale_factor(), drop_cutout(rect))?;
+                original.clip.apply_with_cutouts(original.view.hwnd(), rect.corners, window.scale_factor(), drag_cutouts(rect))?;
                 original.set_visible(reader.transitioning)?;
                 if reader.transitioning {
                     if let Some(page) = self.pages.get(&reader.id) {
@@ -3096,7 +3095,7 @@ impl App {
             if matches!(c, Command::OnboardingOpen) {
                 self.finish_split_resize(); self.dismiss_tab_preview(); self.close_peek(); self.close_find(true);
                 self.overlay = false;
-                self.tab_drop_target = None;
+                self.tab_drag_cutouts = [None; 2];
             }
             let make_default = matches!(c, Command::OnboardingAdvance { step: crate::onboarding::Step::Ready, make_default: true, .. });
             if let Err(e) = self.state.apply(&c) { self.error(e); return; }
@@ -3553,7 +3552,7 @@ impl App {
                 }
                 if visible && !self.overlay && !command { self.refresh_visible_thumbnails(); }
                 self.overlay = visible;
-                if !visible { self.tab_drop_target = None; }
+                if !visible { self.tab_drag_cutouts = [None; 2]; }
                 if !visible && self.split_entry_pending {
                     self.animate_split_entry();
                 } else if let Err(e) = self.sync_layout() { self.error(e); }
@@ -3566,10 +3565,15 @@ impl App {
                 }
                 return;
             }
-            Command::TabDropTarget { rect } => {
-                if rect.is_some_and(|r| !self.overlay || !r.valid() || r.width <= 0. || r.height <= 0.) { return; }
-                if rect.is_none() && self.tab_drop_target.is_none() { return; }
-                self.tab_drop_target = rect;
+            Command::TabDropTarget { rect, preview } => {
+                let cutouts = [rect, preview];
+                if cutouts.into_iter().flatten().any(|r| {
+                    // The row can partly leave the client area while the pointer is captured.
+                    let bounds = Rect { x: r.x.abs(), y: r.y.abs(), ..r };
+                    !self.overlay || !bounds.valid() || r.width <= 0. || r.height <= 0.
+                }) { return; }
+                if cutouts.iter().all(Option::is_none) && self.tab_drag_cutouts.iter().all(Option::is_none) { return; }
+                self.tab_drag_cutouts = cutouts;
                 if let Err(e) = self.sync_page_bounds() { self.error(e); }
                 return;
             }

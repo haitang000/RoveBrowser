@@ -23,21 +23,11 @@ function open(f: Favorite, e: MouseEvent) {
 function showMenu(e: MouseEvent, favorite: Favorite) {
   b.contextMenu = { favorite, x: Math.min(e.clientX, innerWidth - 220), y: Math.max(32, Math.min(e.clientY, innerHeight - 340)) };
 }
-function drag(e: DragEvent, f: Favorite) {
-  e.dataTransfer?.setData("text/era-tab", f.id);
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-  b.dragging = true;
-}
-function drop(e: DragEvent, before?: string) {
-  const id = e.dataTransfer?.getData("text/era-tab");
-  if (id && id !== before) b.send({ type: "favoriteTab", id, before });
-  b.dragging = false;
-}
 </script>
 <template>
-  <div class="favorites" :style="{gridTemplateColumns: b.settings.favoritesPerRow ? `repeat(${b.settings.favoritesPerRow}, minmax(0, 1fr))` : 'repeat(auto-fit, minmax(56px, 1fr))'}" aria-label="常用网站" @dragover.prevent @drop.prevent.self="drop($event)">
-    <div v-for="f in tiles" :key="f.id" class="favorite-tile" :data-bookmark-id="f.id" draggable="true" @dragstart="drag($event, f)" @dragend="b.dragging = false" @dragover.prevent @drop.prevent.stop="drop($event, f.id)" @contextmenu.prevent="showMenu($event, f)" @mousedown.middle.prevent @auxclick.middle.prevent.stop="b.send({ type: 'bookmarkUnload', id: f.id })">
-    <button class="favorite-open" draggable="true" @dragstart.stop="drag($event, f)"
+  <div class="favorites" :style="{gridTemplateColumns: b.settings.favoritesPerRow ? `repeat(${b.settings.favoritesPerRow}, minmax(0, 1fr))` : 'repeat(auto-fit, minmax(56px, 1fr))'}" aria-label="常用网站">
+    <div v-for="f in tiles" :key="f.id" class="favorite-tile" :data-bookmark-id="f.id" @contextmenu.prevent="showMenu($event, f)" @mousedown.middle.prevent @auxclick.middle.prevent.stop="b.send({ type: 'bookmarkUnload', id: f.id })">
+    <button class="favorite-open"
       :title="b.previewTarget === f.id ? undefined : f.title"
       :aria-describedby="b.previewTarget === f.id ? 'tab-hover-preview' : undefined"
       :aria-label="f.title"

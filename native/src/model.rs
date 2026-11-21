@@ -433,7 +433,7 @@ pub enum Command {
         command: bool,
     },
     #[serde(rename = "tabDropTarget")]
-    TabDropTarget { rect: Option<Rect> },
+    TabDropTarget { rect: Option<Rect>, preview: Option<Rect> },
     #[serde(rename = "popupReady")]
     PopupReady,
     #[serde(rename = "permissionAnswer")]

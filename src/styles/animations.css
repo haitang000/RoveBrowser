@@ -64,7 +64,7 @@ html[data-reduce-motion="true"] :is(.bubble-enter-active, .bubble-leave-active) 
   background: var(--hover);
   pointer-events: none;
 }
-.tab-drag-item {
+body > .tab-drag-item {
   position: fixed;
   z-index: 10000;
   margin: 0;
@@ -76,6 +76,11 @@ html[data-reduce-motion="true"] :is(.bubble-enter-active, .bubble-leave-active) 
   pointer-events: none;
   transition: none;
   will-change: transform;
+}
+body > .tab-drag-favorite {
+  grid-template-columns: minmax(0, 1fr);
+  border-radius: 8px;
+  overflow: hidden;
 }
 .tab-drag-item .tab-picture,
 .tab-drag-item .tab-title {

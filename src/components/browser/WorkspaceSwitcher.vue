@@ -3,11 +3,12 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
 import BrowserMenu from "./BrowserMenu.vue";
+import { useTabDrag } from "../../lib/tab-drag";
 
 const b = useBrowser();
 const trigger = ref<HTMLButtonElement>();
 // Keep the drag source and drop targets in the shell WebView on Windows.
-const dragMenuOpen = ref(false);
+const dragMenuOpen = useTabDrag()?.menuOpen;
 
 function syncAnchor() {
   const rect = trigger.value?.getBoundingClientRect();
@@ -28,16 +29,8 @@ function toggleMenu() {
   b.closeDownloads();
   b.browserMenuOpen = true;
 }
-function openDropMenu(event: DragEvent) {
-  if (!b.dragging || !event.dataTransfer?.types.includes("text/era-tab")) return;
-  event.preventDefault();
-  if (dragMenuOpen.value) return;
-  syncAnchor();
-  dragMenuOpen.value = true;
-}
-
 let observer: ResizeObserver;
-watch(() => b.dragging, (dragging) => { if (!dragging) dragMenuOpen.value = false; });
+watch(() => dragMenuOpen?.value, (open) => { if (open) syncAnchor(); });
 watch(() => [b.downloadsOpen, b.state.sidebarCollapsed, b.state.sidebarWidth], syncAnchor, { flush: "post" });
 onMounted(() => {
   observer = new ResizeObserver(syncAnchor);
@@ -65,7 +58,6 @@ onBeforeUnmount(() => {
       :aria-controls="dragMenuOpen ? 'browser-menu-drop-targets' : 'browser-menu'"
       @click="toggleMenu"
       @keydown.down.prevent="!b.browserMenuOpen && toggleMenu()"
-      @dragover="openDropMenu"
     >
       <Icon name="more" :size="15" />
       <span v-if="b.activeDownloads" class="downloads-badge" aria-hidden="true">{{ b.activeDownloads }}</span>

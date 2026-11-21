@@ -27,7 +27,8 @@ function showMenu(e: MouseEvent, tab: Tab) {
 }
 </script>
 <template>
-  <aside ref="sidebar" class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)" @dragstart.capture="tabDrag.start">
+  <aside ref="sidebar" class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)"
+    @pointerdown="tabDrag.press" @lostpointercapture="tabDrag.captureLost">
     <template v-if="b.splitPartner">
       <div class="split-sidebar-top" data-window-drag data-chrome-motion="sidebar-toolbar">
         <button class="icon-button" aria-label="收起侧栏" :title="b.shortcutTitle('收起侧栏', 'sidebar')"

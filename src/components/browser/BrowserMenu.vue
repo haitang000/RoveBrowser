@@ -67,18 +67,6 @@ function selectSpace(id: string) {
   if (id === b.state.activeSpace) b.toggleSpaceEditor(id);
   else b.send({ type: "space", id });
 }
-function allowDrop(event: DragEvent) {
-  if (!event.dataTransfer?.types.includes("text/era-tab")) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "move";
-}
-function moveTab(event: DragEvent, spaceId: string) {
-  const id = event.dataTransfer?.getData("text/era-tab");
-  if (!id) return;
-  event.preventDefault();
-  b.send({ type: "move", id, spaceId });
-  b.dragging = false;
-}
 watch(open, async (visible) => {
   if (!visible || props.dropTargetsOnly) return;
   await nextTick();
@@ -147,7 +135,8 @@ onBeforeUnmount(() => {
             <button v-for="(space, index) in b.state.spaces" :key="space.id" role="menuitem" tabindex="-1"
               :aria-label="`工作区 ${space.name}`" :aria-current="space.id === b.state.activeSpace ? 'true' : undefined"
               :title="space.id === b.state.activeSpace && !dropTargetsOnly ? `编辑 ${space.name}` : space.name"
-              @click="!dropTargetsOnly && selectSpace(space.id)" @dragover="allowDrop" @drop="moveTab($event, space.id)">
+              :data-tab-drop-space="dropTargetsOnly ? space.id : undefined"
+              @click="!dropTargetsOnly && selectSpace(space.id)">
               <SpaceGlyph v-if="space.icon" :icon="space.icon" :size="16" /><Icon v-else name="spaces" :size="16" />
               <span>{{ space.name }}</span>
               <kbd v-if="!dropTargetsOnly && index < 9">Ctrl+{{ index + 1 }}</kbd>
