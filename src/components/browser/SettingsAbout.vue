@@ -73,15 +73,5 @@ function changeChannel(event: Event) {
         </select>
       </div>
     </section>
-
-    <section class="about-card" :aria-label="b.t('欢迎引导')">
-      <div class="setting-row">
-        <div class="setting-description">
-          <strong>{{ b.t('欢迎引导') }}</strong>
-          <p>{{ b.t('重新选择常用网站，或了解首次使用流程。') }}</p>
-        </div>
-        <button class="setting-button" :aria-label="b.t('打开欢迎引导')" @click="b.openOnboarding()">{{ b.t('打开') }}</button>
-      </div>
-    </section>
   </div>
 </template>

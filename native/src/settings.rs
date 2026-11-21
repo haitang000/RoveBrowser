@@ -107,7 +107,7 @@ pub fn normalize_settings_url(value: &str) -> Option<String> {
 pub fn settings_url(pane: Option<&str>) -> String {
     match pane {
         Some(
-            p @ ("spaces" | "passwords" | "privacy" | "translation" | "extensions" | "shortcuts" | "about"),
+            p @ ("spaces" | "passwords" | "privacy" | "translation" | "accessibility" | "extensions" | "shortcuts" | "about"),
         ) => format!("rove://settings/{p}"),
         _ => "rove://settings".into(),
     }
@@ -330,6 +330,19 @@ mod tests {
         state.apply(&Command::OpenSettings { pane: None }).unwrap();
         assert_eq!(state.active_tab, id);
         assert_eq!(state.active().unwrap().url, "rove://settings/privacy");
+        state
+            .apply(&Command::SettingsPane {
+                id: id.clone(),
+                pane: "accessibility".into(),
+            })
+            .unwrap();
+        assert_eq!(state.active().unwrap().url, "rove://settings/accessibility");
+        state
+            .apply(&Command::SettingsPane {
+                id: id.clone(),
+                pane: "privacy".into(),
+            })
+            .unwrap();
         state.settings.search_engine = "baidu".into();
         state.settings.reduce_motion = true;
         assert_eq!(

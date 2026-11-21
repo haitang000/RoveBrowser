@@ -33,6 +33,7 @@ const paths: Record<string, string> = {
   history: "M2 7a6 6 0 1 1 1 5M1 3v4h4M8 4v4l3 2",
   check: "m3 8 3 3 7-7",
   info: "M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0M8 7.5v3.25M8 5.25h.01",
+  accessibility: "M8 1.9a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8M3.3 7.15h9.4M8 6.2v3.5M5.25 14.25 8 9.7l2.75 4.55",
   warning: "M7.1 2.5a1 1 0 0 1 1.8 0l5.7 10a1 1 0 0 1-.9 1.5H2.3a1 1 0 0 1-.9-1.5zM8 6v3m0 2.5v.1",
   minimize: "M3 8h10",
   maximize: "M3 3h10v10H3z",

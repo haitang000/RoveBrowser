@@ -84,7 +84,7 @@ function trapFocus(event: KeyboardEvent) {
 }
 const navigationIds = [
   ["general", "spaces", "shortcuts"],
-  ["privacy", "passwords", "translation", "about"],
+  ["privacy", "passwords", "translation", "accessibility", "about"],
   ["extensions"],
 ] as const satisfies readonly (readonly SettingsPane[])[];
 const navigationGroups = navigationIds.map((ids) =>
@@ -232,6 +232,12 @@ const groups = computed<Group[]>(() => [
         setting: "askBeforeQuit",
         keywords: "ask before quitting",
       },
+    ],
+  },
+  {
+    pane: "accessibility",
+    title: b.t("动态效果"),
+    rows: [
       {
         id: "motion",
         title: b.t("减少动态效果"),
@@ -268,6 +274,20 @@ const groups = computed<Group[]>(() => [
         kind: "input",
         setting: "downloadFolder",
         keywords: "downloads folder",
+      },
+    ],
+  },
+  {
+    pane: "general",
+    title: b.t("欢迎引导"),
+    rows: [
+      {
+        id: "onboarding",
+        title: b.t("重新选择常用网站，或了解首次使用流程。"),
+        detail: "",
+        kind: "button",
+        action: b.t("打开"),
+        keywords: "onboarding welcome guide 欢迎引导 欢迎向导",
       },
     ],
   },
@@ -393,7 +413,7 @@ const showShortcuts = computed(
     !!visibleShortcuts.value.length,
 );
 const aboutPane = SETTINGS_PANES.find((item) => item.id === "about")!;
-const aboutSummary = computed(() => b.t("当前版本、软件更新、更新通道和欢迎引导。"));
+const aboutSummary = computed(() => b.t("当前版本、软件更新和更新通道。"));
 const showAboutResult = computed(() =>
   searching.value && matches(b.t(aboutPane.title), aboutSummary.value, aboutPane.keywords),
 );
@@ -449,6 +469,10 @@ function saveInput(id: string) {
   } else update("downloadFolder", folder.value.trim());
 }
 function action(row: Row) {
+  if (row.id === "onboarding") {
+    b.openOnboarding();
+    return;
+  }
   if (row.id === "default") {
     if (!b.native) { notice.value = b.t("请在 Rove 桌面版中设置默认浏览器。"); return; }
     b.send({ type: "systemSettings" });
@@ -708,7 +732,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   :id="`setting-${row.id}-${tabId}`"
                   class="setting-button"
                   :disabled="row.id === 'default' && !b.native"
-                  :aria-label="row.id === 'default' ? row.action : `${row.action}${row.title}`"
+                  :aria-label="row.id === 'onboarding' ? b.t('打开欢迎引导') : row.id === 'default' ? row.action : `${row.action}${row.title}`"
                   @click="action(row)"
                 >
                   <SearchHighlight :text="row.action!" :words="words" />

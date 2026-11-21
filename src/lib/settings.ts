@@ -34,6 +34,12 @@ export const SETTINGS_PANES = [
     keywords: "translation 语言",
   },
   {
+    id: "accessibility",
+    title: "无障碍",
+    icon: "accessibility",
+    keywords: "accessibility a11y motion 无障碍 减少动态",
+  },
+  {
     id: "extensions",
     title: "扩展",
     icon: "extension",
@@ -49,7 +55,7 @@ export const SETTINGS_PANES = [
     id: "about",
     title: "关于 Rove",
     icon: "info",
-    keywords: "about version check for updates preview canary github gitlab onboarding welcome 关于 版本 软件更新 检查更新 更新通道 欢迎引导",
+    keywords: "about version check for updates preview canary github gitlab 关于 版本 软件更新 检查更新 更新通道",
   },
 ] as const;
 export type SettingsPane = (typeof SETTINGS_PANES)[number]["id"];

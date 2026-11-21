@@ -67,11 +67,15 @@ test("settings are a reusable tab with searchable sections and live preferences"
         (e) => getComputedStyle(e).gridTemplateColumns.split(" ").length,
       ),
   ).toBe(2);
+  await expect(page.getByRole("switch", { name: "减少动态效果", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "无障碍", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "无障碍", exact: true })).toBeVisible();
   await page.getByRole("switch", { name: "减少动态效果", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute(
     "data-reduce-motion",
     "true",
   );
+  await page.getByRole("button", { name: "通用", exact: true }).click();
   await page
     .getByRole("combobox", { name: "外观", exact: true })
     .selectOption("dark");
@@ -107,7 +111,9 @@ test("settings are a reusable tab with searchable sections and live preferences"
 });
 
 test("the action toast follows the selected appearance and fades with reduced motion", async ({ page }) => {
+  await page.getByRole("button", { name: "无障碍", exact: true }).click();
   await page.getByRole("switch", { name: "减少动态效果", exact: true }).click();
+  await page.getByRole("button", { name: "通用", exact: true }).click();
   await page.evaluate(() => {
     document.addEventListener("transitionrun", (event) => {
       const target = event.target;
