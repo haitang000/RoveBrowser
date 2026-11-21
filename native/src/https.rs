@@ -33,6 +33,20 @@ pub fn fetch(
     timeouts: [i32; 4],
     write: &mut dyn FnMut(&[u8]) -> Result<(), String>,
 ) -> Result<(), Error> {
+    fetch_with_progress(start, allowed, accept, max, timeouts, write, &mut |_, _| {})
+}
+
+/// `progress` receives bytes saved so far and the declared length, when the
+/// response included Content-Length. It runs only for the final response.
+pub fn fetch_with_progress(
+    start: &Url,
+    allowed: impl Fn(&Url) -> bool,
+    accept: &str,
+    max: u64,
+    timeouts: [i32; 4],
+    write: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<(), Error> {
     let mut current = start.clone();
     for _ in 0..5 {
         if !allowed(&current)
@@ -43,7 +57,7 @@ pub fn fetch(
         {
             return Err(Error::InvalidUrl);
         }
-        match exchange(&current, accept, max, timeouts, write)? {
+        match exchange(&current, accept, max, timeouts, write, progress)? {
             Hop::Done => return Ok(()),
             Hop::Redirect(location) => {
                 current = current.join(&location).map_err(|_| Error::InvalidUrl)?;
@@ -79,6 +93,7 @@ fn exchange(
     max: u64,
     timeouts: [i32; 4],
     write: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+    progress: &mut dyn FnMut(u64, Option<u64>),
 ) -> Result<Hop, Error> {
     let host = wide(url.host_str().ok_or(Error::InvalidUrl)?);
     let request_target = wide(target(url)?);
@@ -163,6 +178,7 @@ fn exchange(
             return Err(Error::TooLarge);
         }
         let mut received = 0u64;
+        progress(received, declared);
         let mut chunk = [0u8; 16384];
         loop {
             let mut read = 0;
@@ -181,6 +197,7 @@ fn exchange(
                 return Err(Error::TooLarge);
             }
             write(&chunk[..read as usize]).map_err(Error::Write)?;
+            progress(received, declared);
         }
     }
 }

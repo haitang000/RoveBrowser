@@ -182,7 +182,13 @@ impl Offer {
         progress(report.clone());
         let result = (|| {
             let update = PreparedUpdate::new(target, kind)?;
-            download(channel, &release, &update.package())?;
+            let notify = &progress;
+            download(channel, &release, &update.package(), &mut |received, total| {
+                let Some(message) = download_progress(received, total) else { return };
+                if message == report.message { return; }
+                report.message = message;
+                notify(report.clone());
+            })?;
             if kind == PackageKind::Portable {
                 report.phase = "extracting";
                 report.message = "正在解压更新包。".into();
@@ -470,7 +476,12 @@ fn brief(text: &str) -> String {
     if text.chars().count() > 160 && !trimmed.is_empty() { format!("{trimmed}…") } else { trimmed }
 }
 
-fn download(channel: Channel, release: &Release, path: &Path) -> Result<(), String> {
+fn download(
+    channel: Channel,
+    release: &Release,
+    path: &Path,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<(), String> {
     let url = Url::parse(&release.asset_url).map_err(|_| "发布文件地址无效。")?;
     let expected = if let Some(expected) = &release.checksum {
         expected.clone()
@@ -480,11 +491,38 @@ fn download(channel: Channel, release: &Release, path: &Path) -> Result<(), Stri
     } else {
         return Err("发布页缺少更新包的 SHA-256 校验值。".into());
     };
-    save_to(&url, channel, path, PACKAGE_LIMIT)?;
+    save_to(&url, channel, path, PACKAGE_LIMIT, progress)?;
     if !sha256_file(path)?.eq_ignore_ascii_case(&expected) {
         return Err("更新包校验失败，已取消安装。".into());
     }
     Ok(())
+}
+/// Percent when the server sent a length, otherwise the size saved so far.
+fn download_progress(received: u64, total: Option<u64>) -> Option<String> {
+    let label = if let Some(total) = total.filter(|total| *total > 0) {
+        let percent = received.saturating_mul(100) / total;
+        format!("{}%", percent.min(100))
+    } else if received > 0 {
+        format_bytes(received)
+    } else {
+        return None;
+    };
+    Some(format!("正在下载并校验更新包（{label}）。"))
+}
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    let whole = unit == 0 || value >= 10.0 || (value - value.round()).abs() < 1e-9;
+    if whole {
+        format!("{} {}", value.round() as u64, UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 fn sha256_digest(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit())
@@ -550,17 +588,37 @@ fn get_bytes(url: &Url, channel: Channel, api: bool, accept: &str, max: u64) -> 
     if body.is_empty() { return Err("更新服务器没有返回发布信息。".into()); }
     Ok(body)
 }
-fn save_to(url: &Url, channel: Channel, path: &Path, max: u64) -> Result<(), String> {
+fn save_to(
+    url: &Url,
+    channel: Channel,
+    path: &Path,
+    max: u64,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<(), String> {
     let mut file = std::fs::File::create_new(path).map_err(|_| "无法保存安装包。")?;
-    let result = fetch(url, channel, false, "application/octet-stream", max, DOWNLOAD_TIMEOUTS, &mut |chunk| {
+    let result = fetch_with_progress(url, channel, max, DOWNLOAD_TIMEOUTS, &mut |chunk| {
         file.write_all(chunk).map_err(|_| "无法保存安装包。".into())
-    });
+    }, progress);
     drop(file);
     if result.is_err() { let _ = std::fs::remove_file(path); }
     result
 }
 fn fetch(start: &Url, channel: Channel, api: bool, accept: &str, max: u64, timeouts: [i32; 4], write: &mut dyn FnMut(&[u8]) -> Result<(), String>) -> Result<(), String> {
-    https::fetch(start, |url| allowed(channel, api, url), accept, max, timeouts, write).map_err(|error| match error {
+    https::fetch(start, |url| allowed(channel, api, url), accept, max, timeouts, write).map_err(fetch_error)
+}
+fn fetch_with_progress(
+    start: &Url,
+    channel: Channel,
+    max: u64,
+    timeouts: [i32; 4],
+    write: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<(), String> {
+    https::fetch_with_progress(start, |url| allowed(channel, false, url), "application/octet-stream", max, timeouts, write, progress)
+        .map_err(fetch_error)
+}
+fn fetch_error(error: https::Error) -> String {
+    match error {
         https::Error::InvalidUrl => "更新地址不在该通道的服务器上。".into(),
         https::Error::RedirectLimit => "更新地址重定向过多。".into(),
         https::Error::Transport => "无法连接更新服务器，请稍后再试。".into(),
@@ -570,7 +628,7 @@ fn fetch(start: &Url, channel: Channel, api: bool, accept: &str, max: u64, timeo
         }
         https::Error::TooLarge => "更新服务器返回的内容过大。".into(),
         https::Error::Write(message) => message,
-    })
+    }
 }
 fn status_message(status: u32) -> String {
     if status == 403 || status == 429 { "更新服务器暂时限制了检查，请稍后再试。".into() }
@@ -648,6 +706,17 @@ mod tests {
         let target = request_target(&Url::parse(CANARY_PIPELINES).unwrap()).unwrap();
         assert!(target.contains("haitang000%2Frovebrowser"));
         assert!(target.contains("ref=main"));
+    }
+    #[test]
+    fn download_progress_is_shown_in_parentheses() {
+        assert_eq!(download_progress(0, Some(1000)).as_deref(), Some("正在下载并校验更新包（0%）。"));
+        assert_eq!(download_progress(420, Some(1000)).as_deref(), Some("正在下载并校验更新包（42%）。"));
+        assert_eq!(download_progress(1000, Some(1000)).as_deref(), Some("正在下载并校验更新包（100%）。"));
+        assert_eq!(download_progress(1500, Some(1000)).as_deref(), Some("正在下载并校验更新包（100%）。"));
+        assert_eq!(download_progress(1536, None).as_deref(), Some("正在下载并校验更新包（1.5 KB）。"));
+        assert_eq!(download_progress(10 * 1024 * 1024, None).as_deref(), Some("正在下载并校验更新包（10 MB）。"));
+        assert!(download_progress(0, None).is_none());
+        assert!(download_progress(0, Some(0)).is_none());
     }
     #[test]
     fn checksum_lines_match_the_installer_name() {

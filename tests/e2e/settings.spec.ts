@@ -381,8 +381,8 @@ test("an available update waits for explicit confirmation and sends the displaye
   await update.click();
   await dialog.getByRole("button", { name: "确认更新并重启" }).click();
   expect(await commands()).toEqual([{ type: "updateCheck" }, { type: "updateInstall", offerId }]);
-  await status("downloading", "正在下载并校验更新包。");
-  await expect(page.getByRole("status")).toHaveText("正在下载并校验更新包。");
+  await status("downloading", "正在下载并校验更新包（42%）。");
+  await expect(page.getByRole("status")).toHaveText("正在下载并校验更新包（42%）。");
   await expect(update).toHaveCount(0);
   await status("error", "更新包校验失败，已取消安装。");
   await expect(page.getByRole("status")).toHaveText("更新包校验失败，已取消安装。");
