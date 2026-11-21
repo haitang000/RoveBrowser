@@ -235,6 +235,10 @@ pub enum Command {
     ListExtensions,
     #[serde(rename = "extensionsChoose")]
     ChooseExtension,
+    #[serde(rename = "extensionsChromeStore")]
+    PrepareChromeStoreExtension { input: String },
+    #[serde(rename = "extensionsChromeStoreTab")]
+    PrepareChromeStoreTab { id: String },
     #[serde(rename = "extensionsReview")]
     ReviewExtension { ticket: String, install: bool },
     #[serde(rename = "extensionsEnable")]

@@ -33,6 +33,8 @@ Rove 是一款面向 Windows 10/11 的浏览器，使用 WebView2 加载网页�
 
 在「设置 → 扩展」点击「加载本地扩展」，选择包含 `manifest.json` 的 Manifest V3 扩展目录并确认权限。Rove 保存独立副本，扩展会作用于所有工作区的匹配网页。可以随时停用或卸载；手动更新时，卸载后再加载新版本。
 
+也可在「设置 → 扩展」粘贴 Chrome 网上应用店的详情链接或扩展 ID。浏览扩展详情页时，浏览器菜单提供「安装此商店扩展」。Rove 下载公开的 CRX3 安装包，验证商店签名和开发者签名，保留官方扩展 ID，再显示权限供确认。
+
 ## 开发
 
 ### 环境要求
@@ -86,6 +88,7 @@ npm run test:native:resize              # 界面脚本阻塞时的窗口缩放�
 npm run test:native:sleep               # 后台标签休眠、真实 TrySuspend/Resume 与设置开关专项
 npm run test:native:reader              # 阅读提取、外观、查找、分屏与原网页恢复（需先构建 Debug）
 npm run test:native:extensions          # 本地扩展生命周期和应用界面隔离（需先构建 Debug）
+npm run test:native:chrome-store        # 使用真实 Chrome 网上应用店验证安装（需先构建 Debug，并能访问 Google）
 ```
 
 原生冒烟测试需要先构建 Debug 程序；其他专项测试及其构建前提见 `package.json` 的 `test:native:*` 脚本。原生测试使用临时用户目录和本地测试网页；实际验证范围和已知测试限制见 [验证记录](docs/VALIDATION.md)。
@@ -101,7 +104,7 @@ npm run test:native:extensions          # 本地扩展生命周期和应用界�
 
 ## 已知限制
 
-- 扩展目前通过解包目录安装。Chrome 网上应用店、自动更新和扩展工具栏弹窗尚未接入，依赖这些入口的扩展可能无法使用。
+- 扩展支持本地解包目录和公开的 Chrome 网上应用店 Manifest V3 安装包。扩展自动更新、工具栏弹窗和侧栏暂不可用。
 - 广告拦截后端、文件夹和站点权限管理界面尚未实现。
 - 分屏组合可恢复，但分屏比例暂不跨重启保存；侧栏尚无原生浮动侧栏的边缘呼出。
 - 后台标签休眠不检测页面里尚未提交的输入，也没有站点级的“保持唤醒”；播放声音、加载中与当前分屏的页面不会休眠。

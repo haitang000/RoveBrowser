@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
-import type { ExtensionItem } from "../../lib/extensions";
+import { CHROME_STORE_URL, type ExtensionItem } from "../../lib/extensions";
 import type { Command } from "../../lib/types";
 import { useBrowser } from "../../stores/browser";
 
@@ -9,6 +9,7 @@ const removal = ref<ExtensionItem | null>(null);
 const choose = ref<HTMLButtonElement>();
 const cancelReview = ref<HTMLButtonElement>();
 const cancelRemoval = ref<HTMLButtonElement>();
+const storeInput = ref("");
 
 function run(command: Command) {
   if (!b.native || b.extensions.busy) return;
@@ -38,16 +39,41 @@ watch(removal, async (item) => {
   }
 });
 
-onMounted(() => run({ type: "extensionsList" }));
+onMounted(() => {
+  if (b.extensions.busy) b.send({ type: "extensionsList" });
+  else run({ type: "extensionsList" });
+});
 </script>
 
 <template>
   <section class="settings-group extension-settings" aria-label="浏览器扩展" :aria-busy="b.extensions.busy">
     <div class="setting-row extension-intro">
       <div class="setting-description">
+        <strong>Chrome 网上应用店</strong>
+        <p>粘贴扩展详情链接或 ID。浏览详情页时，也可以从浏览器菜单安装。</p>
+      </div>
+      <button class="setting-button" @click="b.send({ type: 'new', url: CHROME_STORE_URL })">浏览商店</button>
+      <form class="setting-input-form extension-store-form" @submit.prevent="run({ type: 'extensionsChromeStore', input: storeInput.trim() })">
+        <input
+          v-model="storeInput"
+          aria-label="商店扩展链接或 ID"
+          placeholder="https://chromewebstore.google.com/detail/…"
+          maxlength="4096"
+          autocomplete="off"
+          spellcheck="false"
+          :disabled="!b.native || b.extensions.busy || !!b.extensions.review || !!removal"
+          required
+        />
+        <button class="setting-button" :disabled="!b.native || b.extensions.busy || !!b.extensions.review || !!removal || !storeInput.trim()">
+          查看权限
+        </button>
+      </form>
+    </div>
+    <div class="setting-row extension-intro">
+      <div class="setting-description">
         <strong>本地扩展</strong>
         <p>选择包含 manifest.json 的 Manifest V3 扩展目录。扩展会作用于所有工作区中的匹配网页。</p>
-        <p>扩展工具栏弹窗和商店安装暂不可用。</p>
+        <p>扩展工具栏弹窗和自动更新暂不可用。</p>
         <p v-if="!b.native">请在 Windows 桌面应用中管理扩展。</p>
       </div>
       <button
@@ -69,7 +95,8 @@ onMounted(() => run({ type: "extensionsList" }));
     >
       <div class="setting-description">
         <strong>安装 {{ b.extensions.review.name }}？</strong>
-        <p>版本 {{ b.extensions.review.version }}。仅安装你信任来源的扩展。</p>
+        <p v-if="b.extensions.review.source === 'chromeStore'">版本 {{ b.extensions.review.version }} · 已验证 Chrome 网上应用店签名</p>
+        <p v-else>版本 {{ b.extensions.review.version }}。仅安装你信任来源的扩展。</p>
       </div>
       <div v-if="b.extensions.review.permissions.length" class="extension-request">
         <strong>声明的权限（含可选权限）</strong>
@@ -105,7 +132,7 @@ onMounted(() => run({ type: "extensionsList" }));
       <div v-for="item in b.extensions.items" :key="item.id" class="setting-row extension-row">
         <div class="setting-description">
           <strong>{{ item.name }}</strong>
-          <p>版本 {{ item.version }} · {{ item.enabled ? "已启用" : "已停用" }}</p>
+          <p>版本 {{ item.version }} · {{ item.enabled ? "已启用" : "已停用" }}<template v-if="item.source === 'chromeStore'"> · Chrome 网上应用店</template></p>
         </div>
         <div class="extension-actions">
           <button
@@ -158,6 +185,18 @@ onMounted(() => run({ type: "extensionsList" }));
   border-radius: 12px;
   background: var(--panel);
   overflow-wrap: anywhere;
+}
+.extension-store-form {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: none;
+}
+.extension-store-form input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  width: auto;
 }
 .extension-review > p,
 .extension-request {

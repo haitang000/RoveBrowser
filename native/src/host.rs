@@ -1,4 +1,5 @@
 use crate::{
+    chrome_store,
     clip::WindowClip,
     downloads::{DownloadItem, DownloadState, Downloads},
     extensions,
@@ -2941,7 +2942,7 @@ impl App {
     }
 
     fn extension_command(&mut self, command: Command) {
-        if self.extension_busy { return; }
+        if self.extension_busy && !matches!(command, Command::ListExtensions) { return; }
         let result = match command {
             Command::ChooseExtension => {
                 let owner = self.window.as_ref().and_then(|window| window.window_handle().ok())
@@ -2961,7 +2962,8 @@ impl App {
                         let root = self.extensions_root.clone();
                         let proxy = self.proxy.clone();
                         std::thread::spawn(move || {
-                            let prepared = extensions::prepare(&root, &path).map_err(|error| error.to_string());
+                            let prepared = extensions::prepare(&root, &path)
+                                .map_err(|error| format!("无法读取扩展目录：{error}"));
                             let _ = proxy.send_event(Event::ExtensionPrepared(prepared));
                         });
                     }
@@ -2972,6 +2974,30 @@ impl App {
                 }
                 return;
             }
+            Command::PrepareChromeStoreExtension { input } => {
+                let Some(id) = chrome_store::input_id(&input) else {
+                    self.emit_extensions(None, Some("请输入 Chrome 网上应用店的扩展详情链接或扩展 ID".into()));
+                    return;
+                };
+                let runtime = match wry::webview_version() {
+                    Ok(version) => version,
+                    Err(_) => {
+                        self.emit_extensions(None, Some("无法读取 WebView2 Runtime 版本".into()));
+                        return;
+                    }
+                };
+                self.extension_candidate = None;
+                self.extension_busy = true;
+                self.emit_extensions(None, None);
+                let root = self.extensions_root.clone();
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let prepared = extensions::prepare_store(&root, &id, &runtime)
+                        .map_err(|error| format!("无法准备商店扩展：{error}"));
+                    let _ = proxy.send_event(Event::ExtensionPrepared(prepared));
+                });
+                return;
+            }
             Command::ListExtensions => self.extension_profile(|profile, root| profile.list(root)),
             Command::ReviewExtension { ticket, install } => {
                 if !self.extension_candidate.as_ref().is_some_and(|candidate| candidate.matches(&ticket)) {
@@ -2980,6 +3006,7 @@ impl App {
                 }
                 let candidate = self.extension_candidate.take().unwrap();
                 if !install {
+                    drop(candidate);
                     self.emit_extensions(None, None);
                     return;
                 }
@@ -3100,7 +3127,20 @@ impl App {
             | Command::Layout { .. } | Command::Glass { .. } | Command::PopupReady
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
         ) { return; }
-        if matches!(c, Command::ListExtensions | Command::ChooseExtension | Command::ReviewExtension { .. }
+        if let Command::PrepareChromeStoreTab { id } = &c {
+            let extension_id = self.state.active()
+                .filter(|tab| &tab.id == id)
+                .and_then(|tab| url::Url::parse(&tab.url).ok())
+                .as_ref().and_then(chrome_store::detail_id).map(str::to_owned);
+            if let Some(input) = extension_id {
+                self.command(Command::OpenSettings { pane: Some("extensions".into()) }, event_loop);
+                self.extension_command(Command::PrepareChromeStoreExtension { input });
+            } else {
+                self.error("当前标签页不是 Chrome 网上应用店的扩展详情页");
+            }
+            return;
+        }
+        if matches!(c, Command::ListExtensions | Command::ChooseExtension | Command::PrepareChromeStoreExtension { .. } | Command::ReviewExtension { .. }
             | Command::EnableExtension { .. } | Command::RemoveExtension { .. }) {
             self.extension_command(c);
             return;
@@ -4070,7 +4110,7 @@ impl ApplicationHandler<Event> for App {
                         self.extension_candidate = Some(prepared);
                         self.emit_extensions(None, None);
                     }
-                    Err(error) => self.emit_extensions(None, Some(format!("无法读取扩展目录：{error}"))),
+                    Err(error) => self.emit_extensions(None, Some(error)),
                 }
             }
             Event::PermissionsChanged => {}, // Wake the event loop so about_to_wait reconciles once.

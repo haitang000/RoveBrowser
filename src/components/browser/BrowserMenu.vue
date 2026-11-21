@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { commandContext } from "../../lib/command";
+import { chromeStoreDetailId } from "../../lib/extensions";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 
@@ -55,6 +56,11 @@ function split() {
   const other = partner.value;
   close();
   if (b.active && other) b.send({ type: "split", id: b.active.id, other: other.id });
+}
+function installStoreExtension() {
+  const tab = b.active;
+  close();
+  if (tab) b.send({ type: "extensionsChromeStoreTab", id: tab.id });
 }
 function selectSpace(id: string) {
   close(true);
@@ -122,6 +128,9 @@ onBeforeUnmount(() => {
             </div>
             <hr role="separator" />
             <div role="group" aria-label="工具">
+              <button v-if="b.native && chromeStoreDetailId(b.active?.url)" role="menuitem" tabindex="-1" @click="installStoreExtension">
+                <Icon name="extension" :size="16" /><span>安装此商店扩展…</span>
+              </button>
               <button role="menuitem" tabindex="-1" aria-label="下载" aria-haspopup="dialog" aria-keyshortcuts="Control+J"
                 :aria-description="b.activeDownloads ? `${b.activeDownloads} 个进行中` : undefined" @click="b.toggleDownloads(true)">
                 <Icon name="download" :size="16" /><span>下载</span>

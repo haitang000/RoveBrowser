@@ -3,6 +3,7 @@
 //! commit on main builds the `windows-installer` job, so a new build is a new
 //! commit even when the package version stays the same.
 
+use crate::https;
 use crate::update_install::{PackageKind, PreparedUpdate};
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -11,9 +12,8 @@ use std::path::{Path, PathBuf};
 use url::Url;
 use uuid::Uuid;
 use windows::{
-    core::{w, PCWSTR},
+    core::PCWSTR,
     Win32::{
-        Networking::WinHttp::*,
         Security::Cryptography::{
             BCryptCloseAlgorithmProvider, BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash,
             BCryptHashData, BCryptOpenAlgorithmProvider, BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE,
@@ -560,111 +560,28 @@ fn save_to(url: &Url, channel: Channel, path: &Path, max: u64) -> Result<(), Str
     result
 }
 fn fetch(start: &Url, channel: Channel, api: bool, accept: &str, max: u64, timeouts: [i32; 4], write: &mut dyn FnMut(&[u8]) -> Result<(), String>) -> Result<(), String> {
-    let mut current = start.clone();
-    for hop in 0..5 {
-        if !allowed(channel, api, &current) { return Err("更新地址不在该通道的服务器上。".into()); }
-        match exchange(&current, accept, max, timeouts, write)? {
-            Hop::Done => return Ok(()),
-            Hop::Redirect(location) => {
-                current = current.join(&location).or_else(|_| Url::parse(&location)).map_err(|_| "更新地址无效。".to_string())?;
-                if hop == 4 { return Err("更新地址重定向过多。".into()); }
-            }
-        }
-    }
-    Err("更新地址重定向过多。".into())
-}
-enum Hop { Done, Redirect(String) }
-struct Session { session: *mut core::ffi::c_void, connection: *mut core::ffi::c_void, request: *mut core::ffi::c_void }
-impl Drop for Session {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.request.is_null() { let _ = WinHttpCloseHandle(self.request); }
-            if !self.connection.is_null() { let _ = WinHttpCloseHandle(self.connection); }
-            if !self.session.is_null() { let _ = WinHttpCloseHandle(self.session); }
-        }
-    }
-}
-fn exchange(url: &Url, accept: &str, max: u64, timeouts: [i32; 4], write: &mut dyn FnMut(&[u8]) -> Result<(), String>) -> Result<Hop, String> {
-    let host = wide(url.host_str().ok_or("更新地址无效。")?);
-    let target = request_target(url)?;
-    let target = wide(&target);
-    let headers = wide(&format!("User-Agent: Rove/{CURRENT}\r\nAccept: {accept}\r\nAccept-Encoding: identity\r\n"));
-    unsafe {
-        let mut handles = Session { session: std::ptr::null_mut(), connection: std::ptr::null_mut(), request: std::ptr::null_mut() };
-        handles.session = WinHttpOpen(w!("Rove"), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, PCWSTR::null(), PCWSTR::null(), 0);
-        if handles.session.is_null() { return Err(offline()); }
-        handles.connection = WinHttpConnect(handles.session, PCWSTR(host.as_ptr()), INTERNET_DEFAULT_HTTPS_PORT, 0);
-        if handles.connection.is_null() { return Err(offline()); }
-        handles.request = WinHttpOpenRequest(handles.connection, w!("GET"), PCWSTR(target.as_ptr()), PCWSTR::null(), PCWSTR::null(), std::ptr::null(), WINHTTP_FLAG_SECURE);
-        if handles.request.is_null() { return Err(offline()); }
-        let disable = WINHTTP_DISABLE_REDIRECTS.to_ne_bytes();
-        if WinHttpSetOption(Some(handles.request), WINHTTP_OPTION_DISABLE_FEATURE, Some(&disable)).is_err() {
-            return Err(offline());
-        }
-        if WinHttpSetTimeouts(handles.request, timeouts[0], timeouts[1], timeouts[2], timeouts[3]).is_err() { return Err(offline()); }
-        if WinHttpSendRequest(handles.request, Some(&headers[..headers.len() - 1]), None, 0, 0, 0).is_err()
-            || WinHttpReceiveResponse(handles.request, std::ptr::null_mut()).is_err()
-        {
-            return Err(offline());
-        }
-        let status = status_code(handles.request).ok_or_else(offline)?;
-        if matches!(status, 301 | 302 | 303 | 307 | 308) {
-            return header_text(handles.request, WINHTTP_QUERY_LOCATION).filter(|location| !location.is_empty()).map(Hop::Redirect).ok_or_else(|| "更新地址无效。".into());
-        }
-        if status != 200 {
+    https::fetch(start, |url| allowed(channel, api, url), accept, max, timeouts, write).map_err(|error| match error {
+        https::Error::InvalidUrl => "更新地址不在该通道的服务器上。".into(),
+        https::Error::RedirectLimit => "更新地址重定向过多。".into(),
+        https::Error::Transport => "无法连接更新服务器，请稍后再试。".into(),
+        https::Error::Status(status) => {
             eprintln!("Rove update: HTTP {status}");
-            return Err(status_message(status));
+            status_message(status)
         }
-        if let Some(length) = header_text(handles.request, WINHTTP_QUERY_CONTENT_LENGTH).and_then(|text| text.trim().parse::<u64>().ok()) {
-            if length > max { return Err("更新服务器返回的内容过大。".into()); }
-        }
-        let mut received = 0u64;
-        loop {
-            let mut read = 0u32;
-            let mut chunk = [0u8; 16384];
-            if WinHttpReadData(handles.request, chunk.as_mut_ptr().cast(), chunk.len() as u32, &mut read).is_err() { return Err(offline()); }
-            if read == 0 { break; }
-            received += read as u64;
-            if received > max { return Err("更新服务器返回的内容过大。".into()); }
-            write(&chunk[..read as usize])?;
-        }
-        Ok(Hop::Done)
-    }
+        https::Error::TooLarge => "更新服务器返回的内容过大。".into(),
+        https::Error::Write(message) => message,
+    })
 }
 fn status_message(status: u32) -> String {
     if status == 403 || status == 429 { "更新服务器暂时限制了检查，请稍后再试。".into() }
     else if status == 404 { "这个通道还没有发布。".into() }
     else { "更新服务器没有返回发布信息。".into() }
 }
-fn offline() -> String {
-    "无法连接更新服务器，请稍后再试。".into()
-}
-fn wide(value: &str) -> Vec<u16> { value.encode_utf16().chain(Some(0)).collect() }
 fn request_target(url: &Url) -> Result<String, String> {
-    let Some((_, after)) = url.as_str().split_once("://") else { return Err("更新地址无效。".into()); };
-    let target = after.find('/').map(|index| &after[index..]).unwrap_or("/");
-    if target.is_empty() || target.len() > 2048 || target.contains([' ', '\r', '\n', '#']) { return Err("更新地址无效。".into()); }
-    Ok(target.to_string())
-}
-fn status_code(request: *mut core::ffi::c_void) -> Option<u32> {
-    unsafe {
-        let mut status = 0u32;
-        let mut length = 4u32;
-        WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, PCWSTR::null(), Some(&mut status as *mut u32 as *mut _), &mut length, std::ptr::null_mut()).ok()?;
-        Some(status)
-    }
-}
-fn header_text(request: *mut core::ffi::c_void, level: u32) -> Option<String> {
-    unsafe {
-        let mut size = 0u32;
-        let _ = WinHttpQueryHeaders(request, level, PCWSTR::null(), None, &mut size, std::ptr::null_mut());
-        if size < 2 || size > 8192 { return None; }
-        let mut buf = vec![0u16; size as usize / 2 + 1];
-        WinHttpQueryHeaders(request, level, PCWSTR::null(), Some(buf.as_mut_ptr().cast()), &mut size, std::ptr::null_mut()).ok()?;
-        let chars = (size as usize / 2).min(buf.len());
-        let end = buf[..chars].iter().position(|c| *c == 0).unwrap_or(chars);
-        String::from_utf16(&buf[..end]).ok()
-    }
+    https::target(url)
+        .ok()
+        .map(str::to_owned)
+        .ok_or_else(|| "更新地址无效。".into())
 }
 
 #[cfg(test)]
@@ -711,7 +628,7 @@ mod tests {
     #[test]
     fn canary_follows_each_pipeline_commit_not_the_package_version() {
         let hash = "841f1241ba975d6927fcf5b7f045dfefaf2bc2001e212c25c6d6e0f10e6c0818";
-        let sums = format!("{hash}  Rove-0.1.2-windows-x64-setup.exe\r\n{}  Rove-0.1.2-windows-x64.zip\r\n", "b".repeat(64));
+        let sums = format!("{hash}  Rove-0.1.2-windows-x64-setup.exe\n{}  Rove-0.1.2-windows-x64.zip\n", "b".repeat(64));
         let release = parse_canary_sums(&sums, 147, PackageKind::Setup).unwrap();
         assert!(release.asset_url.contains("/jobs/147/artifacts/release/Rove-0.1.2-windows-x64-setup.exe"));
         assert!(!release.asset_url.contains("job="));

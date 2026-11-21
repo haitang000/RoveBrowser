@@ -362,7 +362,7 @@ const aboutSummary = "当前版本、软件更新、更新通道和欢迎引导�
 const showAboutResult = computed(() =>
   searching.value && matches(aboutPane.title, aboutSummary, aboutPane.keywords),
 );
-const extensionSummary = "加载本地 Chrome 扩展，管理启用状态与卸载。";
+const extensionSummary = "加载本地 Chrome 扩展或从 Chrome 网上应用店安装。";
 const showExtensionsResult = computed(() =>
   searching.value && matches("扩展", extensionSummary, "extension plugin 插件 Manifest V3"),
 );

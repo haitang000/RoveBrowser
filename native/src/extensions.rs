@@ -1,3 +1,4 @@
+use crate::chrome_store;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -65,12 +66,21 @@ struct ContentScript {
     matches: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum Source {
+    #[default]
+    Local,
+    ChromeStore,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Review {
     ticket: String,
     name: String,
     version: String,
+    source: Source,
     permissions: BTreeSet<String>,
     hosts: BTreeSet<String>,
 }
@@ -98,6 +108,8 @@ impl Drop for Prepared {
 struct Record {
     id: String,
     version: String,
+    #[serde(default)]
+    source: Source,
 }
 
 #[derive(Serialize)]
@@ -106,6 +118,7 @@ pub struct Item {
     name: String,
     version: String,
     enabled: bool,
+    source: Source,
 }
 
 pub fn choose_folder(owner: HWND) -> Result<Option<PathBuf>> {
@@ -292,12 +305,44 @@ pub fn prepare(root: &Path, source: &Path) -> Result<Prepared> {
         .encode_wide()
         .flat_map(u16::to_le_bytes)
         .collect();
-    let source_key = Sha256::digest(source_path);
+    let prepared = stage(root, &source_path, Source::Local)?;
+    copy_directory(
+        &source,
+        &prepared.stage.join("payload"),
+        0,
+        &mut (MAX_BYTES, MAX_FILES),
+    )?;
+    finish(prepared, None)
+}
+
+pub fn prepare_store(root: &Path, id: &str, runtime: &str) -> Result<Prepared> {
+    let bytes = chrome_store::download(id, runtime, MAX_BYTES)?;
+    let verified = chrome_store::verify(&bytes, id)?;
+    let prepared = stage(
+        root,
+        format!("chrome-web-store:{id}").as_bytes(),
+        Source::ChromeStore,
+    )?;
+    let payload = prepared.stage.join("payload");
+    chrome_store::unpack(verified.archive, &payload, MAX_BYTES, MAX_FILES)?;
+    // WebView2 loads unpacked extensions. Keep the ID from the verified CRX
+    // developer key instead of letting Chromium derive it from the local path.
+    let manifest_path = payload.join("manifest.json");
+    let mut manifest: serde_json::Value = json_file(&manifest_path)?;
+    let manifest_fields = manifest.as_object_mut().ok_or("商店扩展的清单无效")?;
+    manifest_fields.insert("key".into(), STANDARD.encode(verified.developer_key).into());
+    serde_json::to_writer(File::create(manifest_path)?, &manifest)?;
+    finish(prepared, Some(id))
+}
+
+fn stage(root: &Path, identity: &[u8], source: Source) -> Result<Prepared> {
+    fs::create_dir_all(root)?;
+    let source_key = Sha256::digest(identity);
     let package = root.join(format!("{source_key:x}"));
     let ticket = Uuid::new_v4().to_string();
     let stage = root.join(format!("staging-{ticket}"));
     fs::create_dir(&stage)?;
-    let mut prepared = Prepared {
+    Ok(Prepared {
         stage,
         package,
         id: String::new(),
@@ -305,12 +350,15 @@ pub fn prepare(root: &Path, source: &Path) -> Result<Prepared> {
             ticket,
             name: String::new(),
             version: String::new(),
+            source,
             permissions: BTreeSet::new(),
             hosts: BTreeSet::new(),
         },
-    };
+    })
+}
+
+fn finish(mut prepared: Prepared, expected_id: Option<&str>) -> Result<Prepared> {
     let payload = prepared.stage.join("payload");
-    copy_directory(&source, &payload, 0, &mut (MAX_BYTES, MAX_FILES))?;
     let manifest: Manifest = json_file(&payload.join("manifest.json"))
         .map_err(|error| format!("无法读取扩展清单：{error}"))?;
     if manifest.manifest_version != 3
@@ -320,6 +368,9 @@ pub fn prepare(root: &Path, source: &Path) -> Result<Prepared> {
         return Err("请选择有名称和版本号的 Manifest V3 扩展".into());
     }
     prepared.id = id_for(&prepared.package.join("payload"), manifest.key.as_deref())?;
+    if expected_id.is_some_and(|expected| expected != prepared.id) {
+        return Err("商店扩展的安装 ID 与已验证的扩展 ID 不一致".into());
+    }
     prepared.review.name = localized_name(&manifest, &payload);
     prepared.review.version = manifest.version;
     prepared.review.permissions = manifest
@@ -341,6 +392,7 @@ pub fn prepare(root: &Path, source: &Path) -> Result<Prepared> {
     let record = Record {
         id: prepared.id.clone(),
         version: prepared.review.version.clone(),
+        source: prepared.review.source,
     };
     serde_json::to_writer(File::create(prepared.stage.join("record.json"))?, &record)?;
     Ok(prepared)
@@ -449,6 +501,7 @@ impl Profile {
                     name: take_pwstr(name),
                     version: record.version,
                     enabled: enabled.as_bool(),
+                    source: record.source,
                 });
             }
         }

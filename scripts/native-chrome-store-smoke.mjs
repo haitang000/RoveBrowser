@@ -1,0 +1,128 @@
+// Live Chrome Web Store integration. Only this opt-in smoke test needs Google.
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { chromium, expect } from "@playwright/test";
+import { createLegacyNativeProfile } from "./native-profile-fixture.mjs";
+
+const profile = await mkdtemp(join(tmpdir(), "rove-chrome-store-"));
+const packages = join(profile, "Extensions");
+createLegacyNativeProfile(profile);
+const id = "ddkjiahejlhfcafbddmgiahcphecmpfh";
+const detail = "https://chromewebstore.google.com/detail/ublock-origin-lite/" + id + "?hl=en";
+const port = Number(process.env.ERA_TEST_CHROME_STORE_DEBUG_PORT || "19864");
+const executable = resolve(process.env.ERA_TEST_EXE || "native/target/debug/rove.exe");
+
+let app, browser, ui;
+async function waitFor(check, label) {
+  let lastError;
+  const end = Date.now() + 15000;
+  while (Date.now() < end) {
+    try {
+      const result = await check();
+      if (result) return result;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 80));
+  }
+  throw new Error("Timed out: " + label, { cause: lastError });
+}
+
+function send(command) {
+  return ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
+}
+async function launch() {
+  app = spawn(executable, [], {
+    env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) },
+    windowsHide: true,
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  browser = await waitFor(() => chromium.connectOverCDP("http://127.0.0.1:" + port, { timeout: 1000 }), "UI CDP");
+  ui = await waitFor(() => browser.contexts().flatMap(context => context.pages())
+    .find(page => page.url() === "https://era.ui/index.html"), "application UI");
+  await ui.locator(".sidebar").waitFor();
+  const settings = await ui.evaluate(() => window.__ERA_INITIAL_STATE__.settings);
+  await send({ type: "settingsUpdate", settings: { ...settings, askBeforeQuit: false, reduceMotion: true } });
+}
+async function stop() {
+  if (app.exitCode === null) {
+    const exit = once(app, "exit");
+    let timeout;
+    try {
+      await send({ type: "window", action: "close" }).catch(error => {
+        if (!/closed|disconnect/i.test(error.message)) throw error;
+      });
+      await Promise.race([exit, new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Rove did not exit")), 10000);
+      })]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  await browser.close();
+}
+
+const review = () => ui.getByRole("region", { name: "确认安装扩展" });
+const storeInput = () => ui.getByRole("textbox", { name: "商店扩展链接或 ID" });
+const permissions = () => ui.getByRole("button", { name: "查看权限" });
+const toggle = () => ui.getByRole("switch", { name: /uBlock Origin Lite/i });
+
+async function expectVerifiedReview() {
+  const alert = ui.getByRole("alert");
+  await expect(review().or(alert)).toBeVisible({ timeout: 45000 });
+  if (await alert.isVisible()) throw new Error(await alert.innerText());
+  await expect(review()).toContainText("已验证 Chrome 网上应用店签名");
+}
+
+try {
+  await launch();
+  await send({ type: "settingsOpen", pane: "extensions" });
+  await storeInput().fill("https://example.com/detail/sample/" + id);
+  await permissions().click();
+  await expect(ui.getByRole("alert")).toContainText("扩展详情链接或扩展 ID");
+
+  await storeInput().fill(detail);
+  await permissions().click();
+  await expectVerifiedReview();
+  await expect(review()).toContainText(/uBlock Origin Lite/i);
+  await review().getByRole("button", { name: "取消" }).click();
+  await expect(review()).toHaveCount(0);
+  assert.deepEqual(await readdir(packages), []);
+
+  await send({ type: "new", url: detail });
+  const popup = await waitFor(() => ui.context().pages().find(page => page.url().endsWith("?popup")), "menu renderer");
+  await ui.getByRole("button", { name: "浏览器菜单", exact: true }).click();
+  await popup.getByRole("menuitem", { name: "安装此商店扩展…" }).click();
+  await expectVerifiedReview();
+  await review().getByRole("button", { name: "安装扩展" }).click();
+  await expect(toggle()).toHaveAttribute("aria-checked", "true");
+  const [installed] = await readdir(packages);
+  const record = JSON.parse(await readFile(join(packages, installed, "record.json"), "utf8"));
+  assert.equal(record.source, "chromeStore");
+  assert.equal(record.id, id);
+  const manifest = JSON.parse(await readFile(join(packages, installed, "payload", "manifest.json"), "utf8"));
+  const fromKey = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32)
+    .replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
+  assert.equal(fromKey, id);
+
+  await toggle().click();
+  await expect(toggle()).toHaveAttribute("aria-checked", "false");
+  await stop();
+  await launch();
+  await send({ type: "settingsOpen", pane: "extensions" });
+  await expect(toggle()).toHaveAttribute("aria-checked", "false");
+  await ui.getByRole("button", { name: /卸载 uBlock Origin Lite/i }).click();
+  await ui.getByRole("button", { name: "确认卸载" }).click();
+  await expect(ui.getByText("还没有安装扩展。")).toBeVisible();
+  assert.deepEqual(await readdir(packages), []);
+  await stop();
+  console.log("通过：商店来源校验、详情链接、菜单入口、权限确认、扩展 ID、重启恢复和卸载。");
+} finally {
+  if (app?.exitCode === null) app.kill();
+  await browser?.close().catch(() => {});
+}
