@@ -12,7 +12,7 @@ const field = ref<HTMLInputElement>();
 const typed = ref("");
 let timer: ReturnType<typeof setTimeout> | undefined;
 const label = computed(() =>
-  findMatchLabel(b.findCount, b.findActive, Boolean(b.findQuery.trim())),
+  b.t(findMatchLabel(b.findCount, b.findActive, Boolean(b.findQuery.trim()))),
 );
 const hasMatches = computed(() => b.findCount > 0);
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -72,7 +72,7 @@ onBeforeUnmount(() => clearTimeout(timer));
       v-if="b.findOpen"
       class="find-bar"
       role="search"
-      aria-label="页内查找"
+      :aria-label="b.t('页内查找')"
       data-find-bar=""
     >
       <div class="find-bar-surface">
@@ -81,8 +81,8 @@ onBeforeUnmount(() => clearTimeout(timer));
           ref="field"
           :value="typed"
           type="text"
-          placeholder="在页面中查找"
-          aria-label="查找内容"
+          :placeholder="b.t('在页面中查找')"
+          :aria-label="b.t('查找内容')"
           autocomplete="off"
           spellcheck="false"
           @input="changed"
@@ -92,8 +92,8 @@ onBeforeUnmount(() => clearTimeout(timer));
         <button
           class="find-button"
           type="button"
-          title="上一个匹配 (Shift+Enter)"
-          aria-label="上一个匹配"
+          :title="b.t('上一个匹配 (Shift+Enter)')"
+          :aria-label="b.t('上一个匹配')"
           :disabled="!hasMatches"
           @click="b.findStep(true)"
         >
@@ -102,8 +102,8 @@ onBeforeUnmount(() => clearTimeout(timer));
         <button
           class="find-button"
           type="button"
-          title="下一个匹配 (Enter)"
-          aria-label="下一个匹配"
+          :title="b.t('下一个匹配 (Enter)')"
+          :aria-label="b.t('下一个匹配')"
           :disabled="!hasMatches"
           @click="b.findStep(false)"
         >
@@ -112,8 +112,8 @@ onBeforeUnmount(() => clearTimeout(timer));
         <button
           class="find-button find-done"
           type="button"
-          title="关闭查找 (Esc)"
-          aria-label="关闭查找"
+          :title="b.t('关闭查找 (Esc)')"
+          :aria-label="b.t('关闭查找')"
           @click="b.closeFind()"
         >
           <Icon name="close" :size="12" />

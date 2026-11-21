@@ -46,6 +46,7 @@ pub fn default_shortcuts() -> Vec<(&'static str, Shortcut)> {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
+    pub language: String,
     pub search_engine: String,
     pub custom_search_template: String,
     pub search_suggestions: bool,
@@ -68,6 +69,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            language: "zh-CN".into(),
             search_engine: "google".into(),
             custom_search_template: String::new(),
             search_suggestions: true,
@@ -134,7 +136,7 @@ fn encode(value: &str) -> String {
 }
 impl Settings {
     pub fn repair(&mut self) {
-        self.normalize_channel();
+        self.normalize_choices();
         if !self.download_folder.is_empty() && !std::path::Path::new(&self.download_folder).is_dir()
         {
             self.download_folder.clear();
@@ -150,13 +152,16 @@ impl Settings {
             self.shortcuts.clear();
         }
     }
-    fn normalize_channel(&mut self) {
+    fn normalize_choices(&mut self) {
+        if !matches!(self.language.as_str(), "zh-CN" | "en") {
+            self.language = "zh-CN".into();
+        }
         if self.update_channel != "preview" && self.update_channel != "canary" {
             self.update_channel = "preview".into();
         }
     }
     pub fn validate(&mut self) -> Result<(), String> {
-        self.normalize_channel();
+        self.normalize_choices();
         if ![
             "google",
             "duckDuckGo",
@@ -256,6 +261,23 @@ impl Settings {
 mod tests {
     use super::*;
     use crate::model::{Command, State};
+    #[test]
+    fn interface_language_survives_session_repair_and_defaults_safely() {
+        let mut state = State::default();
+        let mut settings: Settings = serde_json::from_str(r#"{"searchEngine":"bing"}"#).unwrap();
+        assert_eq!(settings.language, "zh-CN");
+        settings.language = "en".into();
+        state.apply(&Command::UpdateSettings { settings }).unwrap();
+
+        let mut restored: State = serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+        restored.repair();
+        assert_eq!(restored.settings.language, "en");
+
+        restored.settings.language = "invalid".into();
+        restored.repair();
+        assert_eq!(restored.settings.language, "zh-CN");
+        assert_eq!(restored.settings.search_engine, "bing");
+    }
     #[test]
     fn search_engines_encode_queries_and_reject_unsafe_templates() {
         let mut s = Settings::default();

@@ -3,7 +3,9 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { calendarDays, localDate, validGithubUsername, type NewTabWidget } from "../../lib/new-tab";
 import { githubContributions, type Contribution } from "../../lib/github-widget";
 import Icon from "../common/Icon.vue";
+import { useBrowser } from "../../stores/browser";
 
+const b = useBrowser();
 const props = defineProps<{ widget: NewTabWidget; now: Date }>();
 const emit = defineEmits<{
   patch: [value: Partial<NewTabWidget>];
@@ -44,7 +46,7 @@ const recentDays = computed(() => {
 });
 const total = computed(() => contributions.value.reduce((sum, day) => sum + day.count, 0));
 function setUsername() {
-  if (!validGithubUsername(username.value)) { usernameError.value = "请输入有效的 GitHub 用户名"; return; }
+  if (!validGithubUsername(username.value)) { usernameError.value = b.t("请输入有效的 GitHub 用户名"); return; }
   usernameError.value = "";
   configuring.value = false;
   emit("patch", { username: username.value.trim() });
@@ -60,7 +62,7 @@ watch([() => props.widget.username, retry], async ([user], _, onCleanup) => {
   contributionError.value = "";
   contributions.value = [];
   try { const result = await githubContributions(user, controller.signal); if (active) contributions.value = result; }
-  catch (error) { if (active) contributionError.value = error instanceof Error && error.name !== "AbortError" ? error.message : "连接超时，请重试"; }
+  catch (error) { if (active) contributionError.value = error instanceof Error && error.name !== "AbortError" ? error.message : b.t("连接超时，请重试"); }
   finally { clearTimeout(timer); if (active) loading.value = false; }
 }, { immediate: true });
 onBeforeUnmount(saveNote);
@@ -74,10 +76,10 @@ onBeforeUnmount(saveNote);
 
   <div v-else-if="widget.kind === 'calendar'" class="nt-calendar">
     <header>
-      <button class="nt-month-title" aria-label="回到本月" @click="monthOffset = 0">{{ monthTitle }}</button>
+      <button class="nt-month-title" :aria-label="b.t('回到本月')" @click="monthOffset = 0">{{ monthTitle }}</button>
       <div class="nt-month-nav">
-        <button aria-label="上个月" @click="monthOffset--"><Icon name="back" :size="13" /></button>
-        <button aria-label="下个月" @click="monthOffset++"><Icon name="forward" :size="13" /></button>
+        <button :aria-label="b.t('上个月')" @click="monthOffset--"><Icon name="back" :size="13" /></button>
+        <button :aria-label="b.t('下个月')" @click="monthOffset++"><Icon name="forward" :size="13" /></button>
       </div>
     </header>
     <div class="nt-calendar-grid">
@@ -88,25 +90,25 @@ onBeforeUnmount(saveNote);
 
   <div v-else-if="widget.kind === 'notes'" class="nt-notes">
     <label :for="`note-${widget.id}`">Notes <Icon name="edit" :size="16" /></label>
-    <textarea :id="`note-${widget.id}`" v-model="note" aria-label="便签内容" placeholder="A little thought…" maxlength="10000" spellcheck="false" @focus="noteFocused = true" @input="queueNote" @blur="noteFocused = false; saveNote()" />
+    <textarea :id="`note-${widget.id}`" v-model="note" :aria-label="b.t('便签内容')" placeholder="A little thought…" maxlength="10000" spellcheck="false" @focus="noteFocused = true" @input="queueNote" @blur="noteFocused = false; saveNote()" />
   </div>
 
   <div v-else class="nt-github">
     <header>
       <span>GitHub <span v-if="widget.username" class="nt-github-user">@{{ widget.username }}</span></span>
-      <button v-if="widget.username" class="nt-widget-setting" aria-label="修改 GitHub 用户名" @click="configuring = !configuring"><Icon name="settings" :size="16" /></button>
+      <button v-if="widget.username" class="nt-widget-setting" :aria-label="b.t('修改 GitHub 用户名')" @click="configuring = !configuring"><Icon name="settings" :size="16" /></button>
     </header>
     <form v-if="configuring" class="nt-github-form" @submit.prevent="setUsername">
-      <label :for="`github-${widget.id}`">你的 GitHub 用户名</label>
-      <div><input :id="`github-${widget.id}`" v-model="username" placeholder="octocat" maxlength="39" autocomplete="off" :aria-invalid="Boolean(usernameError)" :aria-describedby="`github-help-${widget.id}`" /><button type="submit" aria-label="显示贡献图"><Icon name="arrow" :size="18" /></button></div>
-      <p :id="`github-help-${widget.id}`" :class="{ 'nt-form-error': usernameError }">{{ usernameError || '仅查询公开贡献记录 · 数据由 GitHub Contributions API 提供' }}</p>
+      <label :for="`github-${widget.id}`">{{ b.t('你的 GitHub 用户名') }}</label>
+      <div><input :id="`github-${widget.id}`" v-model="username" placeholder="octocat" maxlength="39" autocomplete="off" :aria-invalid="Boolean(usernameError)" :aria-describedby="`github-help-${widget.id}`" /><button type="submit" :aria-label="b.t('显示贡献图')"><Icon name="arrow" :size="18" /></button></div>
+      <p :id="`github-help-${widget.id}`" :class="{ 'nt-form-error': usernameError }">{{ usernameError || b.t('仅查询公开贡献记录 · 数据由 GitHub Contributions API 提供') }}</p>
     </form>
-    <div v-else-if="loading" class="nt-widget-message" role="status">正在加载贡献记录…</div>
-    <div v-else-if="contributionError" class="nt-widget-message" role="status"><span>{{ contributionError }}</span><button class="nt-text-button" @click="retry++">重试</button></div>
+    <div v-else-if="loading" class="nt-widget-message" role="status">{{ b.t('正在加载贡献记录…') }}</div>
+    <div v-else-if="contributionError" class="nt-widget-message" role="status"><span>{{ contributionError }}</span><button class="nt-text-button" @click="retry++">{{ b.t('重试') }}</button></div>
     <template v-else>
-      <button class="nt-contribution-link" aria-label="打开 GitHub 个人主页" @click="emit('navigate', `https://github.com/${widget.username}`)">
+      <button class="nt-contribution-link" :aria-label="b.t('打开 GitHub 个人主页')" @click="emit('navigate', `https://github.com/${widget.username}`)">
         <span class="nt-contribution-summary"><strong>{{ total.toLocaleString() }}</strong> contributions in the last year</span>
-        <span class="nt-contribution-grid" role="img" :aria-label="`${widget.username} 最近一年的 GitHub 贡献次数：${total}`">
+        <span class="nt-contribution-grid" role="img" :aria-label="b.t('{name} 最近一年的 GitHub 贡献次数：{count}', { name: widget.username ?? '', count: total })">
           <span v-for="(day, i) in recentDays" :key="i" class="nt-contribution-day" :data-level="day?.level || 0" :style="day ? undefined : { visibility: 'hidden' }" :title="day ? `${day.date}: ${day.count} contributions` : undefined" />
         </span>
       </button>

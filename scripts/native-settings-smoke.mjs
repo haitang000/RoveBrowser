@@ -280,6 +280,14 @@ try {
   });
   await send({ type: "theme" });
   await waitFor(async () => (await state()).theme === "dark", "dark theme");
+  await ui.getByRole("button", { name: "通用", exact: true }).click();
+  await ui.getByRole("combobox", { name: "界面语言", exact: true }).selectOption("en");
+  await waitFor(async () => (await state()).settings.language === "en", "English preference saved");
+  await ui.getByRole("heading", { name: "General", exact: true }).waitFor();
+  await ui.getByRole("button", { name: "Browser menu", exact: true }).click();
+  await popup.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  await ui.getByRole("button", { name: "Privacy", exact: true }).click();
+  await waitFor(async () => (await state()).tabs.find((t) => t.id === id)?.url === "rove://settings/privacy", "restore Privacy pane");
   await stop();
   await launch();
   const restored = await state();
@@ -287,6 +295,7 @@ try {
   assert.equal(restored.settings.searchEngine, "custom");
   assert.equal(restored.settings.rememberHistory, false);
   assert.equal(restored.settings.reduceMotion, true);
+  assert.equal(restored.settings.language, "en");
   assert.equal(restored.settings.shortcuts.new.key, 89);
   assert.equal(restored.theme, "dark");
   assert.equal(
@@ -294,8 +303,9 @@ try {
     "rove://settings/privacy",
   );
   await ui.locator(".settings-page").waitFor();
+  await ui.getByRole("heading", { name: "Privacy", exact: true }).waitFor();
   await ui.screenshot({ path: join(output, "native-settings-restored.png") });
-  checks.push("重启后恢复引擎、外观、动态效果、快捷键、下载路径及设置分类");
+  checks.push("设置和浏览器菜单即时切换英语；重启后恢复界面语言、引擎、外观、动态效果、快捷键、下载路径及设置分类");
   await writeFile(
     join(output, "native-settings.json"),
     JSON.stringify({ profile, checks }, null, 2),

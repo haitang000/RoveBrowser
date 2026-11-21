@@ -2,6 +2,7 @@
 // Color wheel, shade, presets and effects, from Zigzag/Sidebar/SpaceEditor.swift.
 // Copyright 2026 Zigao Wang, Apache-2.0. Modified for Rove.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
 import type { SpaceColor } from "../../lib/types";
 import { paint } from "../../lib/space-color";
@@ -28,6 +29,7 @@ import {
   type Spot,
 } from "../../lib/space-look";
 
+const b = useBrowser();
 const props = defineProps<{ space: LookFields; dark: boolean }>();
 const emit = defineEmits<{ preview: [LookFields]; commit: [LookFields] }>();
 
@@ -255,16 +257,16 @@ watch(
 </script>
 <template>
   <div class="space-look">
-    <div class="look-presets" role="group" aria-label="预设外观">
+    <div class="look-presets" role="group" :aria-label="b.t('预设外观')">
       <button
         v-for="(look, index) in PRESETS"
         :key="look.name"
         type="button"
         class="look-swatch"
         :class="{ chosen: lookMatches(look, saved()), through: look.seeThrough > 0 }"
-        :aria-label="look.name"
+        :aria-label="b.t(look.name)"
         :aria-pressed="lookMatches(look, saved())"
-        :title="look.name"
+        :title="b.t(look.name)"
         :style="swatchStyle(look)"
         @click="pickPreset(index)"
       />
@@ -287,13 +289,13 @@ watch(
         :class="{ selected: draft.selected === index }"
         :data-knob="index"
         role="slider"
-        :aria-label="index === 0 ? '颜色' : '第二种颜色'"
+        :aria-label="index === 0 ? b.t('颜色') : b.t('第二种颜色')"
         :style="{ ...knobStyle(spot), background: paint(spot.hue, shown.depths[index]!, spot.amount) }"
         @keydown="nudge($event, index as 0 | 1)"
       />
     </div>
     <label class="look-row">
-      <span>明暗</span>
+      <span>{{ b.t('明暗') }}</span>
       <span class="look-slider" :style="{ '--track': shadeStops }">
         <input
           :value="depthAt(draft, draft.selected, dark)"
@@ -301,7 +303,7 @@ watch(
           min="0"
           max="1"
           step="0.01"
-          aria-label="明暗"
+          :aria-label="b.t('明暗')"
           @pointerdown="($event.target as HTMLInputElement).dataset.alt = $event.altKey ? '1' : ''"
           @input="onShade($event, false)"
           @change="onShade($event, true)"
@@ -310,18 +312,18 @@ watch(
     </label>
     <div class="look-fold">
       <button type="button" class="look-disclosure" :aria-expanded="effects" @click="effects = !effects">
-        <span>效果</span><Icon name="chevronDown" :size="12" />
+        <span>{{ b.t('效果') }}</span><Icon name="chevronDown" :size="12" />
       </button>
-      <button type="button" class="look-reset" :disabled="!canReset" @click="resetColors">恢复默认颜色</button>
+      <button type="button" class="look-reset" :disabled="!canReset" @click="resetColors">{{ b.t('恢复默认颜色') }}</button>
     </div>
     <div v-show="effects" class="look-effects">
       <div class="look-row look-gradient">
-        <span>渐变</span>
+        <span>{{ b.t('渐变') }}</span>
         <button
           type="button"
           class="color-chip"
           :class="{ selected: two && draft.selected === 0 }"
-          aria-label="颜色"
+          :aria-label="b.t('颜色')"
           :style="{ background: frameColors.first }"
           @click="draft.selected = 0"
         />
@@ -330,19 +332,19 @@ watch(
           type="button"
           class="color-chip second"
           :class="{ selected: draft.selected === 1 }"
-          aria-label="第二种颜色"
+          :aria-label="b.t('第二种颜色')"
           :style="{ background: frameColors.second }"
           @click="draft.selected = 1"
         >
-          <span class="chip-remove" aria-label="去掉第二种颜色" @click.stop="second" @keydown.enter.stop="second">×</span>
+          <span class="chip-remove" :aria-label="b.t('去掉第二种颜色')" @click.stop="second" @keydown.enter.stop="second">×</span>
         </button>
-        <button v-else type="button" class="color-chip add" aria-label="添加第二种颜色" @click="second">+</button>
+        <button v-else type="button" class="color-chip add" :aria-label="b.t('添加第二种颜色')" @click="second">+</button>
         <button
           v-show="two"
           type="button"
           class="direction-dial"
           role="slider"
-          aria-label="渐变方向"
+          :aria-label="b.t('渐变方向')"
           :aria-valuemin="0"
           :aria-valuemax="360"
           :aria-valuenow="Math.round(draft.angle ?? 45)"
@@ -354,7 +356,7 @@ watch(
         </button>
       </div>
       <label class="look-row">
-        <span>清透</span>
+        <span>{{ b.t('清透') }}</span>
         <span class="look-slider through" :style="{ '--track': clearStops }">
           <input
             :value="draft.translucency ?? 0"
@@ -362,14 +364,14 @@ watch(
             min="0"
             max="1"
             step="0.01"
-            aria-label="清透"
+            :aria-label="b.t('清透')"
             @input="setAmount('translucency', Number(($event.target as HTMLInputElement).value), false)"
             @change="setAmount('translucency', Number(($event.target as HTMLInputElement).value), true)"
           />
         </span>
       </label>
       <label class="look-row">
-        <span>颗粒</span>
+        <span>{{ b.t('颗粒') }}</span>
         <span class="look-slider grain" :style="{ '--track': `linear-gradient(90deg, ${frameColors.first}, ${frameColors.second})` }">
           <input
             :value="draft.grain ?? 0"
@@ -377,7 +379,7 @@ watch(
             min="0"
             max="1"
             step="0.01"
-            aria-label="颗粒"
+            :aria-label="b.t('颗粒')"
             @input="setAmount('grain', Number(($event.target as HTMLInputElement).value), false)"
             @change="setAmount('grain', Number(($event.target as HTMLInputElement).value), true)"
           />

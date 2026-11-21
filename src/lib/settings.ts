@@ -1,5 +1,7 @@
 // Ported from Zigzag SettingsView, SettingsPage, SearchEngine and Shortcuts.
 // Copyright 2026 Zigao Wang. Apache-2.0; adapted for Windows and Vue.
+import { DEFAULT_INTERFACE_LANGUAGE, interfaceLanguage, type InterfaceLanguage } from "./language";
+
 export const SETTINGS_PANES = [
   {
     id: "general",
@@ -120,6 +122,7 @@ export const SHORTCUTS = [
   },
 ] as const;
 export interface Settings {
+  language: InterfaceLanguage;
   searchEngine: string;
   customSearchTemplate: string;
   searchSuggestions: boolean;
@@ -138,6 +141,7 @@ export interface Settings {
   shortcuts: Record<string, Shortcut | null>;
 }
 export const defaultSettings = (): Settings => ({
+  language: DEFAULT_INTERFACE_LANGUAGE,
   searchEngine: "google",
   customSearchTemplate: "",
   searchSuggestions: true,
@@ -165,6 +169,7 @@ export function updateChannelDetail(channel: UpdateChannel): string {
 }
 export function settingsFor(value?: Partial<Settings>): Settings {
   const settings = { ...defaultSettings(), ...value };
+  settings.language = interfaceLanguage(settings.language);
   settings.updateChannel = settings.updateChannel === "canary" ? "canary" : "preview";
   return settings;
 }

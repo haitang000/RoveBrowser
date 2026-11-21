@@ -77,31 +77,31 @@ watch(() => b.downloadsOpen, async (open) => {
     <div v-if="b.downloadsOpen" class="downloads-layer" @pointerdown.self="close">
       <section
         id="downloads-panel" ref="panel" class="downloads-panel anchored-bubble bubble-surface" :style="position"
-        role="dialog" aria-label="下载" tabindex="-1"
+        role="dialog" :aria-label="b.t('下载')" tabindex="-1"
         @wheel.stop @keydown.esc.stop.prevent="close"
         @pointerdown="panelPointerDown"
       >
         <header class="downloads-header">
-          <h2 class="downloads-title">下载</h2>
+          <h2 class="downloads-title">{{ b.t('下载') }}</h2>
           <div class="downloads-header-actions">
-            <button class="download-action" title="打开下载文件夹" aria-label="打开下载文件夹" @click="act('openFolder')"><Icon name="folder" :size="18" /></button>
-            <button class="download-action" title="搜索下载" aria-label="搜索下载" :aria-pressed="searching" @click="toggleSearch"><Icon name="search" :size="18" /></button>
+            <button class="download-action" :title="b.t('打开下载文件夹')" :aria-label="b.t('打开下载文件夹')" @click="act('openFolder')"><Icon name="folder" :size="18" /></button>
+            <button class="download-action" :title="b.t('搜索下载')" :aria-label="b.t('搜索下载')" :aria-pressed="searching" @click="toggleSearch"><Icon name="search" :size="18" /></button>
             <div class="downloads-more">
-              <button ref="more" class="download-action" title="更多下载操作" aria-label="更多下载操作" aria-haspopup="menu" :aria-expanded="menuOpen" @click="toggleMenu" @keydown.down.prevent="!menuOpen && toggleMenu()"><Icon name="more" :size="18" /></button>
-              <div v-if="menuOpen" class="downloads-menu" role="menu" aria-label="下载操作" @keydown.esc.stop.prevent="closeMenu">
-                <button ref="clear" role="menuitem" :disabled="!clearable" @click="act('clearFinished'); more?.focus()"><Icon name="trash" :size="15" />清除已结束的下载</button>
+              <button ref="more" class="download-action" :title="b.t('更多下载操作')" :aria-label="b.t('更多下载操作')" aria-haspopup="menu" :aria-expanded="menuOpen" @click="toggleMenu" @keydown.down.prevent="!menuOpen && toggleMenu()"><Icon name="more" :size="18" /></button>
+              <div v-if="menuOpen" class="downloads-menu" role="menu" :aria-label="b.t('下载操作')" @keydown.esc.stop.prevent="closeMenu">
+                <button ref="clear" role="menuitem" :disabled="!clearable" @click="act('clearFinished'); more?.focus()"><Icon name="trash" :size="15" />{{ b.t('清除已结束的下载') }}</button>
               </div>
             </div>
-            <button class="download-action" aria-label="关闭下载面板" title="关闭" @click="close"><Icon name="close" :size="16" /></button>
+            <button class="download-action" :aria-label="b.t('关闭下载面板')" :title="b.t('关闭')" @click="close"><Icon name="close" :size="16" /></button>
           </div>
         </header>
         <div v-if="searching" class="downloads-search">
           <Icon name="search" :size="15" />
-          <input ref="search" v-model="query" aria-label="搜索下载文件" placeholder="搜索下载文件" type="search" />
+          <input ref="search" v-model="query" :aria-label="b.t('搜索下载文件')" :placeholder="b.t('搜索下载文件')" type="search" />
         </div>
-        <div v-if="!b.downloads.length" class="downloads-empty"><Icon name="download" :size="30" /><span>暂无下载</span></div>
-        <div v-else-if="!filtered.length" class="downloads-empty"><Icon name="search" :size="28" /><span>未找到匹配的下载</span></div>
-        <div v-else class="downloads-list" aria-label="下载文件">
+        <div v-if="!b.downloads.length" class="downloads-empty"><Icon name="download" :size="30" /><span>{{ b.t('暂无下载') }}</span></div>
+        <div v-else-if="!filtered.length" class="downloads-empty"><Icon name="search" :size="28" /><span>{{ b.t('未找到匹配的下载') }}</span></div>
+        <div v-else class="downloads-list" :aria-label="b.t('下载文件')">
           <article v-for="item in filtered" :key="item.id" class="download-row"
             :class="[item.state, { missing: item.state === 'finished' && !item.exists }]"
           >
@@ -109,21 +109,21 @@ watch(() => b.downloadsOpen, async (open) => {
             <div class="download-body">
               <span class="download-name" :title="item.filename">{{ item.filename }}</span>
               <div v-if="isActiveDownload(item)" class="download-bar" :class="{ indeterminate: !item.total }"
-                role="progressbar" :aria-label="`${item.filename} 下载进度`" :aria-valuenow="item.total > 0 ? downloadPercent(item) : undefined" :aria-valuemin="0" :aria-valuemax="100" :aria-valuetext="downloadStatus(item)">
+                role="progressbar" :aria-label="b.t('{name} 下载进度', { name: item.filename })" :aria-valuenow="item.total > 0 ? downloadPercent(item) : undefined" :aria-valuemin="0" :aria-valuemax="100" :aria-valuetext="downloadStatus(item, b.language)">
                 <span :style="{ transform: `scaleX(${item.total > 0 ? downloadFraction(item) : 0.3})` }" />
               </div>
-              <span class="download-meta" :class="{ caution: item.state === 'failed' || item.state === 'blocked' }" :title="downloadStatus(item)">{{ downloadStatus(item) }}</span>
-              <button v-if="b.native && isFinalizingDownload(item)" class="download-open" @click="act('review', item.id)">查看下载提示</button>
-              <button v-if="item.state === 'finished' && item.exists" class="download-open" @click="act('open', item.id)">打开文件</button>
+              <span class="download-meta" :class="{ caution: item.state === 'failed' || item.state === 'blocked' }" :title="downloadStatus(item, b.language)">{{ downloadStatus(item, b.language) }}</span>
+              <button v-if="b.native && isFinalizingDownload(item)" class="download-open" @click="act('review', item.id)">{{ b.t('查看下载提示') }}</button>
+              <button v-if="item.state === 'finished' && item.exists" class="download-open" @click="act('open', item.id)">{{ b.t('打开文件') }}</button>
             </div>
             <div class="download-actions">
               <template v-if="isActiveDownload(item)">
-                <button class="download-action" :title="item.state === 'paused' ? '继续下载' : '暂停下载'" :aria-label="item.state === 'paused' ? '继续下载' : '暂停下载'" @click="act(item.state === 'paused' ? 'resume' : 'pause', item.id)"><Icon :name="item.state === 'paused' ? 'play' : 'pause'" :size="17" /></button>
-                <button class="download-action" title="取消下载" aria-label="取消下载" @click="act('cancel', item.id)"><Icon name="close" :size="17" /></button>
+                <button class="download-action" :title="item.state === 'paused' ? b.t('继续下载') : b.t('暂停下载')" :aria-label="item.state === 'paused' ? b.t('继续下载') : b.t('暂停下载')" @click="act(item.state === 'paused' ? 'resume' : 'pause', item.id)"><Icon :name="item.state === 'paused' ? 'play' : 'pause'" :size="17" /></button>
+                <button class="download-action" :title="b.t('取消下载')" :aria-label="b.t('取消下载')" @click="act('cancel', item.id)"><Icon name="close" :size="17" /></button>
               </template>
               <template v-else>
-                <button v-if="item.state === 'finished' && item.exists" class="download-action" title="在文件夹中显示" aria-label="在文件夹中显示" @click="act('reveal', item.id)"><Icon name="folder" :size="18" /></button>
-                <button class="download-action" title="从列表中移除" aria-label="从列表中移除" @click="act('remove', item.id)"><Icon name="trash" :size="18" /></button>
+                <button v-if="item.state === 'finished' && item.exists" class="download-action" :title="b.t('在文件夹中显示')" :aria-label="b.t('在文件夹中显示')" @click="act('reveal', item.id)"><Icon name="folder" :size="18" /></button>
+                <button class="download-action" :title="b.t('从列表中移除')" :aria-label="b.t('从列表中移除')" @click="act('remove', item.id)"><Icon name="trash" :size="18" /></button>
               </template>
             </div>
           </article>

@@ -25,7 +25,7 @@ function showMenu(e: MouseEvent, favorite: Favorite) {
 }
 </script>
 <template>
-  <div class="favorites" :style="{gridTemplateColumns: b.settings.favoritesPerRow ? `repeat(${b.settings.favoritesPerRow}, minmax(0, 1fr))` : 'repeat(auto-fit, minmax(56px, 1fr))'}" aria-label="常用网站">
+  <div class="favorites" :style="{gridTemplateColumns: b.settings.favoritesPerRow ? `repeat(${b.settings.favoritesPerRow}, minmax(0, 1fr))` : 'repeat(auto-fit, minmax(56px, 1fr))'}" :aria-label="b.t('常用网站')">
     <div v-for="f in tiles" :key="f.id" class="favorite-tile" :data-bookmark-id="f.id" @contextmenu.prevent="showMenu($event, f)" @mousedown.middle.prevent @auxclick.middle.prevent.stop="b.send({ type: 'bookmarkUnload', id: f.id })">
     <button class="favorite-open"
       :title="b.previewTarget === f.id ? undefined : f.title"
@@ -39,9 +39,9 @@ function showMenu(e: MouseEvent, favorite: Favorite) {
     >
       <Favicon :url="f.url" :favicon="favicon(f)" /><Favicon v-if="partner(f)" :url="partner(f)!.url" :favicon="favicon(partner(f)!)" />
     </button>
-    <button v-if="live(f) || (partner(f) && live(partner(f)!))" class="favorite-close" :aria-label="`卸载 ${f.title}`" title="卸载网页（保留常用网站）" @click.stop="b.send({ type: 'bookmarkUnload', id: f.id })"><Icon name="close" :size="9" /></button>
+    <button v-if="live(f) || (partner(f) && live(partner(f)!))" class="favorite-close" :aria-label="`卸载 ${f.title}`" :title="b.t('卸载网页（保留常用网站）')" @click.stop="b.send({ type: 'bookmarkUnload', id: f.id })"><Icon name="close" :size="9" /></button>
     </div>
-    <button v-if="!tiles.length" title="打开标签页后，右键添加或拖到此处置顶" aria-label="打开新标签页以添加置顶网站" @click="b.openCommand()">
+    <button v-if="!tiles.length" :title="b.t('打开标签页后，右键添加或拖到此处置顶')" :aria-label="b.t('打开新标签页以添加置顶网站')" @click="b.openCommand()">
       <Icon name="plus" />
     </button>
   </div>

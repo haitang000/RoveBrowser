@@ -86,55 +86,55 @@ onBeforeUnmount(() => {
   <Transition name="bubble">
     <div v-if="open" class="browser-menu-layer" :class="{ 'browser-menu-drop-layer': dropTargetsOnly }">
       <section ref="panel" :id="dropTargetsOnly ? 'browser-menu-drop-targets' : 'browser-menu'" class="browser-menu anchored-bubble bubble-surface" role="menu"
-        aria-label="浏览器菜单" :style="position" @keydown="key" @wheel.stop>
+        :aria-label="b.t('浏览器菜单')" :style="position" @keydown="key" @wheel.stop>
         <div class="browser-menu-scroll">
           <template v-if="!dropTargetsOnly">
-            <div role="group" aria-label="新建">
+            <div role="group" :aria-label="b.t('新建')">
               <button role="menuitem" tabindex="-1" @click="b.openCommand()">
-                <Icon name="plus" :size="16" /><span>新建标签页</span><kbd v-if="b.shortcutLabel('new')" aria-hidden="true">{{ b.shortcutLabel('new') }}</kbd>
+                <Icon name="plus" :size="16" /><span>{{ b.t('新建标签页') }}</span><kbd v-if="b.shortcutLabel('new')" aria-hidden="true">{{ b.shortcutLabel('new') }}</kbd>
               </button>
               <button role="menuitem" tabindex="-1" :disabled="b.state.spaces.length >= 16"
-                :title="b.state.spaces.length >= 16 ? '最多创建 16 个工作区' : undefined" @click="b.openSpaceCreation()">
-                <Icon name="spaces" :size="16" /><span>新建 Space</span>
+                :title="b.state.spaces.length >= 16 ? b.t('最多创建 16 个工作区') : undefined" @click="b.openSpaceCreation()">
+                <Icon name="spaces" :size="16" /><span>{{ b.t('新建 Space') }}</span>
               </button>
               <button role="menuitem" tabindex="-1" :disabled="!partner || Boolean(b.spaceCreation)" @click="split">
-                <Icon name="split" :size="16" /><span>新建分屏</span>
+                <Icon name="split" :size="16" /><span>{{ b.t('新建分屏') }}</span>
               </button>
             </div>
             <hr role="separator" />
-            <div role="group" aria-label="网页">
+            <div role="group" :aria-label="b.t('网页')">
               <button role="menuitem" tabindex="-1" :disabled="!b.canOutputPage('savePageAs')"
                 aria-haspopup="dialog" :aria-keyshortcuts="b.pageOutputShortcut('savePageAs') ? 'Control+S' : undefined"
                 @click="b.outputPage('savePageAs')">
-                <Icon name="savePage" :size="16" /><span>另存网页…</span><kbd v-if="b.pageOutputShortcut('savePageAs')" aria-hidden="true">{{ b.pageOutputShortcut('savePageAs') }}</kbd>
+                <Icon name="savePage" :size="16" /><span>{{ b.t('另存网页…') }}</span><kbd v-if="b.pageOutputShortcut('savePageAs')" aria-hidden="true">{{ b.pageOutputShortcut('savePageAs') }}</kbd>
               </button>
               <button role="menuitem" tabindex="-1" :disabled="!b.canOutputPage('printPage')"
                 aria-haspopup="dialog" :aria-keyshortcuts="b.pageOutputShortcut('printPage') ? 'Control+P' : undefined"
                 @click="b.outputPage('printPage')">
-                <Icon name="print" :size="16" /><span>打印…</span><kbd v-if="b.pageOutputShortcut('printPage')" aria-hidden="true">{{ b.pageOutputShortcut('printPage') }}</kbd>
+                <Icon name="print" :size="16" /><span>{{ b.t('打印…') }}</span><kbd v-if="b.pageOutputShortcut('printPage')" aria-hidden="true">{{ b.pageOutputShortcut('printPage') }}</kbd>
               </button>
             </div>
             <hr role="separator" />
-            <div role="group" aria-label="工具">
+            <div role="group" :aria-label="b.t('工具')">
               <button v-if="b.native && chromeStoreDetailId(b.active?.url)" role="menuitem" tabindex="-1" @click="installStoreExtension">
-                <Icon name="extension" :size="16" /><span>安装此商店扩展…</span>
+                <Icon name="extension" :size="16" /><span>{{ b.t('安装此商店扩展…') }}</span>
               </button>
-              <button role="menuitem" tabindex="-1" aria-label="下载" aria-haspopup="dialog" aria-keyshortcuts="Control+J"
-                :aria-description="b.activeDownloads ? `${b.activeDownloads} 个进行中` : undefined" @click="b.toggleDownloads(true)">
-                <Icon name="download" :size="16" /><span>下载</span>
-                <small v-if="b.activeDownloads">{{ b.activeDownloads }} 个进行中</small><kbd>Ctrl+J</kbd>
+              <button role="menuitem" tabindex="-1" :aria-label="b.t('下载')" aria-haspopup="dialog" aria-keyshortcuts="Control+J"
+                :aria-description="b.activeDownloads ? b.t('{count} 个进行中', { count: b.activeDownloads }) : undefined" @click="b.toggleDownloads(true)">
+                <Icon name="download" :size="16" /><span>{{ b.t('下载') }}</span>
+                <small v-if="b.activeDownloads">{{ b.t('{count} 个进行中', { count: b.activeDownloads }) }}</small><kbd>Ctrl+J</kbd>
               </button>
               <button role="menuitem" tabindex="-1" @click="b.openSettings()">
-                <Icon name="settings" :size="16" /><span>设置</span><kbd v-if="b.shortcutLabel('settings')" aria-hidden="true">{{ b.shortcutLabel('settings') }}</kbd>
+                <Icon name="settings" :size="16" /><span>{{ b.t('设置') }}</span><kbd v-if="b.shortcutLabel('settings')" aria-hidden="true">{{ b.shortcutLabel('settings') }}</kbd>
               </button>
             </div>
             <hr role="separator" />
           </template>
           <div role="group" :aria-labelledby="dropTargetsOnly ? 'browser-menu-move-label' : 'browser-menu-spaces-label'">
-            <div :id="dropTargetsOnly ? 'browser-menu-move-label' : 'browser-menu-spaces-label'" class="browser-menu-label">{{ dropTargetsOnly ? '移动到工作区' : '工作区' }}</div>
+            <div :id="dropTargetsOnly ? 'browser-menu-move-label' : 'browser-menu-spaces-label'" class="browser-menu-label">{{ dropTargetsOnly ? b.t('移动到工作区') : b.t('工作区') }}</div>
             <button v-for="(space, index) in b.state.spaces" :key="space.id" role="menuitem" tabindex="-1"
-              :aria-label="`工作区 ${space.name}`" :aria-current="space.id === b.state.activeSpace ? 'true' : undefined"
-              :title="space.id === b.state.activeSpace && !dropTargetsOnly ? `编辑 ${space.name}` : space.name"
+              :aria-label="b.t('工作区 {name}', { name: space.name })" :aria-current="space.id === b.state.activeSpace ? 'true' : undefined"
+              :title="space.id === b.state.activeSpace && !dropTargetsOnly ? b.t('编辑 {name}', { name: space.name }) : space.name"
               :data-tab-drop-space="dropTargetsOnly ? space.id : undefined"
               @click="!dropTargetsOnly && selectSpace(space.id)">
               <SpaceGlyph v-if="space.icon" :icon="space.icon" :size="16" /><Icon v-else name="spaces" :size="16" />

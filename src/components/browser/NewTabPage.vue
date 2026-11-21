@@ -38,7 +38,7 @@ const placeholders = computed(() => Math.min(2, Math.max(0, 4 - settings.value.w
 const logos: Record<string, string> = { "github.com": githubLogo, "chatgpt.com": chatgptLogo, "notion.so": notionLogo, "notion.com": notionLogo, "youtube.com": youtubeLogo, "claude.ai": claudeLogo, "mail.google.com": gmailLogo };
 const hostnameFor = (url: string) => new URL(url).hostname.replace(/^www\./, "");
 const logoFor = (url: string) => logos[hostnameFor(url)];
-const widgetTitle = (kind: WidgetKind) => WIDGET_CATALOG.find((entry) => entry.kind === kind)!.title;
+const widgetTitle = (kind: WidgetKind) => b.t(WIDGET_CATALOG.find((entry) => entry.kind === kind)!.title);
 let clock: ReturnType<typeof setInterval>;
 onMounted(() => {
   b.send({ type: "history", query: "" });
@@ -68,7 +68,7 @@ async function beginEditing() {
 async function finishEditing() {
   if (!editing.value) return;
   const displayName = name.value.trim();
-  if (!displayName) { nameError.value = "请输入你的称呼"; return; }
+  if (!displayName) { nameError.value = b.t("请输入你的称呼"); return; }
   if (displayName !== settings.value.displayName) b.send({ type: "newTabUpdate", settings: { ...settings.value, displayName } });
   dragged.value = undefined;
   dropTarget.value = undefined;
@@ -82,7 +82,7 @@ async function addWidget(kind: WidgetKind, source: HTMLElement) {
   const definition = WIDGET_CATALOG.find((entry) => entry.kind === kind)!;
   const id = crypto.randomUUID();
   save([...settings.value.widgets, { id, kind, size: definition.size }]);
-  announcement.value = `已添加${definition.title}`;
+  announcement.value = b.t("已添加{item}", { item: b.t(definition.title) });
   await nextTick();
   const widget = root.value?.querySelector<HTMLElement>(`[data-widget-id="${id}"]`);
   if (editing.value && widget) motion.placeWidget(widget, from);
@@ -90,7 +90,7 @@ async function addWidget(kind: WidgetKind, source: HTMLElement) {
 function removeWidget(id: string) {
   motion.stopPlacement();
   save(settings.value.widgets.filter((widget) => widget.id !== id));
-  announcement.value = "已移除小组件";
+  announcement.value = b.t("已移除小组件");
   nextTick(() => root.value?.querySelector<HTMLButtonElement>(".nt-add-button:not(:disabled)")?.focus());
 }
 function moveWidget(id: string, offset: number) {
@@ -101,7 +101,7 @@ function moveWidget(id: string, offset: number) {
   motion.stopPlacement();
   [widgets[index], widgets[target]] = [widgets[target], widgets[index]];
   save(widgets);
-  announcement.value = `已移动到第 ${target + 1} 个位置`;
+  announcement.value = b.t("已移动到第 {position} 个位置", { position: target + 1 });
 }
 function dragStart(event: DragEvent, id: string) {
   if (!editing.value || !event.dataTransfer) return;
@@ -136,10 +136,10 @@ function navigate(url: string, event?: MouseEvent) {
 </script>
 
 <template>
-  <section ref="root" class="new-tab-page" :class="{ 'nt-editing': editing }" aria-label="新标签页" @keydown.esc.stop="finishEditing" @dragover="dragOver($event)">
+  <section ref="root" class="new-tab-page" :class="{ 'nt-editing': editing }" :aria-label="b.t('新标签页')" @keydown.esc.stop="finishEditing" @dragover="dragOver($event)">
     <div class="nt-pegboard" aria-hidden="true" />
     <div class="nt-layout">
-    <aside class="nt-discover" aria-label="发现小组件" :inert="!editing" :aria-hidden="!editing">
+    <aside class="nt-discover" :aria-label="b.t('发现小组件')" :inert="!editing" :aria-hidden="!editing">
       <h1 ref="discoverTitle" tabindex="-1">Discover</h1>
       <div class="nt-catalog">
         <article v-for="entry in catalog" :key="entry.kind" class="nt-catalog-card">
@@ -148,11 +148,11 @@ function navigate(url: string, event?: MouseEvent) {
               <NewTabWidgetView :widget="entry.widget" :now="previewNow" />
             </div>
           </div>
-          <div class="nt-catalog-info"><h2>{{ entry.title }}</h2><p>{{ entry.description }}</p><button class="nt-add-button" :aria-label="`添加${entry.title}`" :disabled="settings.widgets.length >= MAX_WIDGETS" @click="addWidget(entry.kind, $event.currentTarget as HTMLElement)"><Icon name="plus" :size="14" /> Add</button></div>
+          <div class="nt-catalog-info"><h2>{{ b.t(entry.title) }}</h2><p>{{ b.t(entry.description) }}</p><button class="nt-add-button" :aria-label="b.t('添加{item}', { item: b.t(entry.title) })" :disabled="settings.widgets.length >= MAX_WIDGETS" @click="addWidget(entry.kind, $event.currentTarget as HTMLElement)"><Icon name="plus" :size="14" /> Add</button></div>
         </article>
       </div>
-      <p v-if="settings.widgets.length >= MAX_WIDGETS" class="nt-limit" role="status">最多添加 {{ MAX_WIDGETS }} 个小组件</p>
-      <form class="nt-name-form" @submit.prevent="finishEditing"><label :for="`new-tab-name-${tabId || 'empty'}`">Your name</label><input :id="`new-tab-name-${tabId || 'empty'}`" v-model="name" maxlength="40" autocomplete="off" aria-label="首页称呼" :aria-invalid="Boolean(nameError)" @input="nameError = ''" /><span v-if="nameError" class="nt-form-error" role="alert">{{ nameError }}</span></form>
+      <p v-if="settings.widgets.length >= MAX_WIDGETS" class="nt-limit" role="status">{{ b.t('最多添加 {count} 个小组件', { count: MAX_WIDGETS }) }}</p>
+      <form class="nt-name-form" @submit.prevent="finishEditing"><label :for="`new-tab-name-${tabId || 'empty'}`">Your name</label><input :id="`new-tab-name-${tabId || 'empty'}`" v-model="name" maxlength="40" autocomplete="off" :aria-label="b.t('首页称呼')" :aria-invalid="Boolean(nameError)" @input="nameError = ''" /><span v-if="nameError" class="nt-form-error" role="alert">{{ nameError }}</span></form>
     </aside>
 
     <div class="nt-canvas">
@@ -163,29 +163,29 @@ function navigate(url: string, event?: MouseEvent) {
         </header>
 
         <div class="nt-columns">
-          <section v-if="!editing" class="nt-suggestions" aria-label="推荐网站">
+          <section v-if="!editing" class="nt-suggestions" :aria-label="b.t('推荐网站')">
             <h2>Suggestions</h2>
             <div class="nt-suggestion-list"><a v-for="site in sites" :key="site.url" class="nt-suggestion" :href="site.url" @click.prevent="navigate(site.url, $event)" @auxclick.middle.prevent="navigate(site.url, $event)"><span class="nt-site-icon"><svg v-if="hostnameFor(site.url) === 'figma.com'" class="nt-figma-logo" viewBox="0 0 38 57" aria-hidden="true"><path fill="#f24e1e" d="M9.5 0a9.5 9.5 0 0 0 0 19H19V0Z" /><path fill="#ff7262" d="M19 0h9.5a9.5 9.5 0 0 1 0 19H19Z" /><path fill="#a259ff" d="M9.5 19a9.5 9.5 0 0 0 0 19H19V19Z" /><circle fill="#1abcfe" cx="28.5" cy="28.5" r="9.5" /><path fill="#0acf83" d="M9.5 38a9.5 9.5 0 1 0 9.5 9.5V38Z" /></svg><img v-else-if="logoFor(site.url)" :src="logoFor(site.url)" alt="" draggable="false" /><Favicon v-else :url="site.url" :favicon="site.favicon" /></span><span class="nt-site-text"><strong>{{ site.title }}</strong><small>{{ site.url }}</small></span><Icon class="nt-site-arrow" name="arrow" :size="18" /></a></div>
           </section>
 
-          <section class="nt-widgets" aria-label="小组件">
-            <header class="nt-section-header"><h2>Widgets</h2><button v-if="!editing" ref="editButton" class="nt-edit-button" aria-label="编辑小组件" @click="beginEditing">Edit</button></header>
+          <section class="nt-widgets" :aria-label="b.t('小组件')">
+            <header class="nt-section-header"><h2>Widgets</h2><button v-if="!editing" ref="editButton" class="nt-edit-button" :aria-label="b.t('编辑小组件')" @click="beginEditing">Edit</button></header>
             <div class="nt-widget-grid">
               <article v-for="(widget, index) in settings.widgets" :key="widget.id" class="nt-widget" :class="{ 'nt-widget-wide': widget.size === 'wide', 'nt-widget-dragging': dragged === widget.id, 'nt-widget-drop': dropTarget === widget.id }" :aria-label="widgetTitle(widget.kind)" :data-widget-id="widget.id" @dragover="dragOver($event, widget.id)" @drop="dropWidget($event, widget.id)">
                 <div v-if="editing" class="nt-widget-toolbar">
-                  <button class="nt-drag-handle" draggable="true" :aria-label="`拖动${widgetTitle(widget.kind)}排序`" title="拖动排序" @dragstart="dragStart($event, widget.id)" @dragend="dragged = undefined; dropTarget = undefined"><Icon name="more" :size="16" /></button>
-                  <div><button :disabled="index === 0" :aria-label="`前移${widgetTitle(widget.kind)}`" @click="moveWidget(widget.id, -1)"><Icon name="back" :size="13" /></button><button :disabled="index === settings.widgets.length - 1" :aria-label="`后移${widgetTitle(widget.kind)}`" @click="moveWidget(widget.id, 1)"><Icon name="forward" :size="13" /></button><button :aria-label="`调整${widgetTitle(widget.kind)}宽度`" @click="patchWidget(widget.id, { size: widget.size === 'wide' ? 'small' : 'wide' })"><Icon name="expand" :size="13" /></button><button :aria-label="`移除${widgetTitle(widget.kind)}`" @click="removeWidget(widget.id)"><Icon name="close" :size="14" /></button></div>
+                  <button class="nt-drag-handle" draggable="true" :aria-label="b.t('拖动{item}排序', { item: widgetTitle(widget.kind) })" :title="b.t('拖动排序')" @dragstart="dragStart($event, widget.id)" @dragend="dragged = undefined; dropTarget = undefined"><Icon name="more" :size="16" /></button>
+                  <div><button :disabled="index === 0" :aria-label="b.t('前移{item}', { item: widgetTitle(widget.kind) })" @click="moveWidget(widget.id, -1)"><Icon name="back" :size="13" /></button><button :disabled="index === settings.widgets.length - 1" :aria-label="b.t('后移{item}', { item: widgetTitle(widget.kind) })" @click="moveWidget(widget.id, 1)"><Icon name="forward" :size="13" /></button><button :aria-label="b.t('调整{item}宽度', { item: widgetTitle(widget.kind) })" @click="patchWidget(widget.id, { size: widget.size === 'wide' ? 'small' : 'wide' })"><Icon name="expand" :size="13" /></button><button :aria-label="b.t('移除{item}', { item: widgetTitle(widget.kind) })" @click="removeWidget(widget.id)"><Icon name="close" :size="14" /></button></div>
                 </div>
                 <NewTabWidgetView :widget="widget" :now="now" @patch="patchWidget(widget.id, $event)" @navigate="navigate($event)" />
               </article>
-              <button v-for="slot in placeholders" :key="`empty-${slot}`" class="nt-widget nt-widget-empty" aria-label="添加小组件" @click="editing ? addWidget('notes', $event.currentTarget as HTMLElement) : beginEditing()"><span><Icon name="plus" :size="22" /><small>{{ editing ? '添加便签' : 'Add a widget' }}</small></span></button>
+              <button v-for="slot in placeholders" :key="`empty-${slot}`" class="nt-widget nt-widget-empty" :aria-label="b.t('添加小组件')" @click="editing ? addWidget('notes', $event.currentTarget as HTMLElement) : beginEditing()"><span><Icon name="plus" :size="22" /><small>{{ editing ? b.t('添加便签') : 'Add a widget' }}</small></span></button>
             </div>
           </section>
         </div>
       </div>
     </div>
     </div>
-    <button v-if="editing" class="nt-done-button" aria-label="完成编辑" @click="finishEditing">Done</button>
+    <button v-if="editing" class="nt-done-button" :aria-label="b.t('完成编辑')" @click="finishEditing">Done</button>
     <div class="nt-flight-layer" inert aria-hidden="true" />
     <span v-if="editing" class="nt-sr-only" role="status" aria-live="polite">{{ announcement }}</span>
   </section>

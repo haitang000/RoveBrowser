@@ -111,22 +111,22 @@ onBeforeUnmount(() => {
     <PageToolbar v-if="!split && !b.onboardingOpen" data-chrome-motion="titlebar" />
     <div class="window-controls">
       <button
-        aria-label="最小化"
-        title="最小化"
+        :aria-label="b.t('最小化')"
+        :title="b.t('最小化')"
         @click="b.send({ type: 'window', action: 'minimize' })"
       >
         <Icon name="minimize" :size="12" /></button
       ><button
         ref="maximize"
-        aria-label="最大化或还原"
-        title="最大化或还原"
+        :aria-label="b.t('最大化或还原')"
+        :title="b.t('最大化或还原')"
         @click="b.send({ type: 'window', action: 'maximize' })"
       >
         <Icon name="maximize" :size="11" /></button
       ><button
         class="window-close"
-        aria-label="关闭窗口"
-        title="关闭窗口"
+        :aria-label="b.t('关闭窗口')"
+        :title="b.t('关闭窗口')"
         @click="b.send({ type: 'window', action: 'close' })"
       >
         <Icon name="close" :size="13" />

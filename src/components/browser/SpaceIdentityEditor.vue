@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 import {
@@ -12,6 +13,7 @@ import {
   toggled,
 } from "../../lib/space-icon";
 
+const b = useBrowser();
 const name = defineModel<string>("name", { required: true });
 defineProps<{ placeholder?: string }>();
 const icon = defineModel<string | undefined>("icon");
@@ -76,14 +78,14 @@ function onEsc(event: KeyboardEvent) {
 </script>
 <template>
   <div class="space-identity">
-    <label :for="fieldId">工作区名称</label>
+    <label :for="fieldId">{{ b.t('工作区名称') }}</label>
     <div class="space-name-input">
       <button
         type="button"
         class="space-icon-trigger"
         :aria-pressed="picking"
-        aria-label="选择图标"
-        title="选择图标"
+        :aria-label="b.t('选择图标')"
+        :title="b.t('选择图标')"
         @click="toggle"
       >
         <SpaceGlyph v-if="icon" :icon="icon" :size="14" />
@@ -95,14 +97,14 @@ function onEsc(event: KeyboardEvent) {
         :id="fieldId"
         v-model="name"
         :placeholder="placeholder"
-        aria-label="工作区名称"
+        :aria-label="b.t('工作区名称')"
         maxlength="40"
         autocomplete="off"
       />
     </div>
     <div v-if="picking" class="icon-picker">
-      <div v-if="query" class="icon-grid icon-results" role="listbox" aria-label="表情搜索结果">
-        <p v-if="!results.length" class="icon-empty">没有找到表情</p>
+      <div v-if="query" class="icon-grid icon-results" role="listbox" :aria-label="b.t('表情搜索结果')">
+        <p v-if="!results.length" class="icon-empty">{{ b.t('没有找到表情') }}</p>
         <button
           v-for="entry in results"
           :key="entry.emoji"
@@ -114,8 +116,8 @@ function onEsc(event: KeyboardEvent) {
           <SpaceGlyph :icon="entry.emoji" :size="20" />
         </button>
       </div>
-      <div v-else class="icon-grid" role="group" aria-label="图标">
-        <button type="button" title="无图标" aria-label="无图标" :aria-pressed="!icon" @click="choose(undefined)">
+      <div v-else class="icon-grid" role="group" :aria-label="b.t('图标')">
+        <button type="button" :title="b.t('无图标')" :aria-label="b.t('无图标')" :aria-pressed="!icon" @click="choose(undefined)">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
             <circle cx="8" cy="8" r="5.2" stroke-dasharray="2.2 1.8" />
           </svg>
@@ -137,8 +139,8 @@ function onEsc(event: KeyboardEvent) {
         <input
           :value="field"
           type="text"
-          aria-label="搜索或输入表情"
-          placeholder="搜索或输入表情"
+          :aria-label="b.t('搜索或输入表情')"
+          :placeholder="b.t('搜索或输入表情')"
           autocomplete="off"
           spellcheck="false"
           @input="onInput"

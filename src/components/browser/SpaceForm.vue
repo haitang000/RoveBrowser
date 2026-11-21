@@ -70,20 +70,20 @@ onBeforeUnmount(() => {
     ref="form"
     class="space-form"
     :role="editing ? 'dialog' : undefined"
-    :aria-label="editing ? '编辑空间' : undefined"
+    :aria-label="editing ? b.t('编辑空间') : undefined"
     :aria-labelledby="editing ? undefined : `${id}-title`"
     :aria-busy="saving"
     @submit.prevent="emit('submit')"
   >
     <div class="space-form-scroll">
       <header class="space-form-heading">
-        <h1 :id="`${id}-title`">{{ editing ? '编辑 Space' : '创建 Space' }}</h1>
-        <p>{{ editing ? '更改当前 Space 的名称、图标与主题。' : '用 Space 整理你的标签页与浏览会话。' }}</p>
+        <h1 :id="`${id}-title`">{{ editing ? b.t('编辑 Space') : b.t('创建 Space') }}</h1>
+        <p>{{ editing ? b.t('更改当前 Space 的名称、图标与主题。') : b.t('用 Space 整理你的标签页与浏览会话。') }}</p>
       </header>
       <div class="space-form-fields">
-        <SpaceIdentityEditor v-model:name="name" v-model:icon="icon" v-model:picking="picking" placeholder="Space 名称" />
-        <div class="space-form-profile"><span>配置</span><span>默认</span></div>
-        <button ref="themeButton" type="button" class="space-theme-button" :aria-expanded="themeOpen" :aria-controls="`${id}-theme`" @click="toggleTheme">主题…</button>
+        <SpaceIdentityEditor v-model:name="name" v-model:icon="icon" v-model:picking="picking" :placeholder="b.t('Space 名称')" />
+        <div class="space-form-profile"><span>{{ b.t('配置') }}</span><span>{{ b.t('默认') }}</span></div>
+        <button ref="themeButton" type="button" class="space-theme-button" :aria-expanded="themeOpen" :aria-controls="`${id}-theme`" @click="toggleTheme">{{ b.t('主题…') }}</button>
       </div>
     </div>
     <div class="space-form-actions">
@@ -91,8 +91,8 @@ onBeforeUnmount(() => {
       <slot />
     </div>
     <Teleport to="body">
-      <section v-if="themeOpen" :id="`${id}-theme`" ref="themePanel" class="space-editor-panel space-form-theme" role="region" aria-label="Space 主题">
-        <header><h2>主题</h2><button type="button" class="icon-button" aria-label="关闭主题" @click="closeTheme(true)"><Icon name="close" :size="14" /></button></header>
+      <section v-if="themeOpen" :id="`${id}-theme`" ref="themePanel" class="space-editor-panel space-form-theme" role="region" :aria-label="b.t('Space 主题')">
+        <header><h2>{{ b.t('主题') }}</h2><button type="button" class="icon-button" :aria-label="b.t('关闭主题')" @click="closeTheme(true)"><Icon name="close" :size="14" /></button></header>
         <SpaceLookEditor :space="look" :dark="b.state.theme === 'dark'" @preview="emit('preview', $event)" @commit="emit('commit', $event)" />
       </section>
     </Teleport>

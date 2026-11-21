@@ -115,7 +115,7 @@ function runAction(id: string) {
   }
   if (id === "find") {
     if (!active || active.url === "era://newtab" || isSettingsUrl(active.url)) {
-      b.error = "此页面不支持页内查找";
+      b.error = b.t("此页面不支持页内查找");
       b.commandOpen = false;
       return;
     }
@@ -240,7 +240,7 @@ onBeforeUnmount(() => {
       @pointerdown.self="b.commandOpen = false"
       @keydown="key"
     >
-      <section ref="panel" class="command-panel" role="dialog" aria-modal="true" aria-label="搜索或输入地址">
+      <section ref="panel" class="command-panel" role="dialog" aria-modal="true" :aria-label="b.t('搜索或输入地址')">
         <div class="command-input">
           <Icon v-if="!scope" name="search" :size="18" />
           <span v-if="scope" class="command-chip">{{ scope.name }}</span>
@@ -250,7 +250,7 @@ onBeforeUnmount(() => {
               ref="field"
               :value="typed"
               role="combobox"
-              aria-label="搜索或输入地址"
+              :aria-label="b.t('搜索或输入地址')"
               aria-controls="command-results"
               :aria-activedescendant="results.length ? `command-${selected}` : undefined"
               :aria-expanded="results.length > 0"

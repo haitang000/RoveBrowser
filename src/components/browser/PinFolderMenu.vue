@@ -50,30 +50,30 @@ function save() {
     <div v-if="menu && (!target?.id || folder)" class="menu-scrim" @pointerdown.self="close" @keydown.esc.stop.prevent="close">
       <form v-if="editing" class="pin-folder-editor" role="dialog" aria-labelledby="pin-folder-editor-title"
         :style="{ '--anchor-x': `${menu.x}px`, '--anchor-y': `${menu.y}px` }" @submit.prevent="save">
-        <h2 id="pin-folder-editor-title">{{ folder ? '编辑文件夹' : '新建文件夹' }}</h2>
+        <h2 id="pin-folder-editor-title">{{ folder ? b.t('编辑文件夹') : b.t('新建文件夹') }}</h2>
         <label class="folder-name-field">
-          文件夹名称
-          <input ref="nameInput" v-model="name" type="text" placeholder="输入名称" maxlength="80" required />
+          {{ b.t('文件夹名称') }}
+          <input ref="nameInput" v-model="name" type="text" :placeholder="b.t('输入名称')" maxlength="80" required />
         </label>
         <fieldset class="folder-color-field">
-          <legend>颜色</legend>
+          <legend>{{ b.t('颜色') }}</legend>
           <div class="folder-color-palette">
-            <label v-for="(option, value) in PIN_FOLDER_COLORS" :key="value" :title="option.label" class="folder-color-option">
-              <input v-model="color" type="radio" name="folder-color" :value="value" :aria-label="option.label" />
+            <label v-for="(option, value) in PIN_FOLDER_COLORS" :key="value" :title="b.t(option.label)" class="folder-color-option">
+              <input v-model="color" type="radio" name="folder-color" :value="value" :aria-label="b.t(option.label)" />
               <span class="folder-color-bubble" :style="{ '--swatch': option.fill }"></span>
             </label>
           </div>
         </fieldset>
         <div class="folder-editor-actions">
-          <button type="button" class="plain-button" @click="close">取消</button>
-          <button type="submit" class="primary-button" :disabled="!name.trim()">{{ folder ? '保存修改' : '创建文件夹' }}</button>
+          <button type="button" class="plain-button" @click="close">{{ b.t('取消') }}</button>
+          <button type="submit" class="primary-button" :disabled="!name.trim()">{{ folder ? b.t('保存修改') : b.t('创建文件夹') }}</button>
         </div>
       </form>
       <div v-else ref="panel" class="context-menu" role="menu" :aria-label="folder?.name"
         :style="{ left: `clamp(8px, ${menu.x}px, calc(100dvw - 218px))`, top: `clamp(calc(var(--titlebar-block) + 4px), ${menu.y}px, calc(100dvh - 132px))` }">
         <div class="menu-label menu-tab-title">{{ folder?.name }}</div>
-        <button type="button" role="menuitem" @click="editFolder"><Icon name="edit" />编辑文件夹</button>
-        <button type="button" role="menuitem" @click="act('pinFolderRemove')"><Icon name="folder" />解散文件夹</button>
+        <button type="button" role="menuitem" @click="editFolder"><Icon name="edit" />{{ b.t('编辑文件夹') }}</button>
+        <button type="button" role="menuitem" @click="act('pinFolderRemove')"><Icon name="folder" />{{ b.t('解散文件夹') }}</button>
       </div>
     </div>
   </Teleport>

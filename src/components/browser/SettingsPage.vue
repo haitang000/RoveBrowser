@@ -3,6 +3,7 @@
 // Apache-2.0. AppKit controls adapted to accessible Vue controls.
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
+import { INTERFACE_LANGUAGES } from "../../lib/language";
 import {
   SETTINGS_PANES,
   SEARCH_ENGINES,
@@ -93,7 +94,7 @@ function matches(...text: string[]) {
   return matchesSettingsSearch(words.value, ...text);
 }
 const visiblePermissionRules = computed(() => b.permissionRules.filter(([scope]) =>
-  matches("网站权限", permissions[scope.kind].name, scope.page, scope.requester, "site permissions"),
+  matches(b.t("网站权限"), b.t(permissions[scope.kind].name), scope.page, scope.requester, "site permissions"),
 ));
 function setPermission(scope: PermissionScope, event: Event) {
   const choice = (event.target as HTMLSelectElement).value;
@@ -113,24 +114,24 @@ type Group = { pane: SettingsPane; title: string; rows: Row[] };
 const groups = computed<Group[]>(() => [
   {
     pane: "general",
-    title: "搜索",
+    title: b.t("搜索"),
     rows: [
       {
         id: "engine",
-        title: "搜索引擎",
-        detail: "输入的内容不是网址时，使用此引擎搜索。",
+        title: b.t("搜索引擎"),
+        detail: b.t("输入的内容不是网址时，使用此引擎搜索。"),
         kind: "select",
         setting: "searchEngine",
-        options: SEARCH_ENGINES.map(([id, name]) => [id, name]),
+        options: SEARCH_ENGINES.map(([id, name]) => [id, b.t(name)]),
         keywords: "search engine",
       },
       ...(b.settings.searchEngine === "custom"
         ? [
             {
               id: "custom",
-              title: "搜索地址",
+              title: b.t("搜索地址"),
               detail:
-                "用 %s 表示搜索词，例如 https://example.com/search?q=%s。",
+                b.t("用 %s 表示搜索词，例如 https://example.com/search?q=%s。"),
               kind: "input" as const,
               setting: "customSearchTemplate" as const,
             },
@@ -138,56 +139,65 @@ const groups = computed<Group[]>(() => [
         : []),
       {
         id: "suggestions",
-        title: "搜索建议",
+        title: b.t("搜索建议"),
         detail:
           b.settings.searchEngine === "google"
-            ? "输入的搜索词会发送给 Google 获取建议。"
-            : "当前引擎不提供远程建议；输入的搜索词仅在搜索时发送。",
+            ? b.t("输入的搜索词会发送给 Google 获取建议。")
+            : b.t("当前引擎不提供远程建议；输入的搜索词仅在搜索时发送。"),
         kind: "toggle",
         setting: "searchSuggestions",
         keywords: "suggestions",
       },
       {
         id: "default",
-        title: "默认浏览器",
-        detail: !b.native ? "请在 Rove 桌面版中设置默认浏览器。" : !b.defaultBrowser ? "在 Windows 设置中选择 Rove 打开网页链接。" : b.defaultBrowser.http && b.defaultBrowser.https ? "Rove 已是 HTTP 和 HTTPS 链接的默认浏览器。" : b.defaultBrowser.http || b.defaultBrowser.https ? "部分网页链接仍由其他浏览器打开，请在 Windows 中将 HTTP 和 HTTPS 都设为 Rove。" : "Rove 尚未设为默认浏览器。在 Windows 设置中选择 Rove。",
+        title: b.t("默认浏览器"),
+        detail: !b.native ? b.t("请在 Rove 桌面版中设置默认浏览器。") : !b.defaultBrowser ? b.t("在 Windows 设置中选择 Rove 打开网页链接。") : b.defaultBrowser.http && b.defaultBrowser.https ? b.t("Rove 已是 HTTP 和 HTTPS 链接的默认浏览器。") : b.defaultBrowser.http || b.defaultBrowser.https ? b.t("部分网页链接仍由其他浏览器打开，请在 Windows 中将 HTTP 和 HTTPS 都设为 Rove。") : b.t("Rove 尚未设为默认浏览器。在 Windows 设置中选择 Rove。"),
         kind: "button",
-        action: "设为默认浏览器",
+        action: b.t("设为默认浏览器"),
         keywords: "default browser",
       },
     ],
   },
   {
     pane: "general",
-    title: "窗口与外观",
+    title: b.t("窗口与外观"),
     rows: [
       {
+        id: "language",
+        title: b.t("界面语言"),
+        detail: "",
+        kind: "select",
+        setting: "language",
+        options: INTERFACE_LANGUAGES,
+        keywords: "language locale 界面语言 简体中文 English",
+      },
+      {
         id: "theme",
-        title: "外观",
-        detail: "选择浏览器界面的浅色或深色外观。",
+        title: b.t("外观"),
+        detail: b.t("选择浏览器界面的浅色或深色外观。"),
         kind: "select",
         options: [
-          ["light", "浅色"],
-          ["dark", "深色"],
+          ["light", b.t("浅色")],
+          ["dark", b.t("深色")],
         ],
         keywords: "theme appearance 深色模式 浅色模式",
       },
       {
         id: "names",
-        title: "大号工作区名称",
-        detail: "在侧栏上方以轻盈的大字号显示名称；关闭后使用普通标题。",
+        title: b.t("大号工作区名称"),
+        detail: b.t("在侧栏上方以轻盈的大字号显示名称；关闭后使用普通标题。"),
         kind: "toggle",
         setting: "largeSpaceNames",
         keywords: "large space names",
       },
       {
         id: "favorites",
-        title: "每行常用网站",
-        detail: "自动根据侧栏宽度调整；也可固定每行的数量。",
+        title: b.t("每行常用网站"),
+        detail: b.t("自动根据侧栏宽度调整；也可固定每行的数量。"),
         kind: "select",
         setting: "favoritesPerRow",
         options: [
-          [0, "自动"],
+          [0, b.t("自动")],
           [2, "2"],
           [3, "3"],
           [4, "4"],
@@ -196,16 +206,16 @@ const groups = computed<Group[]>(() => [
       },
       {
         id: "quit",
-        title: "退出前询问",
-        detail: "关闭窗口前确认，避免意外关闭所有标签页。",
+        title: b.t("退出前询问"),
+        detail: b.t("关闭窗口前确认，避免意外关闭所有标签页。"),
         kind: "toggle",
         setting: "askBeforeQuit",
         keywords: "ask before quitting",
       },
       {
         id: "motion",
-        title: "减少动态效果",
-        detail: "使用原地淡入淡出，减少滑动和缩放；同时遵循系统设置。",
+        title: b.t("减少动态效果"),
+        detail: b.t("使用原地淡入淡出，减少滑动和缩放；同时遵循系统设置。"),
         kind: "toggle",
         setting: "reduceMotion",
         keywords: "reduce motion animation 动画",
@@ -214,13 +224,13 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "general",
-    title: "标签页",
+    title: b.t("标签页"),
     rows: [
       {
         id: "sleep",
-        title: "后台标签休眠",
+        title: b.t("后台标签休眠"),
         detail:
-          "一段时间没有查看的标签页会释放内存，再次打开时回到原来的位置；正在播放声音或加载中的标签页不会休眠。",
+          b.t("一段时间没有查看的标签页会释放内存，再次打开时回到原来的位置；正在播放声音或加载中的标签页不会休眠。"),
         kind: "toggle",
         setting: "sleepTabs",
         keywords: "tabs sleep asleep memory background suspend 标签 休眠 内存",
@@ -229,12 +239,12 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "general",
-    title: "下载",
+    title: b.t("下载"),
     rows: [
       {
         id: "folder",
-        title: "保存下载到",
-        detail: "填写已存在的文件夹完整路径；留空使用系统下载文件夹。",
+        title: b.t("保存下载到"),
+        detail: b.t("填写已存在的文件夹完整路径；留空使用系统下载文件夹。"),
         kind: "input",
         setting: "downloadFolder",
         keywords: "downloads folder",
@@ -243,20 +253,20 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "passwords",
-    title: "自动填充",
+    title: b.t("自动填充"),
     rows: [
       {
         id: "passwords",
-        title: "提示保存密码",
-        detail: "由 WebView2 管理网站密码的保存提示。",
+        title: b.t("提示保存密码"),
+        detail: b.t("由 WebView2 管理网站密码的保存提示。"),
         kind: "toggle",
         setting: "savePasswords",
         keywords: "save passwords",
       },
       {
         id: "autofill",
-        title: "自动填充表单",
-        detail: "允许填充表单信息，并在登录页提供已导入密码的账号选择。",
+        title: b.t("自动填充表单"),
+        detail: b.t("允许填充表单信息，并在登录页提供已导入密码的账号选择。"),
         kind: "toggle",
         setting: "autofill",
         keywords: "forms autofill",
@@ -265,53 +275,53 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "privacy",
-    title: "浏览数据",
+    title: b.t("浏览数据"),
     rows: [
       {
         id: "remember",
-        title: "记录浏览历史",
+        title: b.t("记录浏览历史"),
         detail:
-          "将访问过的网页保存在本机，用于地址栏搜索。关闭后保留已有历史。",
+          b.t("将访问过的网页保存在本机，用于地址栏搜索。关闭后保留已有历史。"),
         kind: "toggle",
         setting: "rememberHistory",
         keywords: "remember browsing history",
       },
       {
         id: "history",
-        title: "浏览历史",
-        detail: "清除本机历史记录和已关闭标签页记录。",
+        title: b.t("浏览历史"),
+        detail: b.t("清除本机历史记录和已关闭标签页记录。"),
         kind: "button",
-        action: "清除…",
+        action: b.t("清除…"),
         keywords: "clear history",
       },
       {
         id: "cache",
-        title: "缓存的图片和文件",
-        detail: "释放网页缓存。再次访问时会重新下载内容。",
+        title: b.t("缓存的图片和文件"),
+        detail: b.t("释放网页缓存。再次访问时会重新下载内容。"),
         kind: "button",
-        action: "清除…",
+        action: b.t("清除…"),
         keywords: "clear cache",
       },
       {
         id: "siteData",
-        title: "Cookie 和网站数据",
-        detail: "清除全部网站的 Cookie 和本地存储，会退出网站登录。",
+        title: b.t("Cookie 和网站数据"),
+        detail: b.t("清除全部网站的 Cookie 和本地存储，会退出网站登录。"),
         kind: "button",
-        action: "清除…",
+        action: b.t("清除…"),
         keywords: "cookies site data storage",
       },
     ],
   },
   {
     pane: "translation",
-    title: "网页翻译",
+    title: b.t("网页翻译"),
     rows: [
       {
         id: "translation",
-        title: "翻译网页",
-        detail: "Rove 尚未接入网页翻译服务。",
+        title: b.t("翻译网页"),
+        detail: b.t("Rove 尚未接入网页翻译服务。"),
         kind: "status",
-        action: "暂未提供",
+        action: b.t("暂未提供"),
         keywords: "translation language 翻译 语言",
       },
     ],
@@ -324,26 +334,31 @@ const visibleGroups = computed(() =>
     const rows = group.rows.filter(
       (row) =>
         !searching.value ||
-        matches(meta.title, meta.keywords, group.title) ||
+        matches(b.t(meta.title), meta.keywords, group.title) ||
         matches(row.title, row.detail, row.keywords || "", row.action || ""),
     );
-    return rows.length ? [{ ...group, rows }] : [];
+    return rows.length ? [{ ...group, rows, key: group.rows[0]!.id }] : [];
   }),
 );
 const visibleSpaces = computed(() =>
   b.state.spaces.filter(
-    (space) => !searching.value || matches("工作区 spaces", space.name),
+    (space) => !searching.value || matches(b.t("工作区"), b.t("你的工作区"), "spaces", space.name),
   ),
 );
 const visibleShortcuts = computed(() =>
-  SHORTCUTS.filter(
+  SHORTCUTS.map((item) => ({
+    id: item.id,
+    title: b.t(item.title),
+    group: b.t(item.group),
+    keys: b.t(shortcutText(shortcutFor(item.id, b.settings))),
+  })).filter(
     (item) =>
       !searching.value ||
       matches(
-        "快捷键 shortcuts",
+        b.t("快捷键"),
         item.group,
         item.title,
-        shortcutText(shortcutFor(item.id, b.settings)),
+        item.keys,
       ),
   ),
 );
@@ -358,13 +373,13 @@ const showShortcuts = computed(
     !!visibleShortcuts.value.length,
 );
 const aboutPane = SETTINGS_PANES.find((item) => item.id === "about")!;
-const aboutSummary = "当前版本、软件更新、更新通道和欢迎引导。";
+const aboutSummary = computed(() => b.t("当前版本、软件更新、更新通道和欢迎引导。"));
 const showAboutResult = computed(() =>
-  searching.value && matches(aboutPane.title, aboutSummary, aboutPane.keywords),
+  searching.value && matches(b.t(aboutPane.title), aboutSummary.value, aboutPane.keywords),
 );
-const extensionSummary = "加载本地 Chrome 扩展或从 Chrome 网上应用店安装。";
+const extensionSummary = computed(() => b.t("加载本地 Chrome 扩展或从 Chrome 网上应用店安装。"));
 const showExtensionsResult = computed(() =>
-  searching.value && matches("扩展", extensionSummary, "extension plugin 插件 Manifest V3"),
+  searching.value && matches(b.t("扩展"), extensionSummary.value, "extension plugin 插件 Manifest V3"),
 );
 const noResults = computed(
   () =>
@@ -407,7 +422,7 @@ function select(row: Row, event: Event) {
 function saveInput(id: string) {
   if (id === "custom") {
     if (custom.value && !validSearchTemplate(custom.value.trim())) {
-      notice.value = "搜索地址需要包含 %s，并使用有效的 HTTP 或 HTTPS 网址。";
+      notice.value = b.t("搜索地址需要包含 %s，并使用有效的 HTTP 或 HTTPS 网址。");
       return;
     }
     update("customSearchTemplate", custom.value.trim());
@@ -415,13 +430,13 @@ function saveInput(id: string) {
 }
 function action(row: Row) {
   if (row.id === "default") {
-    if (!b.native) { notice.value = "请在 Rove 桌面版中设置默认浏览器。"; return; }
+    if (!b.native) { notice.value = b.t("请在 Rove 桌面版中设置默认浏览器。"); return; }
     b.send({ type: "systemSettings" });
     return;
   }
   pending.value = {
     kind: row.id,
-    title: `清除${row.title}？`,
+    title: b.t("清除{item}？", { item: row.title }),
     detail: row.detail,
   };
 }
@@ -435,7 +450,7 @@ function editSpace(space?: Space) {
 }
 function saveSpace() {
   if (!spaceName.value.trim()) {
-    notice.value = "请输入工作区名称。";
+    notice.value = b.t("请输入工作区名称。");
     return;
   }
   b.send({
@@ -458,12 +473,12 @@ function dropSpace(event: DragEvent, before: string) {
 }
 function askToUpdate(offerId: string) {
   const { channel, version } = b.updateStatus;
-  const name = channel === "canary" ? `Canary 构建 ${version}` : `版本 ${version}`;
+  const name = b.t(channel === "canary" ? "Canary 构建 {version}" : "版本 {version}", { version: version ?? "" });
   pending.value = {
     kind: "update",
     id: offerId,
-    title: "更新并重启 Rove？",
-    detail: `Rove 将下载 ${name} 并保存浏览会话，然后关闭窗口、安装更新并重新打开。`,
+    title: b.t("更新并重启 Rove？"),
+    detail: b.t("Rove 将下载 {name} 并保存浏览会话，然后关闭窗口、安装更新并重新打开。", { name }),
   };
 }
 watch(() => b.updateStatus.offerId, (offerId) => {
@@ -477,9 +492,9 @@ function confirm() {
   else if (pending.value.kind === "update") {
     if (pending.value.id) b.installUpdate(pending.value.id);
   } else if (b.native) {
-    b.dataStatus = "正在清除…";
+    b.dataStatus = b.t("正在清除…");
     b.send({ type: "clearBrowsingData", kind: pending.value.kind });
-  } else notice.value = "界面预览不保存真实浏览数据；请在 Windows 应用中清除。";
+  } else notice.value = b.t("界面预览不保存真实浏览数据；请在 Windows 应用中清除。");
   pending.value = undefined;
 }
 function record(event: KeyboardEvent) {
@@ -531,23 +546,23 @@ watch(
 onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
 </script>
 <template>
-  <section class="settings-page" aria-label="设置">
+  <section class="settings-page" :aria-label="b.t('设置')">
     <div class="settings-layout" :inert="!!editing || !!pending">
-      <aside class="settings-navigation" aria-label="设置分类">
+      <aside class="settings-navigation" :aria-label="b.t('设置分类')">
         <div class="settings-brand">
           <span>Rove</span>
-          <h1>设置</h1>
+          <h1>{{ b.t('设置') }}</h1>
         </div>
         <nav>
           <button
             v-for="item in SETTINGS_PANES"
             :key="item.id"
-            :title="item.title"
-            :aria-label="item.title"
+            :title="b.t(item.title)"
+            :aria-label="b.t(item.title)"
             :aria-current="pane === item.id && !searching ? 'page' : undefined"
             @click="pick(item.id)"
           >
-            <Icon :name="item.icon" /><span>{{ item.title }}</span>
+            <Icon :name="item.icon" /><span>{{ b.t(item.title) }}</span>
           </button>
         </nav>
       </aside>
@@ -556,16 +571,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
           <h2>
             {{
               searching
-                ? "搜索结果"
-                : SETTINGS_PANES.find((p) => p.id === pane)?.title
+                ? b.t('搜索结果')
+                : b.t(SETTINGS_PANES.find((p) => p.id === pane)!.title)
             }}
           </h2>
           <label class="settings-search"
             ><Icon name="search" :size="14" /><input
               v-model="query"
               type="search"
-              placeholder="查找设置"
-              aria-label="查找设置"
+              :placeholder="b.t('查找设置')"
+              :aria-label="b.t('查找设置')"
               @keydown.esc.stop="query = ''"
           /></label>
         </header>
@@ -577,7 +592,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
             <button v-if="showExtensionsResult" class="about-search-result" @click="pick('extensions')">
               <Icon name="extension" />
               <span class="setting-description">
-                <strong><SearchHighlight text="扩展" :words="words" /></strong>
+                <strong><SearchHighlight :text="b.t('扩展')" :words="words" /></strong>
                 <span class="about-search-summary"><SearchHighlight :text="extensionSummary" :words="words" /></span>
               </span>
               <Icon name="forward" :size="13" />
@@ -585,7 +600,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
             <button v-if="showAboutResult" class="about-search-result" @click="pick('about')">
               <Icon name="info" />
               <span class="setting-description">
-                <strong><SearchHighlight :text="aboutPane.title" :words="words" /></strong>
+                <strong><SearchHighlight :text="b.t(aboutPane.title)" :words="words" /></strong>
                 <span class="about-search-summary"><SearchHighlight :text="aboutSummary" :words="words" /></span>
               </span>
               <Icon name="forward" :size="13" />
@@ -595,17 +610,17 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               class="settings-feedback"
               role="status"
             >
-              {{ notice || b.dataStatus }}
+              {{ notice || b.t(b.dataStatus) }}
             </p>
             <section
               v-for="group in visibleGroups"
-              :key="`${group.pane}-${group.title}`"
+              :key="group.key"
               class="settings-group"
               :aria-label="group.title"
             >
               <h3 :class="{ 'settings-result-heading': searching }">
                 <span v-if="searching" class="settings-result-pane">
-                  <SearchHighlight :text="SETTINGS_PANES.find((p) => p.id === group.pane)!.title" :words="words" />
+                  <SearchHighlight :text="b.t(SETTINGS_PANES.find((p) => p.id === group.pane)!.title)" :words="words" />
                   <span class="settings-result-separator" aria-hidden="true">›</span>
                 </span>
                 <span><SearchHighlight :text="group.title" :words="words" /></span>
@@ -613,7 +628,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               <div v-for="row in group.rows" :key="row.id" class="setting-row">
                 <div class="setting-description">
                   <label :for="`setting-${row.id}-${tabId}`"><SearchHighlight :text="row.title" :words="words" /></label>
-                  <p><SearchHighlight :text="row.detail" :words="words" /></p>
+                  <p v-if="row.detail"><SearchHighlight :text="row.detail" :words="words" /></p>
                 </div>
                 <button
                   v-if="row.kind === 'toggle'"
@@ -650,18 +665,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                     v-if="row.id === 'custom'"
                     :id="`custom-${tabId}`"
                     v-model="custom"
-                    aria-label="搜索地址"
+                    :aria-label="b.t('搜索地址')"
                     placeholder="https://example.com/search?q=%s"
                     maxlength="2048"
                     @change="saveInput(row.id)"
                   /><input
                     v-else
                     v-model="folder"
-                    aria-label="下载文件夹"
-                    placeholder="系统下载文件夹"
+                    :aria-label="b.t('下载文件夹')"
+                    :placeholder="b.t('系统下载文件夹')"
                     maxlength="1024"
                     @change="saveInput(row.id)"
-                  /><button type="submit" class="setting-button">保存</button>
+                  /><button type="submit" class="setting-button">{{ b.t('保存') }}</button>
                 </form>
                 <button
                   v-else-if="row.kind === 'button'"
@@ -679,45 +694,45 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
             <section
               v-if="b.native && (searching ? visiblePermissionRules.length : pane === 'privacy')"
               class="settings-group"
-              aria-label="网站权限"
+              :aria-label="b.t('网站权限')"
             >
-              <h3>网站权限</h3>
+              <h3>{{ b.t('网站权限') }}</h3>
               <div v-if="!visiblePermissionRules.length" class="setting-row">
-                <div class="setting-description"><p>你还没有保存任何网站的权限选择。</p></div>
+                <div class="setting-description"><p>{{ b.t('你还没有保存任何网站的权限选择。') }}</p></div>
               </div>
               <div v-for="([scope, allowed], index) in visiblePermissionRules"
                 :key="JSON.stringify(scope)" class="setting-row">
                 <div class="setting-description permission-description">
-                  <label :for="`permission-rule-${tabId}-${index}`">{{ permissions[scope.kind].name }} · <bdi>{{ scope.requester }}</bdi></label>
-                  <p v-if="scope.page !== scope.requester">嵌入在 <bdi>{{ scope.page }}</bdi></p>
+                  <label :for="`permission-rule-${tabId}-${index}`">{{ b.t(permissions[scope.kind].name) }} · <bdi>{{ scope.requester }}</bdi></label>
+                  <p v-if="scope.page !== scope.requester">{{ b.t('嵌入在') }} <bdi>{{ scope.page }}</bdi></p>
                 </div>
                 <select :id="`permission-rule-${tabId}-${index}`" :value="allowed ? 'allow' : 'block'"
                   @change="setPermission(scope, $event)">
-                  <option value="ask">询问</option>
-                  <option value="allow">允许</option>
-                  <option value="block">阻止</option>
+                  <option value="ask">{{ b.t('询问') }}</option>
+                  <option value="allow">{{ b.t('允许') }}</option>
+                  <option value="block">{{ b.t('阻止') }}</option>
                 </select>
               </div>
             </section>
             <section
               v-if="showSpaces"
               class="settings-group"
-              aria-label="你的工作区"
+              :aria-label="b.t('你的工作区')"
             >
               <div class="settings-group-heading">
                 <h3 :class="{ 'settings-result-heading': searching }">
                   <span v-if="searching" class="settings-result-pane">
-                    <SearchHighlight text="工作区" :words="words" />
+                    <SearchHighlight :text="b.t('工作区')" :words="words" />
                     <span class="settings-result-separator" aria-hidden="true">›</span>
                   </span>
-                  <span><SearchHighlight text="你的工作区" :words="words" /></span>
+                  <span><SearchHighlight :text="b.t('你的工作区')" :words="words" /></span>
                 </h3>
                 <button
                   class="setting-button"
                   :disabled="b.state.spaces.length >= 16"
                   @click="editSpace()"
                 >
-                  新建工作区
+                  {{ b.t('新建工作区') }}
                 </button>
               </div>
               <div
@@ -738,37 +753,28 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 <div class="setting-description">
                   <strong><SearchHighlight :text="space.name" :words="words" /></strong>
                   <p>
-                    {{
-                      b.state.tabs.filter(
-                        (t) => t.spaceId === space.id && !t.pinned,
-                      ).length
-                    }}
-                    个标签页 ·
-                    {{
-                      b.state.pins?.filter((p) => p.spaceId === space.id)
-                        .length || 0
-                    }}
-                    个固定项
+                    {{ b.t('{count} 个标签页', { count: b.state.tabs.filter((t) => t.spaceId === space.id && !t.pinned).length }) }} ·
+                    {{ b.t('{count} 个固定项', { count: b.state.pins?.filter((p) => p.spaceId === space.id).length ?? 0 }) }}
                   </p>
                 </div>
                 <div class="setting-inline-actions">
                   <button
                     class="setting-button"
-                    :aria-label="`编辑 ${space.name}`"
+                    :aria-label="b.t('编辑 {name}', { name: space.name })"
                     @click="editSpace(space)"
                   >
-                    编辑</button
+                    {{ b.t('编辑') }}</button
                   ><button
                     class="icon-button"
-                    :aria-label="`删除 ${space.name}`"
+                    :aria-label="b.t('删除 {name}', { name: space.name })"
                     :disabled="b.state.spaces.length <= 1"
                     @click="
                       pending = {
                         kind: 'space',
                         id: space.id,
-                        title: `删除“${space.name}”？`,
+                        title: b.t('删除“{name}”？', { name: space.name }),
                         detail:
-                          '此工作区的标签页与固定项将被移除，共用的常用网站保留。此操作无法撤销。',
+                          b.t('此工作区的标签页与固定项将被移除，共用的常用网站保留。此操作无法撤销。'),
                       }
                     "
                   >
@@ -776,15 +782,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   </button>
                 </div>
               </div>
-              <p class="setting-hint">拖动工作区调整顺序。</p>
+              <p class="setting-hint">{{ b.t('拖动工作区调整顺序。') }}</p>
             </section>
             <section
               v-if="showShortcuts"
               class="settings-group"
-              aria-label="快捷键列表"
+              :aria-label="b.t('快捷键列表')"
             >
               <div class="settings-group-heading">
-                <h3 :class="{ 'settings-result-heading': searching }"><span><SearchHighlight text="快捷键" :words="words" /></span></h3>
+                <h3 :class="{ 'settings-result-heading': searching }"><span><SearchHighlight :text="b.t('快捷键')" :words="words" /></span></h3>
                 <button
                   class="setting-button"
                   @click="
@@ -792,12 +798,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                     update('shortcuts', {});
                   "
                 >
-                  恢复默认
+                  {{ b.t('恢复默认') }}
                 </button>
               </div>
               <p class="setting-hint">
-                点击按键开始录制，Esc 取消，Backspace 清除。Ctrl + 1–9
-                用于切换工作区。
+                {{ b.t('点击按键开始录制，Esc 取消，Backspace 清除。Ctrl + 1–9 用于切换工作区。') }}
               </p>
               <div
                 v-for="item in visibleShortcuts"
@@ -811,21 +816,21 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 <button
                   class="setting-shortcut"
                   :class="{ recording: recording === item.id }"
-                  :aria-label="`修改快捷键：${item.title}`"
+                  :aria-label="b.t('修改快捷键：{name}', { name: item.title })"
                   @click="
                     notice = '';
                     recording = recording === item.id ? '' : item.id;
                   "
                 >
                   <kbd><SearchHighlight
-                    :text="recording === item.id ? '请按下组合键…' : shortcutText(shortcutFor(item.id, b.settings))"
+                    :text="recording === item.id ? b.t('请按下组合键…') : item.keys"
                     :words="words"
                   /></kbd>
                 </button>
               </div>
             </section>
             <p v-if="noResults" class="settings-empty">
-              没有找到与“{{ query.trim() }}”匹配的设置。
+              {{ b.t('没有找到与“{query}”匹配的设置。', { query: query.trim() }) }}
             </p>
           </div>
           </Transition>
@@ -851,13 +856,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
         class="settings-space-editor"
         role="dialog"
         aria-modal="true"
-        :aria-label="editing === 'new' ? '新建工作区' : '编辑工作区'"
+        :aria-label="editing === 'new' ? b.t('新建工作区') : b.t('编辑工作区')"
       >
         <header>
-          <h2>{{ editing === "new" ? "新建工作区" : "编辑工作区" }}</h2>
+          <h2>{{ editing === "new" ? b.t('新建工作区') : b.t('编辑工作区') }}</h2>
           <button
             class="icon-button"
-            aria-label="关闭编辑"
+            :aria-label="b.t('关闭编辑')"
             @click="editing = undefined"
           >
             <Icon name="close" />
@@ -879,8 +884,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               class="setting-button"
               @click="editing = undefined"
             >
-              取消</button
-            ><button class="primary-button">保存</button>
+              {{ b.t('取消') }}</button
+            ><button class="primary-button">{{ b.t('保存') }}</button>
           </footer>
         </form>
       </section>
@@ -896,9 +901,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
         <p :id="`settings-confirm-detail-${tabId}`">{{ pending.detail }}</p>
         <footer>
           <button class="setting-button" @click="pending = undefined">
-            取消</button
+            {{ b.t('取消') }}</button
           ><button class="primary-button" @click="confirm">
-            {{ pending.kind === "update" ? "确认更新并重启" : pending.kind === "space" ? "删除工作区" : "确认清除" }}
+            {{ pending.kind === "update" ? b.t('确认更新并重启') : pending.kind === "space" ? b.t('删除工作区') : b.t('确认清除') }}
           </button>
         </footer>
       </section>

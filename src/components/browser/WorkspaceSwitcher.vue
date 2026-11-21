@@ -50,8 +50,8 @@ onBeforeUnmount(() => {
       ref="trigger"
       class="icon-button browser-menu-trigger"
       :class="{ active: b.browserMenuOpen || dragMenuOpen || b.downloadsOpen || b.activeDownloads }"
-      :title="b.activeDownloads ? `浏览器菜单 · ${b.activeDownloads} 个下载进行中` : '浏览器菜单'"
-      aria-label="浏览器菜单"
+      :title="b.activeDownloads ? `浏览器菜单 · ${b.activeDownloads} 个下载进行中` : b.t('浏览器菜单')"
+      :aria-label="b.t('浏览器菜单')"
       :aria-description="b.activeDownloads ? `${b.activeDownloads} 个下载进行中` : undefined"
       aria-haspopup="menu"
       :aria-expanded="b.browserMenuOpen || dragMenuOpen"
@@ -64,8 +64,8 @@ onBeforeUnmount(() => {
     </button>
     <button
       class="icon-button"
-      :title="b.shortcutTitle('全部标签页', 'desk')"
-      aria-label="全部标签页"
+      :title="b.shortcutTitle(b.t('全部标签页'), 'desk')"
+      :aria-label="b.t('全部标签页')"
       @click="b.deskOpen = true"
     ><Icon name="grid" :size="14" /></button>
     <BrowserMenu drop-targets-only :drop-menu-open="dragMenuOpen" />

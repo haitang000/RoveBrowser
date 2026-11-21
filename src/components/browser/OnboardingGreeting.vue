@@ -71,8 +71,8 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="onboarding-greeting" aria-labelledby="onboarding-title">
-    <h1 id="onboarding-title" ref="heading" class="sr-only" tabindex="-1">引导完成</h1>
-    <button class="onboarding-greeting-replay" type="button" aria-label="重播 hello 手写动画" @click="play">
+    <h1 id="onboarding-title" ref="heading" class="sr-only" tabindex="-1">{{ b.t('引导完成') }}</h1>
+    <button class="onboarding-greeting-replay" type="button" :aria-label="b.t('重播 hello 手写动画')" @click="play">
       <svg ref="art" class="onboarding-greeting-art" viewBox="44 6 184 80" fill="none" stroke="currentColor" stroke-width="6.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path visibility="hidden" d="M50.7 63.6
           C63.3 53.4 73.6 42.7 73.6 27.2
@@ -104,6 +104,6 @@ onBeforeUnmount(() => {
           C199.2 78.9 193.6 73.2 193.7 65.9" />
       </svg>
     </button>
-    <button v-if="hasFinished" class="onboarding-primary onboarding-primary-light onboarding-greeting-continue" type="button" @click="b.dismissOnboardingGreeting()">开始浏览</button>
+    <button v-if="hasFinished" class="onboarding-primary onboarding-primary-light onboarding-greeting-continue" type="button" @click="b.dismissOnboardingGreeting()">{{ b.t('开始浏览') }}</button>
   </section>
 </template>

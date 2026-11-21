@@ -38,9 +38,9 @@ const muted = computed(() => Boolean(liveTab.value?.muted ?? menu.value?.tab.mut
 const zoomLabel = computed(() => `${Math.round(b.pageZoom * 100)}%`);
 const title = computed(() =>
   liveTab.value
-    ? tabDisplayTitle(liveTab.value)
+    ? tabDisplayTitle(liveTab.value, b.language)
     : menu.value?.tab
-      ? tabDisplayTitle(menu.value.tab)
+      ? tabDisplayTitle(menu.value.tab, b.language)
       : "",
 );
 const canRename = computed(() => Boolean(liveTab.value && !liveTab.value.bookmarkId));
@@ -85,7 +85,7 @@ function copyLink() {
   const url = menu.value?.tab.url;
   if (url) {
     b.send({ type: "copyText", text: url });
-    b.notify("已复制链接");
+    b.notify(b.t("已复制链接"));
   }
   closeMenu();
 }
@@ -118,16 +118,16 @@ function act(type: string, extra = {}) {
           :style="{ left: menu.x + 'px', top: menu.y + 'px', maxHeight: `calc(100dvh - ${menu.y + 12}px)` }"
         >
           <form v-if="edit" class="bookmark-menu-form" @submit.prevent="b.send({ type: 'bookmarkUpdate', id: bookmark()?.id, title: editTitle, url: editUrl }); closeMenu()">
-            <label>名称<input v-model="editTitle" aria-label="固定标签名称" maxlength="80" required /></label>
-            <label>起始网址<input v-model="editUrl" aria-label="固定标签网址" maxlength="2048" required /></label>
-            <button class="primary-button" type="submit">保存修改</button>
+            <label>{{ b.t('名称') }}<input v-model="editTitle" :aria-label="b.t('固定标签名称')" maxlength="80" required /></label>
+            <label>{{ b.t('起始网址') }}<input v-model="editUrl" :aria-label="b.t('固定标签网址')" maxlength="2048" required /></label>
+            <button class="primary-button" type="submit">{{ b.t('保存修改') }}</button>
           </form>
           <form v-else-if="rename" class="tab-rename-form" @submit.prevent="submitRename">
-            <label>标签名称<input v-model="renameTitle" aria-label="标签名称" maxlength="80" placeholder="留空恢复网页标题" /></label>
-            <button class="primary-button" type="submit">保存名称</button>
+            <label>{{ b.t('标签名称') }}<input v-model="renameTitle" :aria-label="b.t('标签名称')" maxlength="80" :placeholder="b.t('留空恢复网页标题')" /></label>
+            <button class="primary-button" type="submit">{{ b.t('保存名称') }}</button>
           </form>
           <template v-else-if="movingToFolder">
-            <div class="menu-label">移至文件夹</div>
+            <div class="menu-label">{{ b.t('移至文件夹') }}</div>
             <button v-for="folder in otherFolders" :key="folder.id" role="menuitem" @click="moveToFolder(folder.id)">
               <Icon name="folder" />{{ folder.name }}
             </button>
@@ -136,14 +136,14 @@ function act(type: string, extra = {}) {
           <div class="menu-label menu-tab-title">{{ title }}</div>
           <button role="menuitem" @click="act('pin')">
             <Icon name="pin" />{{
-              menu.tab.pinned ? "取消固定" : "固定标签页"
+              menu.tab.pinned ? b.t('取消固定') : b.t('固定标签页')
             }}</button
           ><button
             role="menuitem"
             :disabled="!/^https?:\/\//i.test(menu.tab.url) || b.state.favorites.length >= MAX_FAVORITES"
             @click="act('favoriteTab')"
           >
-            <Icon name="plus" />添加到顶部常用网站
+            <Icon name="plus" />{{ b.t('添加到顶部常用网站') }}
           </button><button
             role="menuitem"
             :disabled="
@@ -160,44 +160,44 @@ function act(type: string, extra = {}) {
               closeMenu();
             "
           >
-            <Icon name="split" />在当前网页旁分屏
+            <Icon name="split" />{{ b.t('在当前网页旁分屏') }}
           </button>
           <button v-if="isWeb && otherFolders.length" role="menuitem" @click="chooseFolder">
-            <Icon name="folder" />移至文件夹…
+            <Icon name="folder" />{{ b.t('移至文件夹…') }}
           </button>
           <button v-if="currentFolder" role="menuitem" @click="moveToFolder()">
-            <Icon name="folder" />移出文件夹
+            <Icon name="folder" />{{ b.t('移出文件夹') }}
           </button>
           <template v-if="canRename">
             <button role="menuitem" @click="beginRename">
-              <Icon name="edit" />重命名标签页
+              <Icon name="edit" />{{ b.t('重命名标签页') }}
             </button>
             <button v-if="hasCustomTitle" role="menuitem" @click="resetRename">
-              恢复网页标题
+              {{ b.t('恢复网页标题') }}
             </button>
           </template>
           <button role="menuitem" :disabled="!canRename" @click="duplicate">
-            <Icon name="duplicate" />复制标签页
+            <Icon name="duplicate" />{{ b.t('复制标签页') }}
           </button>
           <button role="menuitem" :disabled="!isWeb" @click="copyLink">
-            <Icon name="copy" />复制链接
+            <Icon name="copy" />{{ b.t('复制链接') }}
           </button>
           <template v-if="isWeb && !menu.tab.unloaded">
             <button role="menuitem" @click="mute">
               <Icon :name="muted ? 'speakerMuted' : 'speaker'" />{{
-                muted ? "取消静音标签页" : "静音标签页"
+                muted ? b.t('取消静音标签页') : b.t('静音标签页')
               }}
             </button>
           </template>
           <template v-if="isActive && isWeb">
-            <div class="menu-label">网页缩放 {{ zoomLabel }}</div>
+            <div class="menu-label">{{ b.t('网页缩放') }} {{ zoomLabel }}</div>
             <div class="menu-zoom">
               <button
                 role="menuitem"
                 :disabled="b.pageZoom <= 0.5"
                 @click="zoom('out')"
               >
-                <Icon name="minus" />缩小
+                <Icon name="minus" />{{ b.t('缩小') }}
               </button>
               <button
                 role="menuitem"
@@ -211,15 +211,15 @@ function act(type: string, extra = {}) {
                 :disabled="b.pageZoom >= 3"
                 @click="zoom('in')"
               >
-                <Icon name="plus" />放大
+                <Icon name="plus" />{{ b.t('放大') }}
               </button>
             </div>
           </template>
           <template v-if="bookmark()">
-            <button role="menuitem" @click="beginEdit">编辑固定标签</button>
-            <button v-if="!menu.tab.unloaded && !samePinnedUrl(menu.tab.url, bookmark()!.url)" role="menuitem" @click="b.send({ type: 'bookmarkReset', id: bookmark()!.id }); closeMenu()">返回固定网址</button>
-            <button v-if="!menu.tab.unloaded" role="menuitem" @click="b.send({ type: 'bookmarkSeparate', id: bookmark()!.id }); closeMenu()">分离为普通标签</button>
-            <button v-if="!menu.tab.unloaded && !samePinnedUrl(menu.tab.url, bookmark()!.url)" role="menuitem" @click="b.send({ type: 'bookmarkUpdate', id: bookmark()!.id, title: bookmark()!.title, url: menu.tab.url }); closeMenu()">将当前网址设为固定网址</button>
+            <button role="menuitem" @click="beginEdit">{{ b.t('编辑固定标签') }}</button>
+            <button v-if="!menu.tab.unloaded && !samePinnedUrl(menu.tab.url, bookmark()!.url)" role="menuitem" @click="b.send({ type: 'bookmarkReset', id: bookmark()!.id }); closeMenu()">{{ b.t('返回固定网址') }}</button>
+            <button v-if="!menu.tab.unloaded" role="menuitem" @click="b.send({ type: 'bookmarkSeparate', id: bookmark()!.id }); closeMenu()">{{ b.t('分离为普通标签') }}</button>
+            <button v-if="!menu.tab.unloaded && !samePinnedUrl(menu.tab.url, bookmark()!.url)" role="menuitem" @click="b.send({ type: 'bookmarkUpdate', id: bookmark()!.id, title: bookmark()!.title, url: menu.tab.url }); closeMenu()">{{ b.t('将当前网址设为固定网址') }}</button>
           </template>
           <button
             role="menuitem"
@@ -229,16 +229,16 @@ function act(type: string, extra = {}) {
               closeMenu();
             "
           >
-            <Icon name="globe" />在 Peek 中预览
+            <Icon name="globe" />{{ b.t('在 Peek 中预览') }}
           </button>
-          <div class="menu-label">关闭</div>
+          <div class="menu-label">{{ b.t('关闭') }}</div>
           <button role="menuitem" :disabled="othersCount === 0" @click="act('closeOthers')">
-            <Icon name="close" />关闭其他标签页<small v-if="othersCount">{{ othersCount }}</small>
+            <Icon name="close" />{{ b.t('关闭其他标签页') }}<small v-if="othersCount">{{ othersCount }}</small>
           </button>
           <button role="menuitem" :disabled="belowCount === 0" @click="act('closeBelow')">
-            <Icon name="close" />关闭下方标签页<small v-if="belowCount">{{ belowCount }}</small>
+            <Icon name="close" />{{ b.t('关闭下方标签页') }}<small v-if="belowCount">{{ belowCount }}</small>
           </button>
-          <div class="menu-label">移至工作区</div>
+          <div class="menu-label">{{ b.t('移至工作区') }}</div>
           <button
             v-for="s in b.state.spaces.filter(
               (x) => x.id !== menu!.tab.spaceId,
@@ -251,7 +251,7 @@ function act(type: string, extra = {}) {
           </button>
           <hr />
           <button role="menuitem" @click="menu.tab.bookmarkId ? (b.send({ type: 'bookmarkUnload', id: menu.tab.bookmarkId }), closeMenu()) : act('close')">
-            <Icon name="close" />{{ menu.tab.pinned ? '卸载网页' : '关闭标签页' }}
+            <Icon name="close" />{{ menu.tab.pinned ? b.t('卸载网页') : b.t('关闭标签页') }}
           </button>
           </template>
         </div>

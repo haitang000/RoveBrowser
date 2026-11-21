@@ -17,8 +17,8 @@ const labels = computed(() => (props.panes ?? [props.tab]).map((tab) => {
   const sleeping = Boolean(b.asleep[tab.id]);
   return {
     tab,
-    title: tabDisplayTitle(tab),
-    tooltip: sleeping ? `已休眠以节省内存 · ${tab.url}` : tab.url,
+    title: tabDisplayTitle(tab, b.language),
+    tooltip: sleeping ? `${b.t("已休眠以节省内存")} · ${tab.url}` : tab.url,
     sleeping,
     audio: Boolean(b.audio[tab.id] || tab.muted),
     permission: b.permissionTabs.has(tab.id),
@@ -37,7 +37,7 @@ const away = computed(() => {
   const bookmark = bookmarkId && b.savedBookmarks.get(bookmarkId);
   return Boolean(bookmark && !unloaded && !samePinnedUrl(bookmark.url, url));
 });
-const closeLabel = computed(() => away.value ? "返回固定网址" : primary.value.bookmarkId ? "卸载" : "关闭");
+const closeLabel = computed(() => away.value ? b.t("返回固定网址") : primary.value.bookmarkId ? b.t("卸载") : b.t("关闭"));
 function unload(tab: Tab) {
   b.send(tab.bookmarkId ? { type: "bookmarkUnload", id: tab.bookmarkId } : { type: "close", id: tab.id });
 }
@@ -66,7 +66,7 @@ function activate() {
       doomed: labels.every((label) => label.doomed),
     }"
     role="tab"
-    :aria-label="`${panes ? `分屏：${title}` : title}${labels.some((label) => label.permission) ? '，有权限请求' : ''}`"
+    :aria-label="`${panes ? b.t('分屏：{name}', { name: title }) : title}${labels.some((label) => label.permission) ? b.t('，有权限请求') : ''}`"
     :aria-selected="selected"
     :tabindex="selected ? 0 : -1"
     :title="previewed ? undefined : rowTitle"
@@ -91,13 +91,13 @@ function activate() {
         <Favicon v-else :url="label.tab.url" :favicon="label.tab.favicon" />
       </span>
       <span class="tab-title">{{ label.title }}</span>
-      <span v-if="label.permission" class="tab-permission-dot" title="有权限请求" aria-hidden="true" />
+      <span v-if="label.permission" class="tab-permission-dot" :title="b.t('有权限请求')" aria-hidden="true" />
       <button
         v-if="label.audio"
         class="tab-audio"
         :class="{ muted: label.tab.muted }"
-        :aria-label="`${label.tab.muted ? '取消静音' : '静音'} ${label.title}`"
-        :title="label.tab.muted ? '取消静音标签页' : '静音标签页'"
+        :aria-label="`${label.tab.muted ? b.t('取消静音') : b.t('静音')} ${label.title}`"
+        :title="label.tab.muted ? b.t('取消静音标签页') : b.t('静音标签页')"
         @click.stop="b.toggleMute(label.tab)"
       >
         <Icon :name="label.tab.muted ? 'speakerMuted' : 'speaker'" :size="12" />
@@ -105,8 +105,8 @@ function activate() {
     </span>
     <button
       class="tab-close"
-      :aria-label="`${closeLabel} ${tabDisplayTitle(primary)}`"
-      :title="away ? closeLabel : primary.bookmarkId ? '卸载网页（保留固定项）' : `关闭 ${tabDisplayTitle(primary)}`"
+      :aria-label="`${closeLabel} ${labels[0].title}`"
+      :title="away ? closeLabel : primary.bookmarkId ? b.t('卸载网页（保留固定项）') : b.t('关闭 {name}', { name: labels[0].title })"
       :disabled="primary.unloaded"
       @click.stop="close"
     >

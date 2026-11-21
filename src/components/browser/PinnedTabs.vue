@@ -48,33 +48,33 @@ function openMenu(event: MouseEvent, id?: string) {
 <template>
   <div class="pinned-area">
     <div class="section-label pin-section-heading" data-pin-root-target @contextmenu.prevent="openMenu($event)">
-      <span>固定标签</span>
-      <button type="button" class="pin-folder-action" aria-label="新建文件夹" title="新建文件夹"
+      <span>{{ b.t('固定标签') }}</span>
+      <button type="button" class="pin-folder-action" :aria-label="b.t('新建文件夹')" :title="b.t('新建文件夹')"
         aria-haspopup="dialog" @click="openMenu($event)">
         <Icon name="plus" :size="14" />
       </button>
     </div>
     <TabList class="pinned-tabs" :rows="groupedRows.get(undefined) ?? []" :folders="layout?.folders"
-      :order="layout?.root" :doomed-ids="doomedIds" aria-label="固定标签页" @menu="(e, t) => emit('menu', e, t)">
+      :order="layout?.root" :doomed-ids="doomedIds" :aria-label="b.t('固定标签页')" @menu="(e, t) => emit('menu', e, t)">
       <template #folder="{ folder }">
         <div class="pin-folder-header" :class="{
           'pin-folder-active': folder.collapsed && containsActive(folder),
           'pin-folder-drop': drag?.state.value?.intoFolder === folder.id,
         }" :data-pin-folder-header="folder.id" @contextmenu.prevent.stop="openMenu($event, folder.id)">
           <button type="button" class="pin-folder-toggle" :aria-expanded="!folder.collapsed" :title="folder.name"
-            :aria-description="folder.collapsed && containsActive(folder) ? '包含当前网页' : undefined" @click="toggle(folder)">
+            :aria-description="folder.collapsed && containsActive(folder) ? b.t('包含当前网页') : undefined" @click="toggle(folder)">
             <Icon name="chevronDown" :size="12" />
             <Icon name="folder" :size="16" class="pin-folder-icon" :data-color="folder.color ?? 'default'"
               :style="{ '--folder-color': PIN_FOLDER_COLORS[folder.color ?? 'default'].fill }" />
             <span>{{ folder.name }}</span>
           </button>
-          <button type="button" class="pin-folder-action pin-folder-more" :aria-label="`${folder.name}的文件夹操作`"
-            aria-haspopup="menu" title="文件夹操作" @click="openMenu($event, folder.id)">
+          <button type="button" class="pin-folder-action pin-folder-more" :aria-label="b.t('{name}的文件夹操作', { name: folder.name })"
+            aria-haspopup="menu" :title="b.t('文件夹操作')" @click="openMenu($event, folder.id)">
             <Icon name="more" :size="14" />
           </button>
         </div>
         <TabList v-if="!folder.collapsed" class="pin-folder-tabs" :rows="groupedRows.get(folder.id) ?? []"
-          :data-pin-folder-list="folder.id" :aria-label="`${folder.name}内的固定标签`"
+          :data-pin-folder-list="folder.id" :aria-label="b.t('{name}内的固定标签', { name: folder.name })"
           :doomed-ids="doomedIds" @menu="(e, t) => emit('menu', e, t)" />
       </template>
     </TabList>

@@ -268,7 +268,7 @@ onBeforeUnmount(() => {
     ref="layer"
     class="peek-layer"
     :class="{ 'is-popup': b.popupWindow, 'has-exit-surface': exitSurfaceReady }"
-    aria-label="网页预览区域"
+    :aria-label="b.t('网页预览区域')"
     :data-phase="b.peekPhase"
     :data-ticket="b.peekTicket"
     :data-moving="b.peekMoving"
@@ -311,19 +311,19 @@ onBeforeUnmount(() => {
           host(b.peek.url)
         }}</span
         ><span class="peek-loading" role="status">{{
-          b.peek.loading ? "正在加载…" : ""
+          b.peek.loading ? b.t('正在加载…') : ""
         }}</span
         ><button
           class="peek-button"
-          aria-label="将预览转为标签页"
+          :aria-label="b.t('将预览转为标签页')"
           title="Open as Tab"
           @click="b.send({ type: 'peekPromote' })"
         >
           <Icon name="expand" :size="17" /></button
         ><button
           class="peek-button"
-          aria-label="关闭 Peek"
-          title="关闭 Peek (Esc)"
+          :aria-label="b.t('关闭 Peek')"
+          :title="b.t('关闭 Peek (Esc)')"
           @click="close"
         >
           <Icon name="close" :size="17" />
@@ -339,12 +339,12 @@ onBeforeUnmount(() => {
           draggable="false"
         />
         <div v-else-if="b.native" class="peek-loading-page">
-          <Icon name="globe" :size="24" /><span>正在打开预览…</span>
+          <Icon name="globe" :size="24" /><span>{{ b.t('正在打开预览…') }}</span>
         </div>
         <div v-if="!b.native" class="preview-page">
           <Icon name="globe" :size="28" />
           <h2>{{ b.peek.title }}</h2>
-          <p>预览网页由 Windows 应用中的独立 WebView2 加载</p>
+          <p>{{ b.t('预览网页由 Windows 应用中的独立 WebView2 加载') }}</p>
           <small>{{ b.peek.url }}</small>
         </div>
       </div>

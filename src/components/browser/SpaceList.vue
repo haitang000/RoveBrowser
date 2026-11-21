@@ -126,8 +126,8 @@ function clickClear() {
           v-if="tabs.length || undoActive"
           class="clear-tabs"
           :class="{ armed: armed && !undoActive, undo: undoActive }"
-          :aria-label="undoActive ? '撤销刚才关闭的标签页' : clearPlan.faded ? `关闭 ${clearPlan.ids.length} 个旧标签页` : `关闭 ${clearPlan.ids.length} 个标签页`"
-          :title="undoActive ? '撤销刚才的批量关闭（4 秒内）' : clearPlan.faded ? '先关闭很久没看的标签页；再次点击关闭其余' : '关闭其他标签页；再次点击关闭当前页'"
+          :aria-label="undoActive ? b.t('撤销刚才关闭的标签页') : clearPlan.faded ? `关闭 ${clearPlan.ids.length} 个旧标签页` : `关闭 ${clearPlan.ids.length} 个标签页`"
+          :title="undoActive ? b.t('撤销刚才的批量关闭（4 秒内）') : clearPlan.faded ? b.t('先关闭很久没看的标签页；再次点击关闭其余') : b.t('关闭其他标签页；再次点击关闭当前页')"
           @pointerenter="enterClear"
           @pointerleave="disarm()"
           @focus="focusClear"
@@ -141,6 +141,6 @@ function clickClear() {
       </span>
     </div>
     <button class="new-tab" @click="b.openCommand()"><Icon name="plus" :size="16" /><span>New Tab</span><kbd v-if="b.shortcutLabel('new')">{{ b.shortcutLabel('new') }}</kbd></button>
-    <TabList :rows="rows.tabs" :doomed-ids="doomedIds" aria-label="标签页" @menu="(e, t) => emit('menu', e, t)" />
+    <TabList :rows="rows.tabs" :doomed-ids="doomedIds" :aria-label="b.t('标签页')" @menu="(e, t) => emit('menu', e, t)" />
   </section>
 </template>

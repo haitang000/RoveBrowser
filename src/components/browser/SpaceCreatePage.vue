@@ -41,7 +41,7 @@ watch(() => b.error, (error) => { if (error) saving.value = false; });
     @preview="preview"
     @commit="preview"
   >
-    <button class="primary-button" type="submit" :disabled="!b.spaceCreation.name.trim() || saving || b.state.spaces.length >= 16">{{ saving ? '正在创建…' : '创建 Space' }}</button>
-    <button class="plain-button" type="button" :disabled="saving" @click="cancel">取消</button>
+    <button class="primary-button" type="submit" :disabled="!b.spaceCreation.name.trim() || saving || b.state.spaces.length >= 16">{{ saving ? b.t('正在创建…') : b.t('创建 Space') }}</button>
+    <button class="plain-button" type="button" :disabled="saving" @click="cancel">{{ b.t('取消') }}</button>
   </SpaceForm>
 </template>

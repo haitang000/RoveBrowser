@@ -28,31 +28,31 @@ onMounted(() => b.scanImports());
 <template>
   <div class="onboarding-card onboarding-bring" :aria-busy="b.importBusy">
     <div class="import-browser-choices">
-      <button class="onboarding-choice import-fresh" :class="{ selected: !selected.length }" :aria-pressed="!selected.length" :disabled="b.importBusy" @click="startFresh"><span class="onboarding-radio" aria-hidden="true" /><strong>全新开始</strong></button>
-      <div v-if="!b.native" class="import-preview-sources" aria-label="可导入的浏览器">
+      <button class="onboarding-choice import-fresh" :class="{ selected: !selected.length }" :aria-pressed="!selected.length" :disabled="b.importBusy" @click="startFresh"><span class="onboarding-radio" aria-hidden="true" /><strong>{{ b.t('全新开始') }}</strong></button>
+      <div v-if="!b.native" class="import-preview-sources" :aria-label="b.t('可导入的浏览器')">
         <div v-for="browser in [{ id: 'edge', title: 'Microsoft Edge' }, { id: 'chrome', title: 'Chrome' }]" :key="browser.id" class="onboarding-choice import-preview-source" aria-disabled="true"><span class="onboarding-radio" aria-hidden="true" /><strong>{{ browser.title }}</strong><span class="onboarding-choice-art" :class="`brand-${browser.id}`"><OnboardingLogo :name="browser.id" /></span></div>
       </div>
-      <div v-if="b.importSources.length" class="import-source-list" role="group" aria-label="选择来源浏览器">
+      <div v-if="b.importSources.length" class="import-source-list" role="group" :aria-label="b.t('选择来源浏览器')">
         <div v-for="source in b.importSources" :key="source.id" class="import-source">
           <label class="onboarding-choice import-source-choice" :class="{ selected: selected.includes(source.id) }"><input type="checkbox" v-model="selected" :value="source.id" :disabled="b.importBusy" @change="choose" /><span><strong>{{ source.browser }}</strong><small>{{ source.name }}</small></span><span class="onboarding-choice-art" :class="`brand-${browserLogo(source.browser)}`"><OnboardingLogo :name="browserLogo(source.browser)" /></span></label>
           <div v-if="reportFor(source.id)" class="import-result" role="status">
-            <p>已导入 {{ reportFor(source.id)!.bookmarks }} 个书签、{{ reportFor(source.id)!.history }} 条历史<span v-if="reportFor(source.id)!.skipped">；跳过 {{ reportFor(source.id)!.skipped }} 个重复或无效项目</span>。</p>
+            <p>{{ b.t('已导入 {bookmarks} 个书签、{history} 条历史', { bookmarks: reportFor(source.id)!.bookmarks, history: reportFor(source.id)!.history }) }}<span v-if="reportFor(source.id)!.skipped">{{ b.t('；跳过 {count} 个重复或无效项目', { count: reportFor(source.id)!.skipped }) }}</span>{{ b.t('。') }}</p>
             <p v-for="problem in reportFor(source.id)!.problems" :key="problem" class="import-problem">{{ problem }}</p>
-            <button v-if="reportFor(source.id)!.problems.length" class="import-link" :disabled="b.importBusy || (!bookmarks && !history)" @click="run([source.id])">重试这个来源</button>
+            <button v-if="reportFor(source.id)!.problems.length" class="import-link" :disabled="b.importBusy || (!bookmarks && !history)" @click="run([source.id])">{{ b.t('重试这个来源') }}</button>
           </div>
         </div>
       </div>
     </div>
-    <p v-if="!b.native" class="onboarding-card-note">浏览器预览无法读取本机数据。请在 Rove 桌面版中导入。</p>
-    <p v-else-if="b.importBusy && b.importPhase === 'checking'" class="onboarding-card-note" role="status">正在检查浏览器配置…</p>
-    <p v-else-if="!b.importSources.length" class="onboarding-card-note">未找到可导入的浏览器数据。支持 Edge、Chrome、Firefox、Brave、Vivaldi 和 Opera；也可单独导入密码文件。</p>
-    <div v-if="b.native" class="import-heading"><button class="import-link" :disabled="b.importBusy" @click="b.scanImports()">重新检查浏览器</button></div>
+    <p v-if="!b.native" class="onboarding-card-note">{{ b.t('浏览器预览无法读取本机数据。请在 Rove 桌面版中导入。') }}</p>
+    <p v-else-if="b.importBusy && b.importPhase === 'checking'" class="onboarding-card-note" role="status">{{ b.t('正在检查浏览器配置…') }}</p>
+    <p v-else-if="!b.importSources.length" class="onboarding-card-note">{{ b.t('未找到可导入的浏览器数据。支持 Edge、Chrome、Firefox、Brave、Vivaldi 和 Opera；也可单独导入密码文件。') }}</p>
+    <div v-if="b.native" class="import-heading"><button class="import-link" :disabled="b.importBusy" @click="b.scanImports()">{{ b.t('重新检查浏览器') }}</button></div>
     <details class="import-options" :open="b.native && b.importSources.length > 0">
-      <summary>导入选项与密码</summary>
-    <fieldset v-if="b.importSources.length" class="import-kinds" :disabled="b.importBusy" @change="choose"><legend>选择导入内容</legend><label><input type="checkbox" v-model="bookmarks" />书签</label><label><input type="checkbox" v-model="history" />历史记录</label></fieldset>
-    <div class="import-passwords"><div><h2>密码</h2><p>在原浏览器中导出密码 CSV，再选择文件。密码使用当前 Windows 账户加密保存。</p></div><button class="import-file-button" :disabled="b.importBusy || !b.native" @click="b.importPasswords()"><Icon name="key" :size="14" />导入密码文件…</button></div>
-    <div v-if="reportFor('password-file')" class="import-result" role="status"><p>已导入 {{ reportFor('password-file')!.passwords }} 个密码<span v-if="reportFor('password-file')!.skipped">，跳过 {{ reportFor('password-file')!.skipped }} 个重复或无效项目</span>。</p><p v-for="problem in reportFor('password-file')!.problems" :key="problem" class="import-problem">{{ problem }}</p></div>
-    <p class="onboarding-card-note">书签放入各来源的独立工作区；历史合并并去重。原浏览器的数据保持原样。导入的密码可在对应网站登录时点击“Rove · 填写登录信息”使用。</p>
+      <summary>{{ b.t('导入选项与密码') }}</summary>
+    <fieldset v-if="b.importSources.length" class="import-kinds" :disabled="b.importBusy" @change="choose"><legend>{{ b.t('选择导入内容') }}</legend><label><input type="checkbox" v-model="bookmarks" />{{ b.t('书签') }}</label><label><input type="checkbox" v-model="history" />{{ b.t('历史记录') }}</label></fieldset>
+    <div class="import-passwords"><div><h2>{{ b.t('密码') }}</h2><p>{{ b.t('在原浏览器中导出密码 CSV，再选择文件。密码使用当前 Windows 账户加密保存。') }}</p></div><button class="import-file-button" :disabled="b.importBusy || !b.native" @click="b.importPasswords()"><Icon name="key" :size="14" />{{ b.t('导入密码文件…') }}</button></div>
+    <div v-if="reportFor('password-file')" class="import-result" role="status"><p>{{ b.t('已导入 {count} 个密码', { count: reportFor('password-file')!.passwords }) }}<span v-if="reportFor('password-file')!.skipped">{{ b.t('，跳过 {count} 个重复或无效项目', { count: reportFor('password-file')!.skipped }) }}</span>{{ b.t('。') }}</p><p v-for="problem in reportFor('password-file')!.problems" :key="problem" class="import-problem">{{ problem }}</p></div>
+    <p class="onboarding-card-note">{{ b.t('书签放入各来源的独立工作区；历史合并并去重。原浏览器的数据保持原样。导入的密码可在对应网站登录时点击“Rove · 填写登录信息”使用。') }}</p>
     </details>
   </div>
 </template>

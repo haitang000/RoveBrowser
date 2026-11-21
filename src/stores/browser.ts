@@ -24,6 +24,7 @@ import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
 import type { LookFields } from "../lib/space-look";
 import type { ImportRequest, ImportSource } from "../lib/import";
 import { NEW_TAB_STORAGE_KEY, newTabSettings, type NewTabSettings } from "../lib/new-tab";
+import { interfaceLanguage, LANGUAGE_STORAGE_KEY, translate } from "../lib/language";
 import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from "../lib/state-snapshot";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
@@ -48,13 +49,17 @@ export const useBrowser = defineStore("browser", () => {
     suggestions = ref<string[]>([]),
     recent = ref<string[]>([]),
     error = ref("");
-  // Native layouts live in the session database. Standalone previews retain
-  // only the new-tab preferences, without persisting the demo browser session.
+  // Native preferences live in the session database. The standalone preview
+  // remembers only the new-tab layout and language, not the demo session.
   if (!native && !popupWindow) {
     try {
       const saved = localStorage.getItem(NEW_TAB_STORAGE_KEY);
       if (saved) state.value.newTab = newTabSettings(JSON.parse(saved));
     } catch { /* A blocked storage area must not prevent opening a tab. */ }
+    try {
+      const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+      if (saved) state.value.settings = settingsFor({ ...state.value.settings, language: interfaceLanguage(saved) });
+    } catch { /* Keep the default language. */ }
     watch(() => state.value.newTab, (value) => {
       try { localStorage.setItem(NEW_TAB_STORAGE_KEY, JSON.stringify(newTabSettings(value))); } catch { /* Keep the current layout in memory. */ }
     }, { deep: true });
@@ -157,6 +162,18 @@ export const useBrowser = defineStore("browser", () => {
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedBookmarks.value.get(active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
+  const language = computed(() => settings.value.language);
+  function t(source: string, values?: Record<string, string | number>) {
+    return translate(language.value, source, values);
+  }
+  watch(language, (value) => {
+    document.documentElement.lang = value;
+  }, { immediate: true });
+  if (!native && !popupWindow) {
+    watch(language, (value) => {
+      try { localStorage.setItem(LANGUAGE_STORAGE_KEY, value); } catch { /* Keep the preference in memory. */ }
+    });
+  }
   const updatePhases = ["idle", "checking", "current", "ahead", "available", "downloading", "extracting", "installing", "error"] as const;
   type UpdatePhase = (typeof updatePhases)[number];
   type UpdateStatus = { phase: UpdatePhase; channel?: UpdateChannel; version?: string; message: string; offerId?: string };
@@ -863,6 +880,8 @@ export const useBrowser = defineStore("browser", () => {
     peekSurface,
     state,
     settings,
+    language,
+    t,
     updateStatus,
     updating,
     checkUpdates,

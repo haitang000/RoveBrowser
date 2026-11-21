@@ -39,12 +39,12 @@ onBeforeUnmount(() => dialog.value?.close());
     <dialog ref="dialog" class="quit-dialog" role="alertdialog" aria-modal="true" tabindex="-1"
       aria-labelledby="quit-title" aria-describedby="quit-description"
       @cancel.prevent="respond(false)" @keydown="keydown">
-      <h2 id="quit-title">确定要退出 Rove 吗？</h2>
-      <p id="quit-description">标签页中未保存的内容可能会丢失。</p>
+      <h2 id="quit-title">{{ b.t('确定要退出 Rove 吗？') }}</h2>
+      <p id="quit-description">{{ b.t('标签页中未保存的内容可能会丢失。') }}</p>
       <div class="quit-actions">
-        <button class="quit-always" @click="respond(true, true)">始终退出</button>
-        <button class="quit-cancel" aria-label="取消" @click="respond(false)">取消 <kbd aria-hidden="true">ESC</kbd></button>
-        <button class="quit-confirm" aria-label="退出" @click="respond(true)">退出 <kbd aria-hidden="true">ENTER</kbd></button>
+        <button class="quit-always" @click="respond(true, true)">{{ b.t('始终退出') }}</button>
+        <button class="quit-cancel" :aria-label="b.t('取消')" @click="respond(false)">{{ b.t('取消') }} <kbd aria-hidden="true">ESC</kbd></button>
+        <button class="quit-confirm" :aria-label="b.t('退出')" @click="respond(true)">{{ b.t('退出') }} <kbd aria-hidden="true">ENTER</kbd></button>
       </div>
     </dialog>
   </div>

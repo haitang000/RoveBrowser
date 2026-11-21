@@ -31,14 +31,14 @@ const spaces = computed(() =>
     tabs: b.state.tabs.filter(
       (t) =>
         t.spaceId === s.id &&
-        `${tabDisplayTitle(t)} ${t.title} ${t.url}`.toLowerCase().includes(query.value.toLowerCase()),
+        `${tabDisplayTitle(t, b.language)} ${t.title} ${t.url}`.toLowerCase().includes(query.value.toLowerCase()),
     ),
   })),
 );
 /** A split half may be a live tab or the card's own tab; either way a rename wins. */
 function titleFor(id: string, fallback: string) {
   const tab = b.state.tabs.find((x) => x.id === id);
-  return tab ? tabDisplayTitle(tab) : fallback;
+  return tab ? tabDisplayTitle(tab, b.language) : fallback;
 }
 watch(
   () => b.deskOpen,
@@ -60,7 +60,7 @@ watch(
       :style="material"
       role="dialog"
       aria-modal="true"
-      aria-label="全部标签页"
+      :aria-label="b.t('全部标签页')"
       @keydown.esc="b.deskOpen = false"
     >
       <div v-if="b.native" class="desk-backdrop" :style="backdropBounds" aria-hidden="true">
@@ -74,12 +74,12 @@ watch(
             ref="input"
             v-model="query"
             placeholder="Search all tabs"
-            aria-label="搜索全部标签页"
+            :aria-label="b.t('搜索全部标签页')"
           />
         </div>
         <button
           class="icon-button"
-          aria-label="关闭全部标签页视图"
+          :aria-label="b.t('关闭全部标签页视图')"
           @click="b.deskOpen = false"
         >
           <Icon name="close" />
@@ -150,19 +150,19 @@ watch(
                       t.url === "era://newtab"
                         ? "Rove"
                         : b.native
-                          ? "尚无网页快照"
-                          : "界面预览"
+                          ? b.t('尚无网页快照')
+                          : b.t('界面预览')
                     }}</small>
                   </div>
                 </template>
               </div>
               <div class="desk-caption">
-                <Favicon :url="t.url" /><span>{{ tabDisplayTitle(t) }}</span>
+                <Favicon :url="t.url" /><span>{{ tabDisplayTitle(t, b.language) }}</span>
               </div>
             </button>
           </div>
           <p v-if="!s.tabs.length" class="empty-space">
-            {{ query ? "没有匹配的标签页" : "拖动标签页到此工作区" }}
+            {{ query ? b.t('没有匹配的标签页') : b.t('拖动标签页到此工作区') }}
           </p>
         </section>
       </div>

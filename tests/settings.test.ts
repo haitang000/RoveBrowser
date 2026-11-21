@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { interfaceLanguage, translate } from "../src/lib/language";
 import { initialState, reduce } from "../src/lib/preview";
 import { address } from "../src/lib/address";
 import { urlFrom } from "../src/lib/command";
@@ -19,6 +20,14 @@ import {
 } from "../src/lib/settings";
 
 describe("Zigzag settings port", () => {
+  it("keeps Chinese for old or invalid settings and interpolates translated labels", () => {
+    expect(settingsFor().language).toBe("zh-CN");
+    expect(settingsFor({ language: "en" }).language).toBe("en");
+    expect(interfaceLanguage("fr")).toBe("zh-CN");
+    expect(translate("en", "编辑 {name}", { name: "项目 {name}" })).toBe("Edit 项目 {name}");
+    expect(translate("en", "未知文案")).toBe("未知文案");
+    expect(translate("en", "toString")).toBe("toString");
+  });
   it("keeps background tab sleeping on by default", () => {
     expect(defaultSettings().sleepTabs).toBe(true);
   });

@@ -164,7 +164,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="handleElement" class="sidebar-resize-handle" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical"
+  <div ref="handleElement" class="sidebar-resize-handle" role="separator" :aria-label="b.t('调整侧栏宽度')" aria-orientation="vertical"
     :aria-valuemin="MIN_SIDEBAR_WIDTH" :aria-valuemax="maximum" :aria-valuenow="width" :aria-valuetext="`${width} 像素`"
-    tabindex="0" title="拖动调整侧栏宽度，双击恢复默认" @pointerdown="resize" @dblclick.prevent="reset" @keydown="key" />
+    tabindex="0" :title="b.t('拖动调整侧栏宽度，双击恢复默认')" @pointerdown="resize" @dblclick.prevent="reset" @keydown="key" />
 </template>

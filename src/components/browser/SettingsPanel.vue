@@ -47,13 +47,13 @@ function save(create = false) {
       class="settings-panel"
       role="dialog"
       aria-modal="true"
-      aria-label="工作区与外观"
+      :aria-label="b.t('工作区与外观')"
     >
       <header>
-        <h2>工作区与外观</h2>
+        <h2>{{ b.t('工作区与外观') }}</h2>
         <button
           class="icon-button"
-          aria-label="关闭设置"
+          :aria-label="b.t('关闭设置')"
           @click="b.settingsOpen = false"
         >
           <Icon name="close" />
@@ -69,14 +69,14 @@ function save(create = false) {
         @commit="publish(false, $event)"
       />
       <div class="settings-actions">
-        <button class="plain-button" @click="save(true)">新建工作区</button
-        ><button class="primary-button" @click="save()">保存</button>
+        <button class="plain-button" @click="save(true)">{{ b.t('新建工作区') }}</button
+        ><button class="primary-button" @click="save()">{{ b.t('保存') }}</button>
       </div>
-      <p class="settings-note">清透在「效果」里。背景带轻微模糊，界面和网页保持清晰。</p>
+      <p class="settings-note">{{ b.t('清透在「效果」里。背景带轻微模糊，界面和网页保持清晰。') }}</p>
       <hr />
       <button class="theme-button" @click="b.send({ type: 'theme' })">
         <Icon :name="b.state.theme === 'light' ? 'moon' : 'sun'" />{{
-          b.state.theme === "light" ? "切换深色模式" : "切换浅色模式"
+          b.state.theme === "light" ? b.t('切换深色模式') : b.t('切换浅色模式')
         }}
       </button>
       <p class="settings-note">Rove · Windows / WebView2</p>

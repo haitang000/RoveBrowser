@@ -39,12 +39,12 @@ onBeforeUnmount(() => { epoch++; freeze(); });
         <div v-for="page in pages" :key="page.key" class="tab-preview-pane">
           <img v-if="b.thumbnails[page.tabId || page.key]" :src="b.thumbnails[page.tabId || page.key]" :alt="`${page.title} 的网页缩略图`" draggable="false" />
           <div v-else-if="page.url === 'era://newtab'" class="tab-preview-empty tab-preview-newtab"><span>Rove</span><small>A little room to explore.</small></div>
-          <div v-else class="tab-preview-empty"><Favicon :url="page.url" :favicon="page.favicon" /><small>{{ !b.native ? '界面预览' : b.previewFailures[page.tabId || page.key] ? '暂时无法生成预览' : '正在生成预览…' }}</small></div>
+          <div v-else class="tab-preview-empty"><Favicon :url="page.url" :favicon="page.favicon" /><small>{{ !b.native ? b.t('界面预览') : b.previewFailures[page.tabId || page.key] ? b.t('暂时无法生成预览') : b.t('正在生成预览…') }}</small></div>
         </div>
       </div>
       <div class="tab-preview-captions">
         <div v-for="page in pages" :key="page.key" class="tab-preview-caption">
-          <span>{{ page.title }}</span><small v-if="b.asleep[page.tabId || page.key]" class="tab-preview-sleep">已休眠以节省内存</small><small v-else>{{ displayUrl(page.url) }}</small>
+          <span>{{ page.title }}</span><small v-if="b.asleep[page.tabId || page.key]" class="tab-preview-sleep">{{ b.t('已休眠以节省内存') }}</small><small v-else>{{ displayUrl(page.url) }}</small>
         </div>
       </div>
     </section>

@@ -50,7 +50,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section v-if="embedded" class="space-editor-panel" role="region" aria-label="编辑空间">
+  <section v-if="embedded" class="space-editor-panel" role="region" :aria-label="b.t('编辑空间')">
     <SpaceIdentityEditor :name="name" :icon="icon" v-model:picking="picking" @update:name="rename" @update:icon="setIcon" />
     <SpaceLookEditor
       v-show="!picking"
@@ -74,6 +74,6 @@ onBeforeUnmount(() => {
     @submit="finish()"
     @dismiss="finish"
   >
-    <button class="primary-button" type="submit">完成</button>
+    <button class="primary-button" type="submit">{{ b.t('完成') }}</button>
   </SpaceForm>
 </template>

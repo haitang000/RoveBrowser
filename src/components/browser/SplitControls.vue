@@ -9,7 +9,7 @@ const controls = computed(() => {
   return anchor?.id === b.active?.id && anchor?.other === b.splitPartner?.id ? anchor : undefined;
 });
 const fullscreen = computed(() => b.state.sidebarCollapsed && b.state.sidebarHidden);
-const fullscreenLabel = computed(() => fullscreen.value ? "退出全屏" : "全屏");
+const fullscreenLabel = computed(() => fullscreen.value ? b.t("退出全屏") : b.t("全屏"));
 
 function close() { b.splitControls = undefined; }
 function outside(event: PointerEvent) {
@@ -43,8 +43,8 @@ onBeforeUnmount(() => {
     </template>
     <Transition name="split-controls">
       <div v-if="controls" class="split-controls" :style="{ left: `${controls.x}px`, top: `${controls.y}px` }">
-        <div class="split-controls-surface" role="group" aria-label="分屏操作">
-          <button class="icon-button" type="button" title="对调" aria-label="对调" @click="swap">
+        <div class="split-controls-surface" role="group" :aria-label="b.t('分屏操作')">
+          <button class="icon-button" type="button" :title="b.t('对调')" :aria-label="b.t('对调')" @click="swap">
             <Icon name="swap" :size="16" />
           </button>
           <button class="icon-button" type="button" :title="fullscreenLabel" :aria-label="fullscreenLabel"

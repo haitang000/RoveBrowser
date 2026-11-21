@@ -15,7 +15,7 @@ import SpaceCreatePage from "./SpaceCreatePage.vue";
 import SpaceEditor from "./SpaceEditor.vue";
 import { provideTabDrag } from "../../lib/tab-drag";
 const b = useBrowser();
-const splitAddress = computed(() => isSettingsUrl(b.active?.url) ? "设置" : host(b.active?.url || "") || "搜索或输入地址");
+const splitAddress = computed(() => isSettingsUrl(b.active?.url) ? b.t("设置") : host(b.active?.url || "") || b.t("搜索或输入地址"));
 const sidebar = ref<HTMLElement>();
 const tabDrag = provideTabDrag(sidebar);
 const spaceDeck = ref<InstanceType<typeof SpaceDeck>>();
@@ -28,17 +28,17 @@ function showMenu(e: MouseEvent, tab: Tab) {
 }
 </script>
 <template>
-  <aside ref="sidebar" class="sidebar" aria-label="浏览器侧栏" @wheel="spaceDeck?.wheel($event)"
+  <aside ref="sidebar" class="sidebar" :aria-label="b.t('浏览器侧栏')" @wheel="spaceDeck?.wheel($event)"
     @pointerdown="tabDrag.press" @lostpointercapture="tabDrag.captureLost">
     <template v-if="b.splitPartner">
       <div class="split-sidebar-top" data-window-drag data-chrome-motion="sidebar-toolbar">
-        <button class="icon-button" aria-label="收起侧栏" :title="b.shortcutTitle('收起侧栏', 'sidebar')"
+        <button class="icon-button" :aria-label="b.t('收起侧栏')" :title="b.shortcutTitle(b.t('收起侧栏'), 'sidebar')"
           data-window-control @click="b.send({ type: 'sidebar' })">
           <Icon name="sidebar" :size="14" />
         </button>
       </div>
-      <button class="address-field split-sidebar-address" aria-label="搜索或输入地址" data-chrome-motion="sidebar-address"
-        :title="b.shortcutTitle('搜索或输入地址', 'address')" @click="b.openCommand('edit', b.active?.id)">
+      <button class="address-field split-sidebar-address" :aria-label="b.t('搜索或输入地址')" data-chrome-motion="sidebar-address"
+        :title="b.shortcutTitle(b.t('搜索或输入地址'), 'address')" @click="b.openCommand('edit', b.active?.id)">
         <span>{{ splitAddress }}</span>
         <Icon name="settings" :size="13" />
       </button>

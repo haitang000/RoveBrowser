@@ -29,25 +29,25 @@ function answer(allowed: boolean | null) {
       <div class="permission-heading">
         <div class="permission-icon"><Icon :name="permission.icon" :size="19" /></div>
         <div class="permission-source">
-          <h2 id="permission-question">{{ permission.question }}</h2>
+          <h2 id="permission-question">{{ b.t(permission.question) }}</h2>
           <p id="permission-requester">
             <bdi>{{ prompt.scope.requester }}</bdi>
             <template v-if="prompt.scope.requester !== prompt.scope.page">
-              嵌入在 <bdi>{{ prompt.scope.page }}</bdi>
+              {{ b.t('嵌入在') }} <bdi>{{ prompt.scope.page }}</bdi>
             </template>
           </p>
         </div>
-        <button class="icon-button permission-close" type="button" aria-label="暂不处理" title="暂不处理（Esc）" @click="answer(null)">
+        <button class="icon-button permission-close" type="button" :aria-label="b.t('暂不处理')" :title="b.t('暂不处理（Esc）')" @click="answer(null)">
           <Icon name="close" :size="13" />
         </button>
       </div>
       <label v-if="prompt.canRemember" class="permission-remember">
-        <input v-model="remember" type="checkbox" /> 记住对此网站的选择
+        <input v-model="remember" type="checkbox" /> {{ b.t('记住对此网站的选择') }}
       </label>
       <div class="permission-actions">
-        <small v-if="prompt.waiting">另有 {{ prompt.waiting }} 个请求待处理</small>
-        <button type="button" @click="answer(false)">不允许</button>
-        <button type="button" class="permission-allow" :disabled="!canAllow" @click="answer(true)">允许</button>
+        <small v-if="prompt.waiting">{{ b.t('另有 {count} 个请求待处理', { count: prompt.waiting }) }}</small>
+        <button type="button" @click="answer(false)">{{ b.t('不允许') }}</button>
+        <button type="button" class="permission-allow" :disabled="!canAllow" @click="answer(true)">{{ b.t('允许') }}</button>
       </div>
     </section>
   </div>

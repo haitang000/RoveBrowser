@@ -2,6 +2,8 @@
 // custom name a tab picks up from its context menu. Shared by the sidebar row,
 // the Clear button preview and the tab menus so they cannot drift apart.
 import type { Tab } from "./types";
+import { translate, type InterfaceLanguage } from "./language";
+import { isSettingsUrl } from "./settings";
 
 /** Tabs start fading after six hours without being looked at. */
 export const TAB_FADE_START = 6 * 60 * 60;
@@ -30,7 +32,9 @@ export function tabIsFaded(lastActivated?: number, now = nowSeconds()): boolean 
 }
 
 /** The name shown in the sidebar and menus: a rename wins over the page title. */
-export function tabDisplayTitle(tab: Pick<Tab, "title" | "customTitle">): string {
+export function tabDisplayTitle(tab: Pick<Tab, "title" | "customTitle"> & { url?: string }, language?: InterfaceLanguage): string {
   const custom = tab.customTitle?.trim();
-  return custom ? custom : tab.title;
+  if (custom) return custom;
+  if (language && isSettingsUrl(tab.url)) return translate(language, "设置");
+  return tab.title;
 }

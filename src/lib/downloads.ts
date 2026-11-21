@@ -1,6 +1,7 @@
 // Formatting and status rules for the downloads panel, ported from Zigzag's
 // DownloadRowView/DownloadManager presentation (Apache-2.0).
 import type { DownloadItem } from "./types";
+import { DEFAULT_INTERFACE_LANGUAGE, translate, type InterfaceLanguage } from "./language";
 
 /** Byte sizes the way the panel writes them: compact, 1024-based, one decimal. */
 export function formatBytes(bytes: number): string {
@@ -32,29 +33,30 @@ export function isFinalizingDownload(item: Pick<DownloadItem, "state" | "receive
 }
 
 /** The line under the file name, in Zigzag's plain words. */
-export function downloadStatus(item: DownloadItem): string {
+export function downloadStatus(item: DownloadItem, language: InterfaceLanguage = DEFAULT_INTERFACE_LANGUAGE): string {
+  const t = (message: string) => translate(language, message);
   switch (item.state) {
     case "inProgress":
       if (isFinalizingDownload(item)) {
-        return `正在等待下载结果 · ${formatBytes(item.received)}`;
+        return `${t("正在等待下载结果")} · ${formatBytes(item.received)}`;
       }
       return item.total > 0
         ? `${downloadPercent(item)}% · ${formatBytes(item.received)} / ${formatBytes(item.total)}`
-        : `正在下载 · ${formatBytes(item.received)}`;
+        : `${t("正在下载")} · ${formatBytes(item.received)}`;
     case "paused":
       return item.total > 0
-        ? `已暂停 · ${downloadPercent(item)}% · ${formatBytes(item.received)} / ${formatBytes(item.total)}`
-        : "已暂停";
+        ? `${t("已暂停")} · ${downloadPercent(item)}% · ${formatBytes(item.received)} / ${formatBytes(item.total)}`
+        : t("已暂停");
     case "finished":
       return item.exists === false
-        ? "文件已被移动或删除"
-        : `已完成 · ${formatBytes(item.total || item.received)}`;
+        ? t("文件已被移动或删除")
+        : `${t("已完成")} · ${formatBytes(item.total || item.received)}`;
     case "failed":
-      return item.failure ? `失败 · ${item.failure}` : "下载失败";
+      return item.failure ? `${t("失败")} · ${item.failure}` : t("下载失败");
     case "blocked":
-      return item.failure ? `已被安全拦截 · ${item.failure}` : "已被安全拦截";
+      return item.failure ? `${t("已被安全拦截")} · ${item.failure}` : t("已被安全拦截");
     case "cancelled":
-      return "已取消";
+      return t("已取消");
     default:
       return "";
   }

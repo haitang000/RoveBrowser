@@ -238,8 +238,8 @@ onBeforeUnmount(() => {
       <button
         v-if="b.state.sidebarCollapsed && !b.state.sidebarHidden"
         class="reveal-sidebar icon-button"
-        aria-label="展开侧栏"
-        title="展开侧栏 (Ctrl+B)"
+        :aria-label="b.t('展开侧栏')"
+        :title="b.t('展开侧栏 (Ctrl+B)')"
         @click="b.send({ type: 'sidebar' })"
       >
         <Icon name="sidebar" /></button

@@ -268,12 +268,12 @@ function resize(e: PointerEvent) {
     :class="{ split: other, resizing: resizing || b.sidebarResizing, 'sidebar-motion-preview': sidebarMotion && !b.native }"
     :style="{ '--split-ratio': ratio }"
   >
-    <div ref="leftPane" class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? '左侧窗格' : undefined">
+    <div ref="leftPane" class="page-pane" :role="other ? 'region' : undefined" :aria-label="other ? b.t('左侧窗格') : undefined">
       <PageToolbar v-if="other && b.active" :pane="b.active" data-chrome-motion="left-pane">
         <button
           class="icon-button"
-          title="固定分屏组合"
-          aria-label="固定分屏组合"
+          :title="b.t('固定分屏组合')"
+          :aria-label="b.t('固定分屏组合')"
           @click="!b.active.pinned && b.send({ type: 'pin' })"
         >
           <Icon name="pin" :size="13" />
@@ -290,7 +290,7 @@ function resize(e: PointerEvent) {
         <div v-else-if="!b.native" :key="`preview:${b.active.id}:${b.active.url}`" class="preview-page">
           <Icon name="globe" :size="28" />
           <h2>{{ b.active.title }}</h2>
-          <p>在 Windows 应用中打开真实网页</p>
+          <p>{{ b.t('在 Windows 应用中打开真实网页') }}</p>
           <small>{{ b.active.url }}</small>
         </div>
         </Transition>
@@ -302,23 +302,23 @@ function resize(e: PointerEvent) {
         class="split-divider"
         :class="{ 'is-hovered': b.splitHovered, 'is-dragging': resizing, 'is-expanded': b.splitControls }"
         role="separator"
-        aria-label="调整分屏比例"
+        :aria-label="b.t('调整分屏比例')"
         aria-orientation="vertical"
         :aria-valuenow="Math.round(ratio * 100)"
         tabindex="0"
-        title="拖动调整比例，单击显示分屏操作"
+        :title="b.t('拖动调整比例，单击显示分屏操作')"
         @keydown.enter.prevent="toggleSplitControls"
         @keydown.space.prevent="toggleSplitControls"
         @pointerdown="resize"
         @keydown.left.prevent="ratio = Math.max(0.2, ratio - 0.05)"
         @keydown.right.prevent="ratio = Math.min(0.8, ratio + 0.05)"
       />
-      <div ref="rightPane" class="page-pane" role="region" aria-label="右侧窗格">
+      <div ref="rightPane" class="page-pane" role="region" :aria-label="b.t('右侧窗格')">
         <PageToolbar :pane="other" data-chrome-motion="right-pane">
           <button
             class="icon-button"
-            aria-label="关闭分屏"
-            title="关闭分屏"
+            :aria-label="b.t('关闭分屏')"
+            :title="b.t('关闭分屏')"
             @click="b.send({ type: 'unsplit' })"
           >
             <Icon name="close" :size="13" />
@@ -343,7 +343,7 @@ function resize(e: PointerEvent) {
     >
     <SplitControls v-if="!b.native" />
     <div v-if="b.tabSplitGuide" class="split-drop-target">
-      <Icon name="split" :size="24" /><span>拖到这里，打开左右分屏</span>
+      <Icon name="split" :size="24" /><span>{{ b.t('拖到这里，打开左右分屏') }}</span>
     </div>
     <Peek v-if="!b.native" />
     <slot />

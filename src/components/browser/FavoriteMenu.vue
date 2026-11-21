@@ -29,21 +29,21 @@ function act(type: string) {
     <div v-if="menu" class="menu-scrim" @pointerdown.self="closeMenu" @keydown.esc="closeMenu">
       <div ref="panel" class="context-menu favorite-menu" role="menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
         <form v-if="edit" class="bookmark-menu-form" @submit.prevent="b.send({ type: 'bookmarkUpdate', id: menu.favorite.id, title: editTitle, url: editUrl }); closeMenu()">
-          <label>名称<input v-model="editTitle" aria-label="置顶网站名称" maxlength="80" required /></label>
-          <label>起始网址<input v-model="editUrl" aria-label="置顶网站网址" maxlength="2048" required /></label>
-          <button class="primary-button" type="submit">保存修改</button>
+          <label>{{ b.t('名称') }}<input v-model="editTitle" :aria-label="b.t('置顶网站名称')" maxlength="80" required /></label>
+          <label>{{ b.t('起始网址') }}<input v-model="editUrl" :aria-label="b.t('置顶网站网址')" maxlength="2048" required /></label>
+          <button class="primary-button" type="submit">{{ b.t('保存修改') }}</button>
         </form>
         <template v-else>
-        <button role="menuitem" @click="beginEdit">编辑常用网站</button>
+        <button role="menuitem" @click="beginEdit">{{ b.t('编辑常用网站') }}</button>
         <template v-if="live(menu.favorite)">
-          <button v-if="!samePinnedUrl(live(menu.favorite)!.url, menu.favorite.url)" role="menuitem" @click="act('bookmarkReset')">返回固定网址</button>
-          <button role="menuitem" @click="act('bookmarkSeparate')">分离为普通标签</button>
-          <button role="menuitem" @click="act('bookmarkUnload')">卸载网页</button>
+          <button v-if="!samePinnedUrl(live(menu.favorite)!.url, menu.favorite.url)" role="menuitem" @click="act('bookmarkReset')">{{ b.t('返回固定网址') }}</button>
+          <button role="menuitem" @click="act('bookmarkSeparate')">{{ b.t('分离为普通标签') }}</button>
+          <button role="menuitem" @click="act('bookmarkUnload')">{{ b.t('卸载网页') }}</button>
         </template>
-        <button role="menuitem" @click="act('bookmarkPin')">移到当前工作区固定标签</button>
-        <button role="menuitem" @click="act('bookmarkUnpin')">移回普通标签</button>
+        <button role="menuitem" @click="act('bookmarkPin')">{{ b.t('移到当前工作区固定标签') }}</button>
+        <button role="menuitem" @click="act('bookmarkUnpin')">{{ b.t('移回普通标签') }}</button>
         <hr />
-        <button role="menuitem" @click="act('favoriteRemove')">移除常用网站</button>
+        <button role="menuitem" @click="act('favoriteRemove')">{{ b.t('移除常用网站') }}</button>
         </template>
       </div>
     </div>
