@@ -1096,7 +1096,7 @@ impl State {
         // Zoom is only meaningful inside WebView2's range; a session written by
         // an older build or a damaged file must not wedge the page at 0 or 99x.
         self.site_zoom.retain(|site, zoom| {
-            !site.is_empty() && site.len() <= 253 && valid_zoom(*zoom) && (*zoom - 1.0).abs() > 0.001
+            !site.is_empty() && site.len() <= 253 && valid_zoom(*zoom)
         });
         for tab in self.tabs.iter_mut().chain(self.closed.iter_mut()) {
             tab.zoom = tab.zoom.filter(|factor| valid_zoom(*factor));
@@ -1676,6 +1676,7 @@ mod tests {
     #[test]
     fn repaired_sessions_drop_invalid_zooms_and_keep_mute_state() {
         let mut state = State::default();
+        state.settings.default_page_zoom = 1.5;
         state.site_zoom.insert("example.com".into(), 1.25);
         state.site_zoom.insert("one.example".into(), 1.0);
         state.site_zoom.insert("huge.example".into(), 9.0);
@@ -1686,13 +1687,15 @@ mod tests {
         state.tabs[0].zoom = Some(1.0);
         state.tabs[1].zoom = Some(0.0);
         state.repair();
-        assert_eq!(state.site_zoom.len(), 1);
+        assert_eq!(state.site_zoom.len(), 2);
         assert_eq!(state.site_zoom.get("example.com"), Some(&1.25));
         assert!(state.tabs[0].muted);
         let mut restored: State =
             serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
         restored.repair();
-        assert_eq!(restored.site_zoom.len(), 1);
+        assert_eq!(restored.site_zoom.len(), 2);
+        assert_eq!(restored.site_zoom.get("one.example"), Some(&1.0));
+        assert_eq!(restored.settings.default_page_zoom, 1.5);
         assert!(restored.tabs[0].muted);
         assert_eq!(restored.tabs[0].zoom, Some(1.0));
         assert_eq!(restored.tabs[1].zoom, None);
@@ -1700,11 +1703,13 @@ mod tests {
         let mut value: serde_json::Value = serde_json::to_value(&restored).unwrap();
         value["tabs"][0].as_object_mut().unwrap().remove("muted");
         value["tabs"][0].as_object_mut().unwrap().remove("zoom");
+        value["settings"].as_object_mut().unwrap().remove("defaultPageZoom");
         value.as_object_mut().unwrap().remove("siteZoom");
         let old: State = serde_json::from_value(value).unwrap();
         assert!(!old.tabs[0].muted);
         assert_eq!(old.tabs[0].zoom, None);
         assert!(old.site_zoom.is_empty());
+        assert_eq!(old.settings.default_page_zoom, 1.0);
     }
     fn tab_for_test(id: &str, space: &str, last: u64) -> Tab {
         Tab {

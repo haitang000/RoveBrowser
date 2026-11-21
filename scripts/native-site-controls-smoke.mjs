@@ -205,11 +205,16 @@ async function launch() {
   return first;
 }
 async function stop() {
+  const exited = new Promise((done) => child.once('exit', done));
+  await send({ type: 'window', action: 'close' }).catch((error) => {
+    if (!/closed|disconnect/i.test(error.message)) throw error;
+  });
+  const code = await Promise.race([exited, new Promise((_, reject) => {
+    setTimeout(() => reject(Error('Application did not close')), 10000).unref();
+  })]);
+  assert.equal(code, 0, 'application closes cleanly');
   await pageBrowser?.close().catch(() => {});
   await uiBrowser?.close().catch(() => {});
-  const exited = new Promise((done) => child.once('exit', done));
-  child.kill();
-  await Promise.race([exited, new Promise((done) => setTimeout(done, 4000))]);
   pageBrowser = uiBrowser = undefined;
   child = undefined;
   // Give the profile copy and the CDP endpoint a beat before relaunching.
@@ -484,16 +489,46 @@ try {
   await send({ type: 'zoom', action: 'in' });
   await new Promise((done) => setTimeout(done, 300));
   await send({ type: 'mute', id: activeId, muted: true });
-  await new Promise((done) => setTimeout(done, 400));
+
+  await send({ type: 'new', url: siteB });
+  const fallback = await pageAt(siteB);
+  await fallback.waitForSelector('h1');
+  await widthEventually(fallback, baseWidth, 'existing page starts at 100%');
+  const fallbackId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
+  await send({ type: 'settingsOpen', pane: 'accessibility' });
+  await ui.getByRole('combobox', { name: '默认页面缩放', exact: true }).selectOption({ label: '150%' });
+  await waitFor(async () => (await lastState()).settings.defaultPageZoom === 1.5, 'save default zoom from accessibility settings');
+  await send({ type: 'activate', id: fallbackId });
+  await widthEventually(fallback, Math.round(baseWidth / 1.5), 'existing page updates to 150%');
+
+  const freshDefaultUrl = `${siteB}?default-zoom`;
+  await send({ type: 'new', url: freshDefaultUrl });
+  const freshDefault = await pageAt(freshDefaultUrl);
+  await widthEventually(freshDefault, Math.round(baseWidth / 1.5), 'new page starts at 150%');
+  await send({ type: 'zoom', action: 'out' });
+  await widthEventually(freshDefault, Math.round(baseWidth / 1.25), 'site zoom overrides the default');
+  await send({ type: 'zoom', action: 'reset' });
+  await widthEventually(freshDefault, Math.round(baseWidth / 1.5), 'reset uses the configured default');
+  for (const factor of [1.25, 1.1, 1]) {
+    await send({ type: 'zoom', action: 'out' });
+    await widthEventually(freshDefault, Math.round(baseWidth / factor), `site zoom changes to ${factor}`);
+  }
+  await send({ type: 'activate', id: activeId });
+  await widthEventually(await pageAt(siteA), Math.round(baseWidth / 1.25), 'site override keeps 125% after changing the default');
+  checks.push('无障碍设置修改默认缩放后，已有网页和新网页采用 150%，网站单独设置优先，重置回到 150%');
   await stop();
 
   const restarted = await launch();
   await widthEventually(restarted, Math.round(baseWidth / 1.25), 'zoom restored after restart');
   const restored = await lastState();
+  assert.equal(restored.settings.defaultPageZoom, 1.5, 'default page zoom survives restart');
+  assert.equal(restored.siteZoom?.localhost, 1, 'explicit 100% site zoom survives restart');
   assert.equal(restored.siteZoom?.['127.0.0.1'], 1.25, 'site zoom survives restart');
   assert.equal(restored.tabs.find((tab) => tab.id === activeId)?.muted, true, 'mute survives restart');
   await expectCount('.tab-row.selected .tab-audio.muted', 1, 'muted speaker after restart');
   checks.push('重启后按站点缩放 125% 与静音状态从 SQLite 会话恢复');
+  await send({ type: 'activate', id: restored.tabs.find((tab) => tab.url === freshDefaultUrl).id });
+  await widthEventually(await pageAt(freshDefaultUrl), baseWidth, 'site zoom of 100% still overrides the default after restart');
   await send({ type: 'activate', id: siblingId });
   const restoredWheelPage = await pageAt(wheelDestination);
   await restoredWheelPage.waitForSelector('h1');

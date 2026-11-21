@@ -10,6 +10,7 @@ import { useBrowser } from "../../stores/browser";
 import { INTERFACE_LANGUAGES } from "../../lib/language";
 import {
   SETTINGS_PANES,
+  PAGE_ZOOM_STEPS,
   SEARCH_ENGINES,
   SHORTCUTS,
   settingsPane,
@@ -236,6 +237,21 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "accessibility",
+    title: b.t("网页缩放"),
+    rows: [
+      {
+        id: "page-zoom",
+        title: b.t("默认页面缩放"),
+        detail: b.t("未单独设置缩放的网页会使用此比例。"),
+        kind: "select",
+        setting: "defaultPageZoom",
+        options: PAGE_ZOOM_STEPS.map((factor) => [factor, `${Math.round(factor * 100)}%`]),
+        keywords: "default page zoom 网页缩放 頁面縮放 網頁縮放",
+      },
+    ],
+  },
+  {
+    pane: "accessibility",
     title: b.t("动态效果"),
     rows: [
       {
@@ -451,10 +467,8 @@ function select(row: Row, event: Event) {
   if (row.id === "theme") {
     if (selected !== b.state.theme) b.send({ type: "theme" });
   } else if (row.setting) {
-    update(
-      row.setting,
-      row.setting === "favoritesPerRow" ? Number(selected) : selected,
-    );
+    const option = row.options?.find(([value]) => String(value) === selected);
+    if (option) update(row.setting, option[0]);
     if (selected === "custom" && !custom.value)
       nextTick(() => document.getElementById(`custom-${props.tabId}`)?.focus());
   }
@@ -675,7 +689,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               <div v-for="row in group.rows" :key="row.id" class="setting-row" :class="{ 'setting-engine-row': row.id === 'engine' }">
                 <div class="setting-description">
                   <label :for="`setting-${row.id}-${tabId}`"><SearchHighlight :text="row.title" :words="words" /></label>
-                  <p v-if="row.detail"><SearchHighlight :text="row.detail" :words="words" /></p>
+                  <p v-if="row.detail" :id="`setting-${row.id}-${tabId}-detail`"><SearchHighlight :text="row.detail" :words="words" /></p>
                 </div>
                 <button
                   v-if="row.kind === 'toggle'"
@@ -696,6 +710,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   <select
                     :id="`setting-${row.id}-${tabId}`"
                     :aria-label="row.title"
+                    :aria-describedby="row.detail ? `setting-${row.id}-${tabId}-detail` : undefined"
                     :value="value(row)"
                     @change="select(row, $event)"
                   >

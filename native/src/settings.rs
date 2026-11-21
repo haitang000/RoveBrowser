@@ -52,6 +52,7 @@ pub struct Settings {
     pub search_suggestions: bool,
     pub large_space_names: bool,
     pub favorites_per_row: u8,
+    pub default_page_zoom: f64,
     pub reduce_motion: bool,
     pub ask_before_quit: bool,
     pub save_passwords: bool,
@@ -75,6 +76,7 @@ impl Default for Settings {
             search_suggestions: true,
             large_space_names: true,
             favorites_per_row: 4,
+            default_page_zoom: 1.0,
             reduce_motion: false,
             ask_before_quit: true,
             save_passwords: true,
@@ -148,6 +150,9 @@ impl Settings {
         if ![0, 2, 3, 4].contains(&self.favorites_per_row) {
             self.favorites_per_row = 4;
         }
+        if !crate::model::ZOOM_STEPS.contains(&self.default_page_zoom) {
+            self.default_page_zoom = 1.0;
+        }
         if self.validate().is_err() {
             self.shortcuts.clear();
         }
@@ -189,6 +194,9 @@ impl Settings {
         }
         if ![0, 2, 3, 4].contains(&self.favorites_per_row) {
             return Err("每行网站数量应为自动、2、3 或 4".into());
+        }
+        if !crate::model::ZOOM_STEPS.contains(&self.default_page_zoom) {
+            return Err("默认页面缩放比例无效".into());
         }
         self.download_folder = self.download_folder.trim().to_string();
         if !self.download_folder.is_empty() {
@@ -261,6 +269,15 @@ impl Settings {
 mod tests {
     use super::*;
     use crate::model::{Command, State};
+    #[test]
+    fn invalid_default_page_zoom_is_rejected_and_repaired() {
+        let mut state = State::default();
+        let mut settings = Settings { default_page_zoom: 1.2, ..Settings::default() };
+        assert!(state.apply(&Command::UpdateSettings { settings: settings.clone() }).is_err());
+        assert_eq!(state.settings.default_page_zoom, 1.0);
+        settings.repair();
+        assert_eq!(settings.default_page_zoom, 1.0);
+    }
     #[test]
     fn interface_language_survives_session_repair_and_defaults_safely() {
         let mut state = State::default();

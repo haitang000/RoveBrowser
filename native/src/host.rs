@@ -1299,12 +1299,29 @@ impl App {
             }
         }
     }
-    /// The zoom this site was last left at, from `ZoomLevels`-style storage.
+    /// A saved site zoom takes precedence over the accessibility preference.
     fn site_zoom_for(&self, url: &str) -> f64 {
+        if !model::is_web(url) {
+            return 1.0;
+        }
         model::site_key(url)
             .and_then(|site| self.state.site_zoom.get(&site).copied())
             .filter(|factor| model::valid_zoom(*factor))
-            .unwrap_or(1.0)
+            .unwrap_or(self.state.settings.default_page_zoom)
+    }
+    fn apply_default_page_zoom(&self) {
+        let pages = self.state.tabs.iter().filter_map(|tab| {
+            let page = self.reader.as_ref().filter(|reader| reader.id == tab.id)
+                .map(|reader| &reader.original)
+                .or_else(|| self.pages.get(&tab.id))?;
+            Some((tab, page))
+        });
+        for (tab, page) in pages.chain(self.peek.iter().map(|peek| (&peek.tab, &peek.page))) {
+            if model::is_web(&tab.url) && tab.zoom.is_none() {
+                page.restore_zoom(self.site_zoom_for(&tab.url));
+            }
+        }
+        self.emit_active_zoom();
     }
     /// Tells the UI the shown page's zoom, so its site menu and toast start in
     /// the right place after a tab, space or split switch.
@@ -4245,25 +4262,28 @@ impl App {
                 if !model::is_web(&tab.url) {
                     return;
                 }
-                let current = crate::site::zoom_factor(&page.view).unwrap_or(1.0);
+                let default = self.state.settings.default_page_zoom;
+                let current = crate::site::zoom_factor(&page.view).unwrap_or(default);
                 let factor = match action.as_str() {
-                    "reset" => 1.0,
+                    "reset" => default,
                     "out" => model::next_zoom(current, -1),
                     _ => model::next_zoom(current, 1),
                 };
                 if page.set_zoom(factor).is_err() {
                     return;
                 }
-                // Zigzag's ZoomLevels: remembered per host; 100% is the absence
-                // of an entry. An existing tab override stays local to the tab.
+                let site = model::site_key(&tab.url);
+                // Tab zoom is local. A reset can inherit the default unless the site has its own scale.
                 if tab.zoom.is_some() {
-                    tab.zoom = Some(factor);
+                    let site_uses_default = site.as_ref().and_then(|site| self.state.site_zoom.get(site))
+                        .is_none_or(|zoom| (*zoom - default).abs() <= 0.001);
+                    tab.zoom = (action != "reset" || !site_uses_default).then_some(factor);
                     if !in_peek {
                         self.save();
                         self.publish();
                     }
-                } else if let Some(site) = model::site_key(&tab.url) {
-                    if (factor - 1.0).abs() <= 0.001 {
+                } else if let Some(site) = site {
+                    if (factor - default).abs() <= 0.001 {
                         self.state.site_zoom.remove(&site);
                     } else {
                         self.state.site_zoom.insert(site, factor);
@@ -4448,6 +4468,7 @@ impl App {
                     self.finish_split_resize();
                     self.error(error);
                 }
+                let previous_default_zoom = self.state.settings.default_page_zoom;
                 if let Err(e) = self.state.apply(&c) {
                     self.finish_split_resize();
                     self.error(e);
@@ -4457,6 +4478,9 @@ impl App {
                 self.playing.retain(|id| self.state.tabs.iter().any(|tab| &tab.id == id));
                 *self.live_settings.borrow_mut() = self.state.settings.clone();
                 if matches!(c, Command::UpdateSettings { .. }) {
+                    if self.state.settings.default_page_zoom != previous_default_zoom {
+                        self.apply_default_page_zoom();
+                    }
                     if self.update_offer.as_ref().is_some_and(|offer| offer.channel.as_str() != self.state.settings.update_channel) {
                         self.update_offer = None;
                     }

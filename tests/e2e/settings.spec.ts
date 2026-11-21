@@ -8,6 +8,17 @@ test.beforeEach(async ({ page }) => {
   await chooseBrowserMenuItem(page, "设置");
 });
 
+test("default page zoom is selectable and searchable in accessibility settings", async ({ page }) => {
+  const zoom = page.getByRole("combobox", { name: "默认页面缩放", exact: true });
+  await expect(zoom).toHaveCount(0);
+  await page.getByRole("button", { name: "无障碍", exact: true }).click();
+  await expect(zoom).toHaveValue("1");
+  await zoom.selectOption({ label: "125%" });
+  await page.getByRole("button", { name: "通用", exact: true }).click();
+  await page.getByRole("searchbox", { name: "查找设置" }).fill("默认页面缩放");
+  await expect(zoom).toHaveValue("1.25");
+});
+
 test("interface language updates live, works in settings search and survives a reload", async ({ page }) => {
   const html = page.locator("html");
   const search = page.getByRole("searchbox", { name: /查找设置|Search settings/ });

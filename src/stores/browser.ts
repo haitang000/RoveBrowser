@@ -169,6 +169,7 @@ export const useBrowser = defineStore("browser", () => {
   const activeBookmark = computed(() => active.value?.bookmarkId ? savedBookmarks.value.get(active.value.bookmarkId) : undefined);
   const activeDownloads = computed(() => activeDownloadCount(downloads.value));
   const settings = computed(() => settingsFor(state.value.settings));
+  if (!native) watch(() => settings.value.defaultPageZoom, (factor) => { pageZoom.value = factor; });
   const language = computed(() => settings.value.language);
   function t(source: string, values?: Record<string, string | number>) {
     return translate(language.value, source, values);
@@ -546,7 +547,7 @@ export const useBrowser = defineStore("browser", () => {
   function findStep(backwards = false) {
     if (native) send({ type: "findNext", backwards });
   }
-  /** Zigzag's View › Zoom In / Zoom Out / Actual Size, on the current page. */
+  /** Zoom the current page or reset it to the default page zoom. */
   function zoom(action: "in" | "out" | "reset") {
     if (native) send({ type: "zoom", action });
   }

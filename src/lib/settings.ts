@@ -127,6 +127,11 @@ export const SHORTCUTS = [
     value: combo(39, false, false, true),
   },
 ] as const;
+// Matches the page zoom steps used by the native host.
+export const PAGE_ZOOM_STEPS: readonly number[] = [
+  0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3,
+];
+
 export interface Settings {
   language: InterfaceLanguage;
   searchEngine: string;
@@ -134,6 +139,7 @@ export interface Settings {
   searchSuggestions: boolean;
   largeSpaceNames: boolean;
   favoritesPerRow: number;
+  defaultPageZoom: number;
   reduceMotion: boolean;
   askBeforeQuit: boolean;
   savePasswords: boolean;
@@ -153,6 +159,7 @@ export const defaultSettings = (): Settings => ({
   searchSuggestions: true,
   largeSpaceNames: true,
   favoritesPerRow: 4,
+  defaultPageZoom: 1,
   reduceMotion: false,
   askBeforeQuit: true,
   savePasswords: true,
@@ -176,6 +183,7 @@ export function updateChannelDetail(channel: UpdateChannel): string {
 export function settingsFor(value?: Partial<Settings>): Settings {
   const settings = { ...defaultSettings(), ...value };
   settings.language = interfaceLanguage(settings.language);
+  if (!PAGE_ZOOM_STEPS.includes(settings.defaultPageZoom)) settings.defaultPageZoom = 1;
   settings.updateChannel = settings.updateChannel === "canary" ? "canary" : "preview";
   return settings;
 }

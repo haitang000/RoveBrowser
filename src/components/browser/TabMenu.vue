@@ -201,10 +201,10 @@ function act(type: string, extra = {}) {
               </button>
               <button
                 role="menuitem"
-                :disabled="Math.abs(b.pageZoom - 1) < 0.001"
+                :disabled="Math.abs(b.pageZoom - b.settings.defaultPageZoom) < 0.001"
                 @click="zoom('reset')"
               >
-                100%
+                {{ Math.round(b.settings.defaultPageZoom * 100) }}%
               </button>
               <button
                 role="menuitem"
