@@ -24,7 +24,8 @@ use webview2_com::{
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2NavigationStartingEventArgs3,
-        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
+        ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2NewWindowRequestedEventArgs3,
+        ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
         ICoreWebView2_4, ICoreWebView2_9,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
@@ -1674,6 +1675,7 @@ impl App {
             })
             .with_navigation_handler(|url| model::is_web(&url) || url == "about:blank")
             .with_initialization_script(include_str!("peek-links.js"))
+            .with_initialization_script(include_str!("chrome-store-install.js"))
             // Zigzag's SwipeNavigation: WebView2 performs the macOS-style
             // two-finger back/forward swipe itself, including its own animation.
             .with_back_forward_navigation_gestures(true)
@@ -1687,7 +1689,7 @@ impl App {
                     matches!(event, PageLoadEvent::Started),
                 ));
             })
-            // The script only adapts standard link opening. There is still no IPC/host API on websites.
+            // The page adapters use standard window requests. Websites have no application IPC.
             .build_as_child(self.window.as_ref().unwrap())?;
         self.track_webview_focus(&view)?;
         // Wry's zoom option also enables pinch, which is handled separately by WebView2.
@@ -3184,15 +3186,21 @@ impl App {
             | Command::Layout { .. } | Command::Glass { .. } | Command::PopupReady
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
         ) { return; }
-        if let Command::PrepareChromeStoreTab { id } = &c {
+        if let Command::PrepareChromeStoreTab { id, expected_url } = &c {
             let extension_id = self.state.active()
-                .filter(|tab| &tab.id == id)
-                .and_then(|tab| url::Url::parse(&tab.url).ok())
-                .as_ref().and_then(chrome_store::detail_id).map(str::to_owned);
+                .filter(|tab| &tab.id == id || tab.split_with.as_ref() == Some(id))
+                .and_then(|_| self.pages.get(id))
+                .and_then(|page| {
+                    let current = page.navigation.current.borrow();
+                    if expected_url.as_ref().is_some_and(|url| url != &*current) {
+                        return None;
+                    }
+                    chrome_store::detail_id(&url::Url::parse(&current).ok()?).map(str::to_owned)
+                });
             if let Some(input) = extension_id {
                 self.command(Command::OpenSettings { pane: Some("extensions".into()) }, event_loop);
                 self.extension_command(Command::PrepareChromeStoreExtension { input });
-            } else {
+            } else if expected_url.is_none() {
                 self.error("当前标签页不是 Chrome 网上应用店的扩展详情页");
             }
             return;
@@ -4919,7 +4927,26 @@ fn register_page_events(
                 } else {
                     String::new()
                 };
-                if let Some(point) = peek_target(&target) {
+                if target == "__rove_chrome_store_install__" {
+                    let mut user = BOOL::default();
+                    args.IsUserInitiated(&mut user)?;
+                    if user.as_bool()
+                        && url::Url::parse(&url).ok().as_ref().and_then(chrome_store::detail_id).is_some()
+                    {
+                        // Bind the click to the actual requester's listing. The event loop also
+                        // checks the live top-level URL before opening the confirmation page.
+                        let frame = args.cast::<ICoreWebView2NewWindowRequestedEventArgs3>()?
+                            .OriginalSourceFrameInfo()?;
+                        let mut source = PWSTR::null();
+                        frame.Source(&mut source)?;
+                        if take_pwstr(source) == url {
+                            let _ = p.send_event(Event::Command(Command::PrepareChromeStoreTab {
+                                id: source_id.clone(),
+                                expected_url: Some(url),
+                            }));
+                        }
+                    }
+                } else if let Some(point) = peek_target(&target) {
                     let mut user = BOOL::default();
                     args.IsUserInitiated(&mut user)?;
                     if user.as_bool() {

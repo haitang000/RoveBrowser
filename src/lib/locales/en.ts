@@ -151,7 +151,6 @@ export const english: Readonly<Record<string, string>> = {
   "请在 Rove 桌面版中检查更新。": "Check for updates in the Rove desktop app.",
   "浏览器扩展": "Browser extensions",
   "Chrome 网上应用店": "Chrome Web Store",
-  "粘贴扩展详情链接或 ID。浏览详情页时，也可以从浏览器菜单安装。": "Paste an extension link or ID. You can also install from the browser menu while viewing an extension’s page.",
   "浏览商店": "Browse store",
   "商店扩展链接或 ID": "Store extension link or ID",
   "查看权限": "Review permissions",

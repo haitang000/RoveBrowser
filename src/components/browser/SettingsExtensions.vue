@@ -7,6 +7,7 @@ import { useBrowser } from "../../stores/browser";
 const b = useBrowser();
 const removal = ref<ExtensionItem | null>(null);
 const choose = ref<HTMLButtonElement>();
+const reviewPanel = ref<HTMLElement>();
 const cancelReview = ref<HTMLButtonElement>();
 const cancelRemoval = ref<HTMLButtonElement>();
 const storeInput = ref("");
@@ -29,8 +30,10 @@ function remove(id: string) {
 watch(() => b.extensions.review, async (current, previous) => {
   if (current?.ticket === previous?.ticket) return;
   await nextTick();
-  if (current) cancelReview.value?.focus();
-  else choose.value?.focus();
+  if (current) {
+    reviewPanel.value?.scrollIntoView({ block: "start" });
+    cancelReview.value?.focus({ preventScroll: true });
+  } else choose.value?.focus();
 });
 watch(removal, async (item) => {
   if (item) {
@@ -47,10 +50,9 @@ onMounted(() => {
 
 <template>
   <section class="settings-group extension-settings" :aria-label="b.t('浏览器扩展')" :aria-busy="b.extensions.busy">
-    <div class="setting-row extension-intro">
+    <div v-if="!b.extensions.review" class="setting-row extension-intro">
       <div class="setting-description">
         <strong>{{ b.t('Chrome 网上应用店') }}</strong>
-        <p>{{ b.t('粘贴扩展详情链接或 ID。浏览详情页时，也可以从浏览器菜单安装。') }}</p>
       </div>
       <button class="setting-button" @click="b.send({ type: 'new', url: CHROME_STORE_URL })">{{ b.t('浏览商店') }}</button>
       <form class="setting-input-form extension-store-form" @submit.prevent="run({ type: 'extensionsChromeStore', input: storeInput.trim() })">
@@ -69,7 +71,7 @@ onMounted(() => {
         </button>
       </form>
     </div>
-    <div class="setting-row extension-intro">
+    <div v-if="!b.extensions.review" class="setting-row extension-intro">
       <div class="setting-description">
         <strong>{{ b.t('本地扩展') }}</strong>
         <p>{{ b.t('选择包含 manifest.json 的 Manifest V3 扩展目录。扩展会作用于所有工作区中的匹配网页。') }}</p>
@@ -89,6 +91,7 @@ onMounted(() => {
 
     <section
       v-if="b.extensions.review"
+      ref="reviewPanel"
       class="extension-review"
       :aria-label="b.t('确认安装扩展')"
       @keydown.esc.stop="review(b.extensions.review.ticket, false)"

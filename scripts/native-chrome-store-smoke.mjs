@@ -17,7 +17,7 @@ const detail = "https://chromewebstore.google.com/detail/ublock-origin-lite/" + 
 const port = Number(process.env.ERA_TEST_CHROME_STORE_DEBUG_PORT || "19864");
 const executable = resolve(process.env.ERA_TEST_EXE || "native/target/debug/rove.exe");
 
-let app, browser, ui;
+let app, browser, pageBrowser, ui;
 async function waitFor(check, label) {
   let lastError;
   const end = Date.now() + 15000;
@@ -64,6 +64,8 @@ async function stop() {
       clearTimeout(timeout);
     }
   }
+  await pageBrowser?.close();
+  pageBrowser = undefined;
   await browser.close();
 }
 
@@ -99,6 +101,19 @@ try {
   await ui.getByRole("button", { name: "浏览器菜单", exact: true }).click();
   await popup.getByRole("menuitem", { name: "安装此商店扩展…" }).click();
   await expectVerifiedReview();
+  await review().getByRole("button", { name: "取消" }).click();
+  await expect(review()).toHaveCount(0);
+
+  await send({ type: "new", url: detail.replace("hl=en", "hl=zh-CN") });
+  pageBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port + 1}`, { timeout: 1000 }), "webpage CDP");
+  const listing = await waitFor(() => pageBrowser.contexts().flatMap(context => context.pages())
+    .find(page => page.url() === detail.replace("hl=en", "hl=zh-CN")), "store listing");
+  const add = listing.getByRole("button", { name: "添加到 Rove", exact: true });
+  await expect(add).toBeVisible({ timeout: 15000 });
+  assert.equal(await add.evaluate(button => Boolean(button.getRootNode().host.nextElementSibling?.matches("button"))), true);
+  await add.click();
+  await expectVerifiedReview();
+  await expect(review()).toContainText(/uBlock Origin Lite/i);
   await review().getByRole("button", { name: "安装扩展" }).click();
   await expect(toggle()).toHaveAttribute("aria-checked", "true");
   const [installed] = await readdir(packages);
@@ -121,8 +136,9 @@ try {
   await expect(ui.getByText("还没有安装扩展。")).toBeVisible();
   assert.deepEqual(await readdir(packages), []);
   await stop();
-  console.log("通过：商店来源校验、详情链接、菜单入口、权限确认、扩展 ID、重启恢复和卸载。");
+  console.log("通过：商店来源校验、详情页按钮、详情链接、菜单入口、权限确认、扩展 ID、重启恢复和卸载。");
 } finally {
   if (app?.exitCode === null) app.kill();
+  await pageBrowser?.close().catch(() => {});
   await browser?.close().catch(() => {});
 }
