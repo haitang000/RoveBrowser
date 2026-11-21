@@ -415,6 +415,10 @@ pub enum Command {
     TabDropTarget { rect: Option<Rect> },
     #[serde(rename = "popupReady")]
     PopupReady,
+    #[serde(rename = "permissionAnswer")]
+    PermissionAnswer { id: String, allowed: Option<bool>, remember: bool },
+    #[serde(rename = "permissionRule")]
+    PermissionRule { scope: crate::permissions::Scope, allowed: Option<bool> },
     #[serde(rename = "popupState")]
     PopupState { popup: serde_json::Value },
     #[serde(rename = "popupLayer")]

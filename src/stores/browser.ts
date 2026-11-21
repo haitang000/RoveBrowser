@@ -14,6 +14,7 @@ import type {
 import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
 import type { ReaderState } from "../lib/reader";
+import type { PermissionPrompt, PermissionRule } from "../lib/permissions";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
 import { SHORTCUTS, sameShortcut, settingsFor, shortcutFor, shortcutText, type SettingsPane } from "../lib/settings";
@@ -29,6 +30,9 @@ export const useBrowser = defineStore("browser", () => {
   const pendingNewTab: NewTabSettings[] = [];
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
+  const permissionPrompt = ref<PermissionPrompt>();
+  const permissionTabs = ref(new Set<string>());
+  const permissionRules = ref<PermissionRule[]>([]);
   const splitResize = ref<{ ratio: number; resizing: boolean }>();
   const splitHovered = ref(false);
   const splitClick = ref(0);
@@ -567,6 +571,11 @@ export const useBrowser = defineStore("browser", () => {
     if (native && !popupWindow) send({ type: "downloadsPanel", open });
   });
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "permissionState") {
+      permissionPrompt.value = e.permissionPrompt ?? undefined;
+      permissionTabs.value = new Set(e.permissionTabs);
+    }
+    if (e.type === "permissionRules" && e.rules) permissionRules.value = e.rules;
     if (e.type === "quitConfirmation") quitOpen.value = Boolean(e.visible);
     if (e.type === "readerState" && e.reader) reader.value = e.reader;
     if (e.type === "sidebarResize" && typeof e.width === "number" && Number.isFinite(e.width))
@@ -771,6 +780,9 @@ export const useBrowser = defineStore("browser", () => {
     popupWindow,
     contextMenu,
     popupArea,
+    permissionPrompt,
+    permissionTabs,
+    permissionRules,
     splitResize,
     splitHovered,
     splitClick,

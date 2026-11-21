@@ -21,6 +21,7 @@ mod import_store;
 mod instance;
 mod layout;
 mod passwords;
+mod permissions;
 mod preview;
 mod reader;
 mod resize_motion;

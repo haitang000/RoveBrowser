@@ -174,6 +174,9 @@ declare global {
       ids?: string[];
       /** The full downloads list. */
       items?: DownloadItem[];
+      permissionPrompt?: import("./permissions").PermissionPrompt | null;
+      permissionTabs?: string[];
+      rules?: import("./permissions").PermissionRule[];
     }) => void;
   }
 }

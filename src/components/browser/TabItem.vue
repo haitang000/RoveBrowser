@@ -21,6 +21,7 @@ const labels = computed(() => (props.panes ?? [props.tab]).map((tab) => {
     tooltip: sleeping ? `已休眠以节省内存 · ${tab.url}` : tab.url,
     sleeping,
     audio: Boolean(b.audio[tab.id] || tab.muted),
+    permission: b.permissionTabs.has(tab.id),
     doomed: props.doomedIds?.includes(tab.id),
     fade: tabFreshness(tab.lastActivated, b.now),
   };
@@ -65,7 +66,7 @@ function activate() {
       doomed: labels.every((label) => label.doomed),
     }"
     role="tab"
-    :aria-label="panes ? `分屏：${title}` : title"
+    :aria-label="`${panes ? `分屏：${title}` : title}${labels.some((label) => label.permission) ? '，有权限请求' : ''}`"
     :aria-selected="selected"
     :tabindex="selected ? 0 : -1"
     :title="previewed ? undefined : rowTitle"
@@ -91,6 +92,7 @@ function activate() {
         <Favicon v-else :url="label.tab.url" :favicon="label.tab.favicon" />
       </span>
       <span class="tab-title">{{ label.title }}</span>
+      <span v-if="label.permission" class="tab-permission-dot" title="有权限请求" aria-hidden="true" />
       <button
         v-if="label.audio"
         class="tab-audio"
@@ -113,3 +115,7 @@ function activate() {
     </button>
   </div>
 </template>
+
+<style scoped>
+.tab-permission-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+</style>

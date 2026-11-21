@@ -2,6 +2,7 @@ use crate::{
     clip::WindowClip,
     downloads::{DownloadItem, DownloadState, Downloads},
     model::{self, Command, PeekPhase, Point, Rect, State, Tab},
+    permissions,
     storage::Storage,
 };
 use include_dir::{include_dir, Dir};
@@ -153,8 +154,10 @@ enum Event {
     /// A background page's `TrySuspend` finished; `true` when it slept.
     SleepDone(String, bool),
     StorageWriteError(String),
+    PermissionsChanged,
 }
 struct Page {
+    permission_document: Rc<permissions::Document>,
     view: WebView,
     save_path: crate::page_output::SavePath,
     resize_surface: Rc<crate::resize_surface::Surface>,
@@ -359,6 +362,9 @@ struct App {
     popup: Option<WebView>,
     page_save: Option<crate::page_output::SaveRequest>,
     popup_state: serde_json::Map<String, serde_json::Value>,
+    permissions: permissions::Requests,
+    permission_state: serde_json::Value,
+    permission_shown_at: Instant,
     ui: Option<WebView>,
     window: Option<Window>,
     context: WebContext,
@@ -511,6 +517,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         pending_download_review: None,
         popup: None,
         popup_state: serde_json::Map::new(),
+        permissions: permissions::Requests::load(&storage)?,
+        permission_state: json!({"type":"permissionState", "permissionPrompt":null, "permissionTabs":[]}),
+        permission_shown_at: Instant::now(),
         page_save: None,
         ui: None,
         window: None,
@@ -547,6 +556,88 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 impl App {
+    fn permission_pane(&self, request: &permissions::Request) -> Option<Rect> {
+        if self.quit_pending || self.overlay || self.downloads_open.get() || self.space_form_open() || !self.state.onboarding.completed {
+            return None;
+        }
+        let (page, rect) = if let Some(peek) = &self.peek {
+            if peek.phase != PeekPhase::Open { return None; }
+            (&peek.page, peek.rect?)
+        } else {
+            let rect = if request.tab == self.state.active_tab {
+                self.primary
+            } else if self.state.active()?.split_with.as_deref() == Some(&request.tab) {
+                self.secondary?
+            } else {
+                return None;
+            };
+            (self.pages.get(&request.tab)?, rect)
+        };
+        (rect.valid() && rect.width > 0. && rect.height > 0. && page.visible.get()
+            && request.belongs_to(&page.permission_document)).then_some(rect)
+    }
+
+    fn publish_permission_rules(&self) {
+        self.emit(json!({"type":"permissionRules", "rules": self.permissions.rules()}));
+    }
+
+    fn sync_permissions(&mut self) {
+        self.permissions.reconcile();
+        if self.permissions.waiting.is_empty()
+            && self.permission_state["permissionTabs"].as_array().is_some_and(Vec::is_empty) {
+            return;
+        }
+        let tabs: std::collections::BTreeSet<_> = self.permissions.waiting.iter().map(|r| &r.tab).collect();
+        let prompt = self.permissions.waiting.iter().find_map(|request| {
+            let rect = self.permission_pane(request)?;
+            Some(json!({
+                "id": request.id, "scope": request.scope, "canRemember": request.scope.can_remember(),
+                "remember": request.scope.kind.remembers_by_default(),
+                "pane": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
+                "waiting": self.permissions.waiting.len() - 1,
+            }))
+        });
+        let state = json!({"type":"permissionState", "permissionPrompt": prompt, "permissionTabs": tabs});
+        if state["permissionPrompt"]["id"] != self.permission_state["permissionPrompt"]["id"] {
+            self.permission_shown_at = Instant::now();
+        }
+        if state != self.permission_state {
+            self.emit(state.clone());
+            self.permission_state = state;
+        }
+    }
+
+    fn update_permission_rule(&mut self, scope: permissions::Scope, allowed: Option<bool>) -> bool {
+        if let Err(error) = self.permissions.update(&self.storage, scope.clone(), allowed) {
+            self.error(format!("无法保存网站权限（{error}）"));
+            self.publish_permission_rules();
+            return false;
+        }
+        for page in self.pages.values()
+            .chain(self.peek.iter().map(|peek| &peek.page))
+            .chain(self.reader.iter().map(|reader| &reader.original)) {
+            page.permission_document.forget(&scope);
+        }
+        self.publish_permission_rules();
+        true
+    }
+
+    fn answer_permission(&mut self, id: &str, allowed: Option<bool>, remember: bool) {
+        self.sync_permissions();
+        if self.permission_state["permissionPrompt"]["id"].as_str() != Some(id)
+            || (allowed == Some(true) && self.permission_shown_at.elapsed() < Duration::from_millis(500)) {
+            return;
+        }
+        let Some(index) = self.permissions.waiting.iter().position(|request| request.id == id) else { return };
+        let request = self.permissions.waiting.remove(index).unwrap();
+        if let Some(allowed) = allowed {
+            let remembered = remember && request.scope.can_remember()
+                && self.update_permission_rule(request.scope.clone(), Some(allowed));
+            request.answer(allowed, !remembered);
+        }
+        self.sync_permissions();
+    }
+
     fn publish_default_browser(&self) {
         self.emit(json!({"type":"defaultBrowser","defaultBrowser":crate::default_browser::status()}));
     }
@@ -930,6 +1021,7 @@ impl App {
         register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.live_settings.clone(), true)?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
+            permission_document: Default::default(),
             resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
             view, url: url.clone(), clip: Rc::new(WindowClip::default()), save_path: Default::default(),
             thumbnail_version: 0, thumbnail_attempt: None, thumbnail_pending: false,
@@ -1459,7 +1551,13 @@ impl App {
         )?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let _ = crate::site::set_muted(&view, tab.muted);
+        let permission_document = Rc::new(permissions::Document::default());
+        let proxy = self.proxy.clone();
+        permissions::register(&view, tab.id.clone(), &permission_document, self.permissions.inbox.clone(), move || {
+            let _ = proxy.send_event(Event::PermissionsChanged);
+        })?;
         let page = Page {
+            permission_document,
             resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
             view,
             save_path,
@@ -1587,6 +1685,7 @@ impl App {
                     let _ = proxy.send_event(Event::PreviewLoad(key.clone(), epoch, url, matches!(event, PageLoadEvent::Started)));
                 }).build_as_child(self.window.as_ref().unwrap())?;
             crate::web_settings::apply(&view, &self.state.settings)?;
+            permissions::deny_preview_requests(&view)?;
             let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
             view.set_bounds(self.bounds(self.primary))?;
             view.load_url(&tab.url)?;
@@ -3043,6 +3142,7 @@ impl App {
                 self.publish_default_browser();
                 self.publish_sleep_state();
                 self.publish_reader();
+                self.publish_permission_rules();
                 if let Err(e) = self.sync() {
                     self.error(e);
                 }
@@ -3160,6 +3260,17 @@ impl App {
                 self.publish_downloads();
                 self.publish_peek();
                 self.publish_sleep_state();
+                self.sync_permissions();
+                self.emit(self.permission_state.clone());
+                self.publish_permission_rules();
+                return;
+            }
+            Command::PermissionAnswer { id, allowed, remember } => {
+                self.answer_permission(&id, allowed, remember);
+                return;
+            }
+            Command::PermissionRule { scope, allowed } => {
+                self.update_permission_rule(scope, allowed);
                 return;
             }
             Command::PopupState { popup } => {
@@ -3668,6 +3779,7 @@ impl ApplicationHandler<Event> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         match event {
+            Event::PermissionsChanged => {}, // Wake the event loop so about_to_wait reconciles once.
             Event::ExternalUrls(urls) => {
                 self.external_urls.extend(urls.into_iter().take(32usize.saturating_sub(self.external_urls.len())));
                 self.open_external_urls(Some(event_loop));
@@ -4186,6 +4298,7 @@ impl ApplicationHandler<Event> for App {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.sync_permissions();
         // Publish the latest state once after draining this turn's events.
         if self.pending_publish.replace(false) {
             let message = self.state_publisher.message(&self.state);
@@ -4211,6 +4324,8 @@ impl ApplicationHandler<Event> for App {
         event_loop.set_control_flow(due.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.permissions.inbox.take();
+        self.permissions.waiting.clear();
         self.page_save.take();
         self.glass_backdrop = None;
         self.flush_session();

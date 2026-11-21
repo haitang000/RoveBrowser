@@ -25,6 +25,7 @@ import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 import SpaceLookEditor from "./SpaceLookEditor.vue";
 import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } from "../../lib/space-look";
 import { paneDirection } from "../../lib/page-motion";
+import { permissions, type PermissionScope } from "../../lib/permissions";
 const props = defineProps<{ tabId: string; url: string }>();
 const b = useBrowser(),
   query = ref(""),
@@ -85,6 +86,13 @@ const searching = computed(() => !!query.value.trim());
 const words = computed(() => settingsSearchWords(query.value));
 function matches(...text: string[]) {
   return matchesSettingsSearch(words.value, ...text);
+}
+const visiblePermissionRules = computed(() => b.permissionRules.filter(([scope]) =>
+  matches("网站权限", permissions[scope.kind].name, scope.page, scope.requester, "site permissions"),
+));
+function setPermission(scope: PermissionScope, event: Event) {
+  const choice = (event.target as HTMLSelectElement).value;
+  b.send({ type: "permissionRule", scope, allowed: choice === "ask" ? null : choice === "allow" });
 }
 type Row = {
   id: string;
@@ -646,6 +654,29 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   <SearchHighlight :text="row.action!" :words="words" />
                 </button>
                 <span v-else class="setting-status"><SearchHighlight :text="row.action!" :words="words" /></span>
+              </div>
+            </section>
+            <section
+              v-if="b.native && (searching ? visiblePermissionRules.length : pane === 'privacy')"
+              class="settings-group"
+              aria-label="网站权限"
+            >
+              <h3>网站权限</h3>
+              <div v-if="!visiblePermissionRules.length" class="setting-row">
+                <div class="setting-description"><p>你还没有保存任何网站的权限选择。</p></div>
+              </div>
+              <div v-for="([scope, allowed], index) in visiblePermissionRules"
+                :key="JSON.stringify(scope)" class="setting-row">
+                <div class="setting-description permission-description">
+                  <label :for="`permission-rule-${tabId}-${index}`">{{ permissions[scope.kind].name }} · <bdi>{{ scope.requester }}</bdi></label>
+                  <p v-if="scope.page !== scope.requester">嵌入在 <bdi>{{ scope.page }}</bdi></p>
+                </div>
+                <select :id="`permission-rule-${tabId}-${index}`" :value="allowed ? 'allow' : 'block'"
+                  @change="setPermission(scope, $event)">
+                  <option value="ask">询问</option>
+                  <option value="allow">允许</option>
+                  <option value="block">阻止</option>
+                </select>
               </div>
             </section>
             <section

@@ -19,6 +19,11 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
     b.closeDownloads();
     return;
   }
+  if (e.key === "Escape" && b.permissionPrompt && !b.overlay) {
+    e.preventDefault();
+    b.send({ type: "permissionAnswer", id: b.permissionPrompt.id, allowed: null, remember: false });
+    return;
+  }
   if (e.key === "Escape" && b.findOpen) {
     e.preventDefault();
     b.closeFind();

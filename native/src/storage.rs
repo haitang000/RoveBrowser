@@ -16,6 +16,7 @@ impl Storage {
         std::fs::create_dir_all(path)?;
         let conn = Connection::open(path.join("era.sqlite"))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS session(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS history(url TEXT PRIMARY KEY,title TEXT NOT NULL,visited INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY,started INTEGER NOT NULL,json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS imported_logins(id TEXT PRIMARY KEY, origin TEXT NOT NULL, secret BLOB NOT NULL); CREATE INDEX IF NOT EXISTS imported_logins_origin ON imported_logins(origin);")?;
+        conn.execute("CREATE TABLE IF NOT EXISTS site_permissions(scope TEXT PRIMARY KEY, allowed INTEGER NOT NULL CHECK(allowed IN (0,1)))", [])?;
         Ok(Self { conn })
     }
     pub fn load(&self) -> Result<State, Box<dyn std::error::Error>> {

@@ -506,3 +506,4 @@
     flex-wrap: wrap;
   }
 }
+.permission-description { overflow-wrap: anywhere; }
