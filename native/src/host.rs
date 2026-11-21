@@ -4691,7 +4691,10 @@ impl ApplicationHandler<Event> for App {
                 let _ = self.proxy.send_event(Event::RestoreKeyboardFocus);
                 self.publish_default_browser();
             }
-            WindowEvent::Focused(false) => self.dismiss_tab_preview(),
+            WindowEvent::Focused(false) => {
+                self.emit(json!({"type":"windowDeactivated"}));
+                self.dismiss_tab_preview();
+            }
             WindowEvent::CloseRequested => {
                 if !self.confirm_quit() { return; }
                 self.save();

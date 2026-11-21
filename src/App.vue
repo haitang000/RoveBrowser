@@ -40,6 +40,18 @@ const shownSpace = computed(() => {
 const glassActive = computed(() => !b.onboardingOpen && isSeeThrough(shownSpace.value?.translucency) && glassAllowed.value);
 const painted = computed<ReturnType<typeof frameOf>>((previous) => shareSnapshot(previous, frameOf(shownSpace.value, b.state.theme, glassActive.value)));
 watch(() => b.onboardingOpen, (open) => { document.documentElement.dataset.onboarding = String(open); }, { immediate: true, flush: "sync" });
+function newGrainTexture() {
+  const seed = 1 + Math.floor(Math.random() * 2_147_483_646);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128">
+    <filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="${seed}" stitchTiles="stitch"/></filter>
+    <rect width="128" height="128" filter="url(#n)"/>
+  </svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+const grainTexture = ref(newGrainTexture());
+function refreshGrainTexture() { grainTexture.value = newGrainTexture(); }
+// The native window can stay active while focus moves between its WebViews.
+watch(() => b.windowDeactivations, refreshGrainTexture);
 const gradient = "linear-gradient(var(--frame-gradient-angle), var(--frame-gradient-start), var(--frame-gradient-end))";
 const shellStyle = computed<Record<string, string>>((previous) => shareSnapshot(previous, {
   ...(glassActive.value
@@ -56,6 +68,7 @@ const shellStyle = computed<Record<string, string>>((previous) => shareSnapshot(
       }
     : {}),
   "--grain-opacity": String(painted.value.grain * 0.18),
+  "--grain-image": `url("${grainTexture.value}")`,
 }));
 function frameColor(color: string) {
   const alpha = glassActive.value ? coverage(shownSpace.value?.translucency) : 1;
@@ -166,14 +179,20 @@ function dismissCommand() { if (b.native) b.commandOpen = false; }
 
 onMounted(async () => {
   window.addEventListener("keydown", key);
+  if (!b.native) window.addEventListener("blur", refreshGrainTexture);
   document.addEventListener("pointerdown", dismissCommand, true);
   reducedMotion.addEventListener("change", finishFrameAnimation);
   reducedTransparency.addEventListener("change", syncTransparency);
   if (b.native) document.documentElement.dataset.native = "true";
   if (b.native) {
-    // Wait for the mounted shell, fonts and a paint opportunity before revealing
-    // the native window. Its session and theme are already present on first render.
-    await document.fonts.ready;
+    // Load the visible texture along with the fonts before revealing the window.
+    if (painted.value.grain > 0) {
+      const image = new Image();
+      image.src = grainTexture.value;
+      await Promise.all([document.fonts.ready, image.decode().catch(() => {})]);
+    } else {
+      await document.fonts.ready;
+    }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => b.send({ type: "presented" }));
     });
@@ -181,6 +200,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", key);
+  window.removeEventListener("blur", refreshGrainTexture);
   document.removeEventListener("pointerdown", dismissCommand, true);
   reducedMotion.removeEventListener("change", finishFrameAnimation);
   reducedTransparency.removeEventListener("change", syncTransparency);

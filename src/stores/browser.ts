@@ -28,6 +28,7 @@ import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from ".
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const popupWindow = Boolean(window.__ERA_POPUP__);
+  const windowDeactivations = ref(0);
   const pendingNewTab: NewTabSettings[] = [];
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
@@ -612,6 +613,7 @@ export const useBrowser = defineStore("browser", () => {
     if (native && !popupWindow) send({ type: "downloadsPanel", open });
   });
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "windowDeactivated" && !popupWindow) windowDeactivations.value++;
     if (e.type === "permissionState") {
       permissionPrompt.value = e.permissionPrompt ?? undefined;
       permissionTabs.value = new Set(e.permissionTabs);
@@ -831,6 +833,7 @@ export const useBrowser = defineStore("browser", () => {
     onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,
     native,
     popupWindow,
+    windowDeactivations,
     contextMenu,
     popupArea,
     permissionPrompt,

@@ -186,6 +186,38 @@ for (const custom of [false, true]) {
   });
 }
 
+test("the shell renders fresh grain on startup and prepares fresh grain when the native window deactivates", async ({ page }) => {
+  const state = initialState();
+  Object.assign(state.spaces[0]!, { hue: 0.6, brightness: 0.12, grain: 0.8 });
+  await nativeShell(page, state);
+  const readGrain = () => page.locator(".browser-shell").evaluate(async (shell) => {
+    const style = getComputedStyle(shell, "::before");
+    const opacity = Number(style.opacity);
+    const image = new Image();
+    image.src = style.backgroundImage.slice(5, -2);
+    await image.decode();
+    const sample = document.createElement("canvas");
+    sample.width = sample.height = 8;
+    sample.getContext("2d")!.drawImage(image, 0, 0);
+    return { opacity, pixels: sample.toDataURL() };
+  });
+  const startup = await readGrain();
+  expect(startup.opacity).toBeCloseTo(0.144);
+
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  expect(await readGrain()).toEqual(startup);
+
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: "windowDeactivated" }));
+  const background = await readGrain();
+  expect(background.pixels).not.toBe(startup.pixels);
+  expect(background.opacity).toBe(startup.opacity);
+
+  await page.reload();
+  const reopened = await readGrain();
+  expect(reopened.pixels).not.toBe(background.pixels);
+  expect(reopened.opacity).toBe(startup.opacity);
+});
+
 test("glass gradients and grain retarget from the visible frame, including switches to and from solid colors", async ({ page }) => {
   const state = initialState();
   Object.assign(state.spaces[0]!, { hue: 0.6, brightness: 0.12, hue2: 0.9, brightness2: 0.6, angle: 90, translucency: 0.8, grain: 0.8 });
