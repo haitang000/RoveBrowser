@@ -7,40 +7,58 @@ import ExtensionIcon from "./ExtensionIcon.vue";
 
 const b = useBrowser();
 const selected = ref<ExtensionItem>();
+const bubble = ref<HTMLElement>();
 const panel = ref<HTMLElement>();
 const content = ref<HTMLElement>();
+const openMenu = computed(() => Boolean(b.extensionMenuAnchor && !b.extensions.popup && !b.quitOpen));
+const anchor = ref(b.extensionMenuAnchor);
 const viewport = ref({ width: innerWidth, height: innerHeight });
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const entering = ref(false);
+const revealingPage = ref(false);
+let pagePresented = false;
+let pageAnimation: Animation | undefined;
+const panelRadius = 20;
 const position = computed(() => {
-  const anchor = b.extensionMenuAnchor;
+  const trigger = anchor.value;
   const margin = 10;
   const pageSize = b.extensionView?.size;
   const showingPage = selected.value && b.extensionView?.phase === "ready";
   const panelWidth = showingPage ? Math.max(176, (pageSize?.[0] ?? 458) + 2) : 344;
   const panelHeight = showingPage ? Math.max((pageSize?.[1] ?? 470) + 50, 86) : 144;
   const width = Math.max(0, Math.min(panelWidth, viewport.value.width - margin * 2));
-  const top = Math.max(32, Math.min((anchor?.y ?? 24) + (anchor?.height ?? 0) + 8, viewport.value.height / 3));
-  const left = Math.max(margin, Math.min(
-    (anchor?.x ?? width) + (anchor?.width ?? 0) - width,
-    viewport.value.width - width - margin,
-  ));
+  const top = Math.max(32, Math.min((trigger?.y ?? 24) + (trigger?.height ?? 0) + 8, viewport.value.height / 3));
+  const triggerCenter = trigger ? trigger.x + trigger.width / 2 : width / 2;
+  const left = Math.max(margin, Math.min(triggerCenter - width + 30, viewport.value.width - width - margin));
+  const tip = Math.max(22, Math.min(triggerCenter - left, width - 22));
   return {
     width: width + "px",
     left: left + "px",
     top: top + "px",
     height: selected.value ? panelHeight + "px" : undefined,
     maxHeight: Math.max(0, viewport.value.height - top - margin) + "px",
+    "--bubble-tip": tip + "px",
+    "--extension-bubble-radius": panelRadius + "px",
   };
 });
 
 function bounds() {
-  const r = content.value?.getBoundingClientRect();
-  return r && r.width > 0 && r.height > 0
-    ? { x: r.x, y: r.y, width: r.width, height: r.height }
-    : undefined;
+  const card = bubble.value;
+  const shell = panel.value;
+  const slot = content.value;
+  if (!card || !shell || !slot || !slot.clientWidth || !slot.clientHeight) return;
+  // A CSS transform only moves the painted bubble. The child WebView uses its layout bounds.
+  return {
+    x: card.offsetLeft + shell.clientLeft + slot.offsetLeft,
+    y: card.offsetTop + shell.clientTop + slot.offsetTop + slot.clientTop,
+    width: slot.clientWidth,
+    height: slot.clientHeight,
+    corners: [0, 0, panelRadius - 1, panelRadius - 1],
+  };
 }
 
 async function open(item: ExtensionItem) {
-  if (!item.enabled || !item.hasPage || selected.value) return;
+  if (!openMenu.value || !item.enabled || !item.hasPage || selected.value) return;
   b.extensionView = undefined;
   selected.value = item;
   await nextTick();
@@ -56,18 +74,76 @@ function resize() {
   viewport.value = { width: innerWidth, height: innerHeight };
 }
 
-watch(position, () => {
+function syncPageBounds() {
+  if (!openMenu.value || entering.value || revealingPage.value || b.extensionView?.phase !== "ready") return;
   const rect = bounds();
-  if (rect && b.extensionMenuAnchor && b.extensionView?.phase === "ready") {
-    b.send({ type: "extensionViewBounds", rect });
+  if (rect) b.send({ type: "extensionViewBounds", rect });
+}
+
+function finishEnter() {
+  entering.value = false;
+  animatePage();
+}
+
+function animatePage() {
+  const card = bubble.value;
+  if (!openMenu.value || entering.value || pagePresented || b.extensionView?.phase !== "ready" || !card) return;
+  pagePresented = true;
+  if (b.settings.reduceMotion || reducedMotion.matches) {
+    syncPageBounds();
+    return;
   }
+  const animation = card.animate(
+    [{ transform: "translateY(-3px) scale(.97)" }, { transform: "none" }],
+    { duration: 180, easing: "cubic-bezier(.16, 1.6, .3, 1)" },
+  );
+  revealingPage.value = true;
+  pageAnimation = animation;
+  animation.onfinish = () => {
+    if (pageAnimation !== animation) return;
+    pageAnimation = undefined;
+    revealingPage.value = false;
+    syncPageBounds();
+  };
+}
+
+function cancelPageAnimation() {
+  pagePresented = false;
+  revealingPage.value = false;
+  pageAnimation?.cancel();
+  pageAnimation = undefined;
+}
+
+function beginLeave(layer: Element) {
+  (layer as HTMLElement).inert = true;
+  entering.value = false;
+  cancelPageAnimation();
+}
+
+watch(position, () => {
+  if (pagePresented) syncPageBounds();
+  else animatePage();
 }, { flush: "post" });
+
+function finishPageAnimation() {
+  if (b.settings.reduceMotion || reducedMotion.matches) pageAnimation?.finish();
+}
+watch(() => b.settings.reduceMotion, finishPageAnimation);
+
+watch(openMenu, (visible) => {
+  if (!visible) return;
+  anchor.value = b.extensionMenuAnchor;
+  selected.value = undefined;
+  b.extensionView = undefined;
+  b.send({ type: "extensionsList" });
+}, { immediate: true });
 
 function close() {
   b.extensionMenuAnchor = undefined;
 }
 
 async function back() {
+  cancelPageAnimation();
   b.send({ type: "extensionViewClose" });
   selected.value = undefined;
   b.extensionView = undefined;
@@ -86,15 +162,21 @@ function tileLabel(item: ExtensionItem) {
 }
 
 onMounted(() => {
-  b.send({ type: "extensionsList" });
   window.addEventListener("resize", resize);
+  reducedMotion.addEventListener("change", finishPageAnimation);
 });
-onBeforeUnmount(() => window.removeEventListener("resize", resize));
+onBeforeUnmount(() => {
+  cancelPageAnimation();
+  window.removeEventListener("resize", resize);
+  reducedMotion.removeEventListener("change", finishPageAnimation);
+});
 </script>
 
 <template>
-  <div class="extension-menu-layer" @click.self="close" @keydown.esc.stop.prevent="close">
-    <section ref="panel" class="extension-menu-panel" :style="position"
+  <Transition name="bubble" @before-enter="entering = true" @after-enter="finishEnter" @before-leave="beginLeave">
+  <div v-if="openMenu" class="extension-menu-layer" @click.self="close" @keydown.esc.stop.prevent="close">
+    <div ref="bubble" class="extension-menu-bubble anchored-bubble bubble-below bubble-surface" :style="position">
+    <section ref="panel" class="extension-menu-panel"
       role="dialog" :aria-label="selected?.name ?? b.t('扩展')" tabindex="-1">
       <header class="extension-menu-header">
         <button v-if="selected" type="button" class="icon-button" :aria-label="b.t('返回')" @click="back">
@@ -112,7 +194,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", resize));
         <p v-if="b.extensionView?.phase === 'error'" role="alert">
           {{ b.t('无法打开扩展页面') }}<small v-if="b.extensionView.message">{{ b.extensionView.message }}</small>
         </p>
-        <p v-else-if="b.extensionView?.phase !== 'ready'" role="status">{{ b.t('正在打开扩展…') }}</p>
+        <p v-else-if="entering || revealingPage || b.extensionView?.phase !== 'ready'" role="status">{{ b.t('正在打开扩展…') }}</p>
       </div>
       <div v-else class="extension-menu-list">
         <p v-if="!b.extensions.items && b.extensions.error" role="alert">{{ b.extensions.error }}</p>
@@ -133,22 +215,30 @@ onBeforeUnmount(() => window.removeEventListener("resize", resize));
         </div>
       </div>
     </section>
+    </div>
   </div>
+  </Transition>
 </template>
 
 <style scoped>
 .extension-menu-layer { position: fixed; inset: 0; z-index: 85; }
-.extension-menu-panel {
+.extension-menu-layer.bubble-leave-active { z-index: 0; }
+.extension-menu-bubble {
   position: absolute;
   display: flex;
+  border-radius: var(--extension-bubble-radius);
+}
+.extension-menu-panel {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--panel-edge);
-  border-radius: var(--radius-panel);
-  background: var(--panel);
+  border-radius: inherit;
   color: var(--ink);
-  box-shadow: 0 8px 30px var(--panel-shadow);
   outline: none;
 }
 .extension-menu-header {
@@ -190,11 +280,11 @@ onBeforeUnmount(() => window.removeEventListener("resize", resize));
 .extension-menu-tile[aria-disabled="true"] { color: var(--quiet); opacity: .62; cursor: default; }
 .extension-menu-tile > span:last-child { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; }
 .extension-menu-content {
+  position: relative;
   display: grid;
   flex: 1;
   place-items: center;
   min-height: 0;
-  margin: 0 0 5px;
   border-top: 1px solid var(--panel-edge);
   overflow: auto;
 }

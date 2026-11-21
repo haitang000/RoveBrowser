@@ -342,6 +342,7 @@ struct UndoBatch {
 struct ExtensionView {
     ticket: uuid::Uuid,
     view: WebView,
+    clip: WindowClip,
     fit_content: bool,
     ready: bool,
     visible: bool,
@@ -3041,7 +3042,7 @@ impl App {
             let _ = proxy.send_event(Event::ExtensionView(ticket, event));
         })?;
         self.extension_view = Some(ExtensionView {
-            ticket, view, fit_content: page.fit_content, ready: false,
+            ticket, view, clip: WindowClip::default(), fit_content: page.fit_content, ready: false,
             visible: false, size: None, next_measure: None,
         });
         Ok(())
@@ -3075,10 +3076,13 @@ impl App {
 
     fn resize_extension_view(&mut self, rect: Rect) {
         if !self.can_show_extension_view(rect) { return }
+        let Some(window) = &self.window else { return };
+        let scale = window.scale_factor();
         let bounds = self.bounds(rect);
         let Some(extension) = self.extension_view.as_mut() else { return };
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
             extension.view.set_bounds(bounds)?;
+            extension.clip.apply(extension.view.hwnd(), rect.corners, scale)?;
             if extension.ready && !extension.visible {
                 unsafe { SetWindowPos(extension.view.hwnd(), Some(HWND_TOP), 0, 0, 0, 0,
                     SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }

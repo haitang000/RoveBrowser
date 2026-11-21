@@ -104,7 +104,7 @@ onBeforeUnmount(() => {
   <ReaderControls />
   <SplitControls />
   <PermissionPrompt v-if="b.permissionPrompt" :key="b.permissionPrompt.id" :prompt="b.permissionPrompt" />
-  <ExtensionMenu v-if="b.extensionMenuAnchor && !b.extensions.popup && !b.quitOpen" />
+  <ExtensionMenu />
   <ExtensionInstallDialog v-if="b.extensions.popup && !b.quitOpen" />
   <QuitDialog v-if="b.quitOpen" />
 </template>

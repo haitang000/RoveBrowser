@@ -38,6 +38,15 @@
   clip-path: path("M 4 0 H 28 V 10 H 26 Q 23 10 21 12.5 L 15.2 18 Q 14 19.3 12.8 18 L 8.5 13 C 7.1 11.2 6.6 7.2 5 6 C 3.5 4.9 3.5 2 4 0 Z");
   pointer-events: none;
 }
+.anchored-bubble.bubble-below {
+  transform-origin: var(--bubble-tip) -8px;
+  --bubble-enter-y: -6px;
+  --bubble-exit-y: -4px;
+}
+.anchored-bubble.bubble-below::after {
+  top: -10px;
+  transform: scaleY(-1);
+}
 .downloads-panel {
   position: absolute;
   display: flex;
