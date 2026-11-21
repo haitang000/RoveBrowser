@@ -4,6 +4,7 @@ import { favoriteUrl, MAX_FAVORITES } from "./favorites";
 import { sameOrigin } from "./favicon";
 import { normalizeSettingsUrl } from "./settings";
 import { nowSeconds } from "./tab-meta";
+import { movePinEntries, pinFolderById, pinFolderName } from "./pin-folders";
 
 export function samePinnedUrl(a: string, b: string) {
   const key = (input: string) => {
@@ -154,6 +155,30 @@ function moveBefore(items: Favorite[], id: string, before: string, after = false
   const targets = items.flatMap((f, index) => f.id === before || f.id === targetPartner ? [index] : []);
   items.splice(after ? targets.at(-1)! + 1 : targets[0]!, 0, ...moving);
 }
+
+function placePin(s: BrowserState, id: string, spaceId: string, folderId?: string, before?: string, after = false) {
+  if (!s.spaces.some((space) => space.id === spaceId)) throw Error("工作区不存在");
+  const layout = s.pinLayouts?.[spaceId];
+  const folder = layout?.folders.find((folder) => folder.id === folderId);
+  const movingFolder = layout?.folders.some((folder) => folder.id === id);
+  if (folderId && !folder) throw Error("文件夹不存在");
+  if (movingFolder && folder) throw Error("请选择固定区中的位置");
+  const entries = folder?.pins ?? layout?.root ?? s.pins!.filter((pin) => pin.spaceId === spaceId).map((pin) => pin.id);
+  if (before && !entries.includes(before)) throw Error("目标位置已变化，请重试");
+  const anchor = before ? group(s, before).map((pin) => pin.id) : [];
+  if (before && !anchor.length) anchor.push(before);
+  if (movingFolder && layout) {
+    movePinEntries(layout, [id], undefined, anchor, after);
+    return;
+  }
+  const saved = bookmarkId(s, id);
+  const pin = saved && savedPage(s, saved)?.spaceId === spaceId ? saved : keep(s, id, false, spaceId);
+  if (layout) movePinEntries(layout, group(s, pin).map((pin) => pin.id), folderId, anchor, after);
+  else if (before) moveBefore(s.pins!, pin, before, after);
+  const active = s.tabs.find((tab) => tab.id === s.activeTab);
+  if (active) s.activeSpace = active.spaceId;
+}
+
 export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string) => void): boolean {
   const id = String(c.id || s.activeTab);
   switch (c.type) {
@@ -212,13 +237,43 @@ export function bookmarkCommand(s: BrowserState, c: Command, close: (id: string)
     }
     case "bookmarkUnpin": unpin(s, id, c.spaceId as string | undefined); break;
     case "bookmarkPin": keep(s, id, false, c.spaceId as string | undefined); break;
+    case "pinFolderCreate": {
+      const spaceId = String(c.spaceId);
+      const name = pinFolderName(c.name);
+      if (!s.spaces.some((space) => space.id === spaceId)) throw Error("工作区不存在");
+      const layouts = s.pinLayouts ??= {};
+      const layout = layouts[spaceId] ??= { root: s.pins!.filter((pin) => pin.spaceId === spaceId).map((pin) => pin.id), folders: [] };
+      const id = crypto.randomUUID();
+      layout.folders.push({ id, name, collapsed: false, pins: [] });
+      layout.root.push(id);
+      break;
+    }
+    case "pinFolderRename":
+    case "pinFolderCollapse":
+    case "pinFolderRemove": {
+      const layout = s.pinLayouts?.[String(c.spaceId)];
+      const folder = layout?.folders.find((folder) => folder.id === id);
+      if (!layout || !folder) throw Error("文件夹不存在");
+      if (c.type === "pinFolderRename") folder.name = pinFolderName(c.name);
+      else if (c.type === "pinFolderCollapse") folder.collapsed = c.collapsed === true;
+      else {
+        const at = layout.root.indexOf(id);
+        layout.root.splice(at, 1, ...folder.pins);
+        layout.folders.splice(layout.folders.indexOf(folder), 1);
+      }
+      break;
+    }
+    case "pinPlace":
+      placePin(s, id, String(c.spaceId), c.folderId as string | undefined, c.before as string | undefined, c.after === true);
+      break;
     case "favoriteTab": { const mark = keep(s, id, true); if (c.before) moveBefore(s.favorites, mark, String(c.before)); break; }
     case "pin": if (bookmarkId(s, id)) unpin(s, id); else keep(s, id, false); break;
     case "move": if (!bookmarkId(s, id)) return false; keep(s, id, false, String(c.spaceId)); activateTab(s, s.tabs.find((t) => t.id === s.activeTab)); break;
     case "reorder": {
       const target = bookmarkId(s, String(c.before));
       if (target && s.pins!.some((f) => f.id === target)) {
-        const mark = keep(s, id, false, savedPage(s, target)!.spaceId); moveBefore(s.pins!, mark, target, c.after === true);
+        const spaceId = savedPage(s, target)!.spaceId!;
+        placePin(s, id, spaceId, pinFolderById(s.pinLayouts?.[spaceId]).get(target), target, c.after === true);
       } else {
         const mark = bookmarkId(s, id);
         if (mark) openBookmark(s, mark);

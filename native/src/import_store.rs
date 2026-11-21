@@ -104,6 +104,7 @@ impl Storage {
         }
         next.onboarding.imports.retain(|r| r.id != report.id);
         next.onboarding.imports.push(report);
+        next.sync_pin_layouts();
         tx.execute("INSERT INTO session(id,json) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET json=excluded.json", [serde_json::to_string(&next).map_err(|e| e.to_string())?]).map_err(|_| "会话保存失败，本次数据未写入".to_string())?;
         tx.commit()
             .map_err(|_| "无法完成导入，本次数据未写入".to_string())?;

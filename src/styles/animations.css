@@ -82,6 +82,7 @@ body > .tab-drag-favorite {
   border-radius: 8px;
   overflow: hidden;
 }
+body > .tab-drag-folder { padding: 0 3px; }
 .tab-drag-item .tab-picture,
 .tab-drag-item .tab-title {
   opacity: 1 !important;

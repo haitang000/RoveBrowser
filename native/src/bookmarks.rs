@@ -113,7 +113,7 @@ impl State {
                 .and_then(|t| t.bookmark_id.clone())
         })
     }
-    fn group(&self, id: &str) -> Vec<String> {
+    pub(crate) fn group(&self, id: &str) -> Vec<String> {
         let other = self.bookmark(id).and_then(|f| f.split_with.as_ref());
         self.pins
             .iter()
@@ -295,7 +295,7 @@ impl State {
             }
         }
     }
-    fn keep_tab(
+    pub(crate) fn keep_tab(
         &mut self,
         id: &str,
         favorite: bool,
@@ -636,8 +636,8 @@ impl State {
                         .bookmark(&target)
                         .and_then(|f| f.space_id.clone())
                         .unwrap();
-                    let mark = self.keep_tab(id, false, Some(&space))?;
-                    move_before(&mut self.pins, &mark, &target, *after);
+                    let folder = self.pin_layouts.get(&space).and_then(|layout| layout.folder_for(&target));
+                    self.place_pin(id, &space, folder.as_deref(), Some(&target), *after)?;
                 } else {
                     let mark = self.bookmark_id(id);
                     if let Some(mark) = &mark {
@@ -675,7 +675,7 @@ impl State {
     }
 }
 
-fn move_before(items: &mut Vec<Favorite>, id: &str, before: &str, after: bool) {
+pub(crate) fn move_before(items: &mut Vec<Favorite>, id: &str, before: &str, after: bool) {
     if id == before {
         return;
     }

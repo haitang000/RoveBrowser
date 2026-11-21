@@ -5,7 +5,7 @@ export interface TabRow {
   panes?: [Tab, Tab];
 }
 
-export function sidebarTabRows(pins: Tab[], tabs: Tab[], favorites: Tab[], activeId: string) {
+export function sidebarTabRows(pins: Tab[], tabs: Tab[], favorites: Tab[], activeId: string, folders?: ReadonlyMap<string, string>) {
   const visible = [...pins, ...tabs];
   const pages = [...visible, ...favorites];
   const byId = new Map(pages.map((tab) => [tab.id, tab]));
@@ -19,6 +19,7 @@ export function sidebarTabRows(pins: Tab[], tabs: Tab[], favorites: Tab[], activ
     const secondary = primary && byId.get(primary.splitWith ?? "");
     if (!primary || !secondary || primary === secondary ||
         Boolean(primary.unloaded) !== Boolean(secondary.unloaded) ||
+        folders?.get(primary.bookmarkId ?? primary.id) !== folders?.get(secondary.bookmarkId ?? secondary.id) ||
         claimed.has(primary.id) || claimed.has(secondary.id)) continue;
 
     const candidates = [primary, secondary].filter((tab) => visibleIds.has(tab.id));

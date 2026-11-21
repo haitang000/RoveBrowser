@@ -30,7 +30,7 @@ export const useBrowser = defineStore("browser", () => {
   const popupWindow = Boolean(window.__ERA_POPUP__);
   const windowDeactivations = ref(0);
   const pendingNewTab: NewTabSettings[] = [];
-  const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite }>();
+  const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite; pinFolder?: { spaceId: string; id?: string } }>();
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
   const permissionPrompt = ref<PermissionPrompt>();
   const permissionTabs = ref(new Set<string>());

@@ -8,6 +8,7 @@ import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 import Favorites from "./Favorites.vue";
 import TabMenu from "./TabMenu.vue";
+import PinFolderMenu from "./PinFolderMenu.vue";
 import SpaceDeck from "./SpaceDeck.vue";
 import WorkspaceSwitcher from "./WorkspaceSwitcher.vue";
 import SpaceCreatePage from "./SpaceCreatePage.vue";
@@ -54,6 +55,6 @@ function showMenu(e: MouseEvent, tab: Tab) {
     <Favorites />
     <SpaceDeck ref="spaceDeck" :blocked="b.overlay || Boolean(b.peek) || Boolean(b.contextMenu)" @menu="showMenu" />
     </template>
-    <WorkspaceSwitcher /><TabMenu v-if="!b.native" />
+    <WorkspaceSwitcher /><TabMenu v-if="!b.native" /><PinFolderMenu v-if="!b.native" />
   </aside>
 </template>

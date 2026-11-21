@@ -131,6 +131,8 @@ pub struct State {
     pub favorites: Vec<Favorite>,
     #[serde(default)]
     pub pins: Vec<Favorite>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub pin_layouts: std::collections::BTreeMap<String, crate::pin_folders::PinLayout>,
     #[serde(default)]
     pub library_version: u8,
     /// Bumped when the cached-icon pipeline changes; older icons are fetched
@@ -338,6 +340,25 @@ pub enum Command {
         id: String,
         #[serde(rename = "spaceId")]
         space_id: Option<String>,
+    },
+    #[serde(rename = "pinFolderCreate")]
+    CreatePinFolder { #[serde(rename = "spaceId")] space_id: String, name: String },
+    #[serde(rename = "pinFolderRename")]
+    RenamePinFolder { #[serde(rename = "spaceId")] space_id: String, id: String, name: String },
+    #[serde(rename = "pinFolderCollapse")]
+    CollapsePinFolder { #[serde(rename = "spaceId")] space_id: String, id: String, collapsed: bool },
+    #[serde(rename = "pinFolderRemove")]
+    RemovePinFolder { #[serde(rename = "spaceId")] space_id: String, id: String },
+    #[serde(rename = "pinPlace")]
+    PlacePin {
+        id: String,
+        #[serde(rename = "spaceId")]
+        space_id: String,
+        #[serde(rename = "folderId")]
+        folder_id: Option<String>,
+        before: Option<String>,
+        #[serde(default)]
+        after: bool,
     },
     #[serde(rename = "favoriteTab")]
     FavoriteTab { id: String, before: Option<String> },
@@ -684,6 +705,7 @@ impl Default for State {
             active_tab: String::new(),
             favorites,
             pins: vec![],
+            pin_layouts: Default::default(),
             library_version: 0,
             icon_version: 0,
             closed: vec![],
@@ -976,6 +998,7 @@ impl State {
             self.active_space = self.spaces[0].id.clone()
         }
         self.repair_bookmarks();
+        self.sync_pin_layouts();
         let ids: Vec<_> = self.tabs.iter().map(|t| t.id.clone()).collect();
         let now = now_secs();
         for t in &mut self.tabs {
@@ -1006,7 +1029,8 @@ impl State {
         self.remember_active();
     }
     pub fn apply(&mut self, c: &Command) -> Result<(), String> {
-        if self.apply_bookmark_command(c)? {
+        if self.apply_pin_folder_command(c)? || self.apply_bookmark_command(c)? {
+            self.sync_pin_layouts();
             self.remember_active();
             return Ok(());
         }
@@ -1051,6 +1075,7 @@ impl State {
                     let removed: Vec<_> = self.tabs.iter().filter(|t| &t.space_id == id && !self.favorites.iter().any(|f| Some(&f.id) == t.bookmark_id.as_ref())).map(|t| t.id.clone()).collect();
                     self.spaces.retain(|s| &s.id != id);
                     self.pins.retain(|p| p.space_id.as_ref() != Some(id));
+                    self.pin_layouts.remove(id);
                     if &self.active_space == id { self.active_space = self.spaces[0].id.clone(); }
                     for t in &mut self.tabs {
                         if &t.space_id == id {

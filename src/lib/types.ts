@@ -74,6 +74,16 @@ export interface Favorite {
   splitWith?: string;
   spaceId?: string;
 }
+export interface PinFolder {
+  id: string;
+  name: string;
+  collapsed: boolean;
+  pins: string[];
+}
+export interface PinLayout {
+  root: string[];
+  folders: PinFolder[];
+}
 export interface BrowserState {
   /** Absent in existing profiles: onboarding is already complete. */
   onboarding?: import("./onboarding").OnboardingState;
@@ -83,6 +93,7 @@ export interface BrowserState {
   activeTab: string;
   favorites: Favorite[];
   pins?: Favorite[];
+  pinLayouts?: Record<string, PinLayout>;
   libraryVersion?: number;
   closed: Tab[];
   theme: "light" | "dark";

@@ -8,6 +8,7 @@ import PinnedTabs from "./PinnedTabs.vue";
 import TabList from "./TabList.vue";
 import { tabIsFaded } from "../../lib/tab-meta";
 import { sidebarTabRows } from "../../lib/tab-rows";
+import { pinFolderById } from "../../lib/pin-folders";
 
 const props = defineProps<{ spaceId: string; savedScroll: number }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab]; scroll: [id: string, top: number] }>();
@@ -21,7 +22,8 @@ const pins = computed<Tab[]>((previous) => shareSnapshot(previous, (b.state.pins
     const live = b.liveBookmarks.get(f.id);
     return { ...(live || { id: f.id, spaceId: props.spaceId, url: f.url, splitWith: f.splitWith, unloaded: true }), title: f.title, favicon: live?.favicon || f.favicon, pinned: true, bookmarkId: f.id };
   })));
-const rows = computed(() => sidebarTabRows(pins.value, tabs.value, favorites.value, b.state.activeTab));
+const folders = computed(() => pinFolderById(b.state.pinLayouts?.[props.spaceId]));
+const rows = computed(() => sidebarTabRows(pins.value, tabs.value, favorites.value, b.state.activeTab, folders.value));
 // The scrollbar is ambient: it only paints while the list is actually moving.
 // Restoring a pane's scroll position on mount is not a scroll the user made, so
 // it must not flash the bar.
@@ -116,7 +118,7 @@ function clickClear() {
 
 <template>
   <section ref="list" class="space-list" :class="{ scrolling }" :data-space-id="spaceId" :aria-label="space?.name" @scroll="onScroll">
-    <PinnedTabs :rows="rows.pins" :doomed-ids="doomedIds" @menu="(e, t) => emit('menu', e, t)" />
+    <PinnedTabs :space-id="spaceId" :rows="rows.pins" :doomed-ids="doomedIds" @menu="(e, t) => emit('menu', e, t)" />
     <div class="section-label">
       <span>Tabs</span>
       <span class="section-label-end">

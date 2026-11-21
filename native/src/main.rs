@@ -25,6 +25,7 @@ mod instance;
 mod layout;
 mod passwords;
 mod permissions;
+mod pin_folders;
 mod preview;
 mod reader;
 mod resize_motion;

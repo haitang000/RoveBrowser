@@ -12,6 +12,7 @@ import { paintKeys } from "./space-look";
 import { ONBOARDING_STEPS, saveOnboardingSites } from "./onboarding";
 import { normalizeSidebarWidth } from "./sidebar-width";
 import { newTabSettings } from "./new-tab";
+import { syncPinLayouts } from "./pin-folders";
 export function initialState(): BrowserState {
   return upgradeLibrary({
     spaces: [
@@ -98,6 +99,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
     activateTab(s, t);
   };
   if (bookmarkCommand(s, c, (id) => { Object.assign(s, reduce(s, { type: "close", id })); })) {
+    syncPinLayouts(s);
     rememberActive(s);
     return { ...s };
   }
@@ -143,6 +145,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       if (s.spaces.length <= 1) throw Error("至少保留一个工作区");
       const removed = new Set(s.tabs.filter((t) => t.spaceId === c.id && !s.favorites.some((f) => f.id === t.bookmarkId)).map((t) => t.id));
       s.spaces = s.spaces.filter((space) => space.id !== c.id); s.pins = s.pins?.filter((p) => p.spaceId !== c.id);
+      if (s.pinLayouts) delete s.pinLayouts[String(c.id)];
       if (s.activeSpace === c.id) s.activeSpace = s.spaces[0]!.id;
       s.tabs = s.tabs.filter((t) => !removed.has(t.id));
       s.tabs.forEach((t) => { if (t.spaceId === c.id) t.spaceId = s.activeSpace; if (t.splitWith && removed.has(t.splitWith)) delete t.splitWith; });

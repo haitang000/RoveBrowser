@@ -6,6 +6,7 @@ import Desk from "./Desk.vue";
 import SettingsPanel from "./SettingsPanel.vue";
 import Peek from "./Peek.vue";
 import TabMenu from "./TabMenu.vue";
+import PinFolderMenu from "./PinFolderMenu.vue";
 import FavoriteMenu from "./FavoriteMenu.vue";
 import TabPreviewCard from "./TabPreviewCard.vue";
 import ErrorToast from "./ErrorToast.vue";
@@ -97,7 +98,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
-  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><BrowserMenu /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
+  <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><PinFolderMenu /><BrowserMenu /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
   <ReaderControls />
   <SplitControls />
   <PermissionPrompt v-if="b.permissionPrompt" :key="b.permissionPrompt.id" :prompt="b.permissionPrompt" />

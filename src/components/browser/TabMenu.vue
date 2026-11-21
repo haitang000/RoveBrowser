@@ -12,10 +12,12 @@ const b = useBrowser();
 const menu = computed(() => b.contextMenu?.tab ? { ...b.contextMenu, tab: b.contextMenu.tab } : undefined);
 const edit = ref(false), editTitle = ref(""), editUrl = ref("");
 const rename = ref(false), renameTitle = ref("");
+const movingToFolder = ref(false);
 const panel = ref<HTMLElement>();
 watch(menu, async (value) => {
   edit.value = false;
   rename.value = false;
+  movingToFolder.value = false;
   if (value) { await nextTick(); panel.value?.querySelector<HTMLButtonElement>("button")?.focus(); }
 });
 function bookmark() { return menu.value?.tab.bookmarkId ? savedPage(b.state, menu.value.tab.bookmarkId) : undefined; }
@@ -42,6 +44,9 @@ const title = computed(() =>
       : "",
 );
 const canRename = computed(() => Boolean(liveTab.value && !liveTab.value.bookmarkId));
+const folders = computed(() => b.state.pinLayouts?.[menu.value?.tab.spaceId ?? ""]?.folders ?? []);
+const currentFolder = computed(() => folders.value.find((folder) => folder.pins.includes(menu.value?.tab.bookmarkId ?? "")));
+const otherFolders = computed(() => folders.value.filter((folder) => folder !== currentFolder.value));
 const hasCustomTitle = computed(() => Boolean(liveTab.value?.customTitle));
 const othersCount = computed(() =>
   menu.value ? tabsToDismiss(b.state, "others", menu.value.tab.id).length : 0,
@@ -67,6 +72,14 @@ function resetRename() {
   if (!liveTab.value) return;
   b.send({ type: "renameTab", id: liveTab.value.id, title: "" });
   closeMenu();
+}
+async function chooseFolder() {
+  movingToFolder.value = true;
+  await nextTick();
+  panel.value?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+}
+function moveToFolder(folderId?: string) {
+  if (menu.value) act("pinPlace", { spaceId: menu.value.tab.spaceId, folderId });
 }
 function copyLink() {
   const url = menu.value?.tab.url;
@@ -113,6 +126,12 @@ function act(type: string, extra = {}) {
             <label>标签名称<input v-model="renameTitle" aria-label="标签名称" maxlength="80" placeholder="留空恢复网页标题" /></label>
             <button class="primary-button" type="submit">保存名称</button>
           </form>
+          <template v-else-if="movingToFolder">
+            <div class="menu-label">移至文件夹</div>
+            <button v-for="folder in otherFolders" :key="folder.id" role="menuitem" @click="moveToFolder(folder.id)">
+              <Icon name="folder" />{{ folder.name }}
+            </button>
+          </template>
           <template v-else>
           <div class="menu-label menu-tab-title">{{ title }}</div>
           <button role="menuitem" @click="act('pin')">
@@ -142,6 +161,12 @@ function act(type: string, extra = {}) {
             "
           >
             <Icon name="split" />在当前网页旁分屏
+          </button>
+          <button v-if="isWeb && otherFolders.length" role="menuitem" @click="chooseFolder">
+            <Icon name="folder" />移至文件夹…
+          </button>
+          <button v-if="currentFolder" role="menuitem" @click="moveToFolder()">
+            <Icon name="folder" />移出文件夹
           </button>
           <template v-if="canRename">
             <button role="menuitem" @click="beginRename">
