@@ -22,6 +22,78 @@ test("new tab follows the reference layout and opens a suggested site", async ({
   await expect(page.locator(".preview-page")).toContainText("https://github.com/");
 });
 
+test("edit moves the original widgets and fades in the pegboard before the catalog slides in", async ({ page }) => {
+  const transition = await page.getByRole("button", { name: "编辑小组件", exact: true }).evaluate(async (button) => {
+    const card = document.querySelector(".nt-widget-grid article")!;
+    const pegboard = document.querySelector(".nt-pegboard")!;
+    const catalog = document.querySelector(".nt-discover")!;
+    const home = card.getBoundingClientRect().toJSON();
+    getComputedStyle(pegboard).opacity;
+    getComputedStyle(catalog).transform;
+    button.click();
+    await new Promise(requestAnimationFrame);
+    const [move] = card.getAnimations();
+    const [fade] = pegboard.getAnimations();
+    const [slide] = catalog.getAnimations();
+    move.pause();
+    move.currentTime = 0;
+    const start = card.getBoundingClientRect().toJSON();
+    move.finish();
+    return {
+      home, start, end: card.getBoundingClientRect().toJSON(),
+      easing: [move, fade, slide].map(({ effect }) => {
+        const frames = effect as KeyframeEffect;
+        return [frames.getTiming().easing, ...frames.getKeyframes().map(frame => frame.easing)];
+      }),
+      delays: [move, fade, slide].map(({ effect }) => effect!.getTiming().delay),
+      fadeDuration: Number(fade.effect!.getTiming().duration),
+    };
+  });
+  expect(transition.start.x).toBeCloseTo(transition.home.x, 1);
+  expect(transition.start.y).toBeCloseTo(transition.home.y, 1);
+  expect(transition.end.y).not.toBeCloseTo(transition.home.y, 1);
+  for (const easing of transition.easing) expect(easing).toContainEqual(expect.stringContaining("cubic-bezier"));
+  expect(transition.delays[0]).toBeLessThan(transition.delays[1]);
+  expect(transition.delays[1] + transition.fadeDuration).toBeLessThanOrEqual(transition.delays[2]);
+});
+
+test("the selected widget flies from its preview to its final grid slot below the fold", async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 720 });
+  await page.getByRole("button", { name: "编辑小组件", exact: true }).click();
+  const add = page.getByRole("button", { name: "添加便签", exact: true });
+  await expect(page.locator(".nt-discover")).toHaveCSS("transform", "none");
+  await add.scrollIntoViewIfNeeded();
+
+  const flight = await add.evaluate(async (button) => {
+    const preview = button.closest(".nt-catalog-card")!.querySelector(".nt-preview-notes")!;
+    const source = preview.getBoundingClientRect().toJSON();
+    button.click();
+    await new Promise(requestAnimationFrame);
+    const card = document.querySelector(".nt-flight-card")!;
+    const [animation] = card.getAnimations();
+    animation.pause();
+    animation.currentTime = 0;
+    const start = card.getBoundingClientRect().toJSON();
+    animation.play();
+    return { source, start, text: card.textContent, easing: animation.effect!.getTiming().easing };
+  });
+  for (const dimension of ["x", "y", "width", "height"]) {
+    expect(flight.start[dimension]).toBeCloseTo(flight.source[dimension], 1);
+  }
+  expect(flight.text).toContain("Notes");
+  expect(flight.easing).toContain("cubic-bezier");
+  await expect(page.locator(".nt-flight-card")).toHaveCount(0);
+  await expect(page.locator('.nt-widget-grid article[aria-label="便签"]')).toBeInViewport({ ratio: 0.9 });
+  await expect(page.getByRole("button", { name: "完成编辑", exact: true })).toBeInViewport();
+
+  await page.getByRole("button", { name: "完成编辑", exact: true }).click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "编辑小组件", exact: true }).click();
+  await add.click();
+  await expect(page.locator(".nt-flight-card")).toHaveCount(0);
+  await expect(page.locator('.nt-widget-grid article[aria-label="便签"]').last()).toBeInViewport();
+});
+
 test("discover adds, resizes, sorts and removes widgets and preserves notes on reload", async ({ page }) => {
   await page.getByRole("button", { name: "编辑小组件", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Discover" })).toBeFocused();
@@ -44,7 +116,7 @@ test("discover adds, resizes, sorts and removes widgets and preserves notes on r
   await expect.poll(() => page.locator("article.nt-widget").evaluateAll((items) => items.map((item) => item.getAttribute("aria-label")))).toEqual(["时钟", "便签", "日历"]);
   await page.getByRole("button", { name: "编辑小组件", exact: true }).click();
   await page.setViewportSize({ width: 1826, height: 1344 });
-  await page.locator(".new-tab-page").screenshot({ path: "test-results/new-tab-discover.png" });
+  await page.locator(".new-tab-page").screenshot({ path: "test-results/new-tab-discover.png", animations: "disabled" });
 });
 
 test("GitHub contribution widget validates usernames, retries failures and renders real response data", async ({ page }) => {

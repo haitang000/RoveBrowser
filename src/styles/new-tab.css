@@ -7,15 +7,18 @@
   --nt-soft: #f7f7f8;
   --nt-blue: #4062ff;
   --nt-grid-dot: #fff;
+  --nt-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --nt-board-delay: 28ms;
+  --nt-board-duration: 190ms;
   height: 100%;
   width: 100%;
   display: block;
   position: relative;
-  overflow: auto;
+  overflow: hidden;
+  isolation: isolate;
   container-type: inline-size;
   color: var(--nt-ink);
   background: var(--nt-bg);
-  overscroll-behavior: contain;
 }
 [data-theme="dark"] .new-tab-page {
   --nt-ink: #eeeff4;
@@ -109,7 +112,7 @@
 .nt-widget:not(.nt-widget-wide) .nt-contribution-legend > span:first-child { display: none; }
 
 /* Home keeps the greeting and suggestions still; only the widget cards scroll. */
-.new-tab-page:not(.nt-editing) { overflow: hidden; }
+.nt-layout { position: relative; height: 100%; overflow: hidden; overscroll-behavior: contain; }
 .new-tab-page:not(.nt-editing) .nt-canvas { height: 100%; min-height: 0; }
 .new-tab-page:not(.nt-editing) .nt-home { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .new-tab-page:not(.nt-editing) .nt-greeting { flex-shrink: 0; }
@@ -131,8 +134,32 @@
 }
 
 /* Edit mode uses the same cards and data on a quiet dot-grid canvas. */
-.nt-editing { display: grid; grid-template-columns: 42% minmax(0, 1fr); overflow: auto; }
-.nt-discover { min-width: 0; padding: 40px clamp(22px, 3.5cqw, 54px); overflow-y: auto; overscroll-behavior: contain; background: var(--nt-bg); border-right: 1px solid var(--nt-border); }
+.nt-pegboard {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle, var(--nt-grid-dot) 2px, transparent 2.5px) 0 0 / 16px 16px var(--nt-soft);
+  opacity: 0;
+  transition: opacity var(--nt-board-duration) var(--nt-ease);
+}
+.nt-editing .nt-pegboard { opacity: 1; transition-delay: var(--nt-board-delay); }
+.nt-editing .nt-layout { display: grid; grid-template-columns: 42% minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow-y: auto; overflow-x: hidden; }
+.nt-discover {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 2;
+  width: 42%;
+  min-width: 0;
+  padding: 40px clamp(22px, 3.5cqw, 54px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--nt-bg);
+  border-right: 1px solid var(--nt-border);
+  visibility: hidden;
+  transform: translateX(-100%);
+  transition: transform 240ms var(--nt-ease), visibility 0s 240ms;
+}
+.nt-editing .nt-discover { position: relative; inset: auto; width: auto; visibility: visible; transform: none; transition-delay: calc(var(--nt-board-delay) + var(--nt-board-duration)), 0s; }
 .nt-discover > h1 { margin: 0 0 42px; font-size: clamp(32px, 4.2cqw, 54px); letter-spacing: -1.7px; font-weight: 400; line-height: 1.1; }
 .nt-discover > h1:focus { outline: none; }
 .nt-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
@@ -162,7 +189,7 @@
 .nt-name-form label { color: var(--nt-muted); font-size: 12px; }
 .nt-name-form input { background: var(--nt-soft); color: var(--nt-ink); font: inherit; border: 1px solid var(--nt-border); border-radius: 8px; padding: 10px 12px; width: 100%; min-width: 0; }
 .nt-limit { font-size: 12px; color: var(--nt-muted); margin: 16px 0 0; }
-.nt-editing .nt-canvas { min-height: 0; overflow: auto; overscroll-behavior: contain; background-color: var(--nt-soft); background-image: radial-gradient(circle, var(--nt-grid-dot) 2px, transparent 2.5px); background-size: 16px 16px; padding: clamp(126px, 18.5cqw, 340px) clamp(20px, 5.2cqw, 90px) 60px; }
+.nt-editing .nt-canvas { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: clamp(126px, 18.5cqw, 340px) clamp(20px, 5.2cqw, 90px) 60px; }
 .nt-editing .nt-columns { display: block; }
 .nt-editing .nt-home { max-width: 525px; }
 .nt-done-button { position: absolute; display: block; z-index: 3; top: 24px; right: 28px; padding: 11px 24px; border-radius: 30px; background: var(--nt-blue); color: #fff; font-size: 22px; letter-spacing: -0.5px; transition: transform 160ms ease-out; }
@@ -180,6 +207,9 @@
 .nt-editing .nt-widget:not(.nt-widget-empty) { padding-top: 42px; }
 .nt-widget-dragging { opacity: 0.45; }
 .nt-widget-drop { outline: 2px solid var(--nt-blue); outline-offset: 3px; }
+.nt-flight-layer { position: absolute; z-index: 4; inset: 0; overflow: hidden; pointer-events: none; }
+.nt-flight-card { position: absolute; transform-origin: top left; }
+.nt-widget-placing { opacity: 0; }
 .nt-sr-only { position: absolute; height: 1px; width: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .nt-edit-button:active, .nt-add-button:active { transform: scale(0.97); }
 .nt-done-button:active { transform: scale(0.97); }
@@ -228,7 +258,8 @@
   .nt-clock > span { font-size: 19px; }
   .nt-widget-wide { min-height: 190px; }
   .nt-widget:not(.nt-widget-wide) { min-height: 230px; }
-  .nt-discover { grid-column: 1 / -1; padding: 28px 26px; overflow: visible; border-right: 0; }
+  .nt-editing .nt-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .nt-discover { inset: 0 0 auto; width: 100%; padding: 28px 26px; overflow: visible; border-right: 0; }
   .nt-discover > h1 { margin-bottom: 26px; font-size: 36px; padding-right: 100px; }
   .nt-catalog { gap: 12px; }
   .nt-catalog-preview { height: 130px; }

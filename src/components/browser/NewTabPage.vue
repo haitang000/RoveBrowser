@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { greeting, MAX_WIDGETS, newTabSettings, newTabSuggestions, WIDGET_CATALOG, type NewTabWidget, type WidgetKind } from "../../lib/new-tab";
+import { useNewTabMotion } from "../../lib/new-tab-motion";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
 import NewTabWidgetView from "./NewTabWidget.vue";
@@ -15,6 +16,7 @@ import gmailLogo from "../../assets/onboarding/gmail.png";
 const props = defineProps<{ tabId?: string }>();
 const b = useBrowser();
 const root = ref<HTMLElement>();
+const motion = useNewTabMotion(root, () => b.settings.reduceMotion);
 const settings = computed(() => newTabSettings(b.state.newTab));
 const sites = computed(() => newTabSuggestions(b.history, b.state.favorites, b.state.pins));
 const editing = ref(false);
@@ -41,33 +43,46 @@ function save(widgets = settings.value.widgets) {
   b.send({ type: "newTabUpdate", settings: { ...settings.value, widgets } });
 }
 function patchWidget(id: string, value: Partial<NewTabWidget>) {
+  if (value.size) motion.stopPlacement();
   if (settings.value.widgets.some((widget) => widget.id === id)) save(settings.value.widgets.map((widget) => widget.id === id ? { ...widget, ...value, id } : widget));
+}
+async function changeEditing(value: boolean) {
+  const positions = motion.captureLayout();
+  editing.value = value;
+  await nextTick();
+  if (editing.value !== value) return;
+  motion.moveLayout(positions);
+  (value ? discoverTitle.value : editButton.value)?.focus({ preventScroll: true });
 }
 async function beginEditing() {
   name.value = settings.value.displayName;
   nameError.value = "";
-  editing.value = true;
-  await nextTick();
-  discoverTitle.value?.focus();
+  await changeEditing(true);
 }
 async function finishEditing() {
   if (!editing.value) return;
   const displayName = name.value.trim();
   if (!displayName) { nameError.value = "请输入你的称呼"; return; }
   if (displayName !== settings.value.displayName) b.send({ type: "newTabUpdate", settings: { ...settings.value, displayName } });
-  editing.value = false;
   dragged.value = undefined;
   dropTarget.value = undefined;
-  await nextTick();
-  editButton.value?.focus();
+  await changeEditing(false);
 }
-function addWidget(kind: WidgetKind) {
+async function addWidget(kind: WidgetKind, source: HTMLElement) {
   if (settings.value.widgets.length >= MAX_WIDGETS) return;
+  const preview = source.closest(".nt-catalog-card")?.querySelector(".nt-catalog-preview > div");
+  const from = (preview ?? source).getBoundingClientRect();
+  motion.stopPlacement();
   const definition = WIDGET_CATALOG.find((entry) => entry.kind === kind)!;
-  save([...settings.value.widgets, { id: crypto.randomUUID(), kind, size: definition.size }]);
+  const id = crypto.randomUUID();
+  save([...settings.value.widgets, { id, kind, size: definition.size }]);
   announcement.value = `已添加${definition.title}`;
+  await nextTick();
+  const widget = root.value?.querySelector<HTMLElement>(`[data-widget-id="${id}"]`);
+  if (editing.value && widget) motion.placeWidget(widget, from);
 }
 function removeWidget(id: string) {
+  motion.stopPlacement();
   save(settings.value.widgets.filter((widget) => widget.id !== id));
   announcement.value = "已移除小组件";
   nextTick(() => root.value?.querySelector<HTMLButtonElement>(".nt-add-button:not(:disabled)")?.focus());
@@ -77,12 +92,14 @@ function moveWidget(id: string, offset: number) {
   const index = widgets.findIndex((widget) => widget.id === id);
   const target = index + offset;
   if (index < 0 || target < 0 || target >= widgets.length) return;
+  motion.stopPlacement();
   [widgets[index], widgets[target]] = [widgets[target], widgets[index]];
   save(widgets);
   announcement.value = `已移动到第 ${target + 1} 个位置`;
 }
 function dragStart(event: DragEvent, id: string) {
   if (!editing.value || !event.dataTransfer) return;
+  motion.stopPlacement();
   dragged.value = id;
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("text/rove-widget", id);
@@ -114,7 +131,9 @@ function navigate(url: string, event?: MouseEvent) {
 
 <template>
   <section ref="root" class="new-tab-page" :class="{ 'nt-editing': editing }" aria-label="新标签页" @keydown.esc.stop="finishEditing" @dragover="dragOver($event)">
-    <aside v-if="editing" class="nt-discover" aria-label="发现小组件">
+    <div class="nt-pegboard" aria-hidden="true" />
+    <div class="nt-layout">
+    <aside class="nt-discover" aria-label="发现小组件" :inert="!editing" :aria-hidden="!editing">
       <h1 ref="discoverTitle" tabindex="-1">Discover</h1>
       <div class="nt-catalog">
         <article v-for="entry in WIDGET_CATALOG" :key="entry.kind" class="nt-catalog-card">
@@ -124,14 +143,13 @@ function navigate(url: string, event?: MouseEvent) {
             <div v-else-if="entry.kind === 'calendar'" class="nt-preview-calendar"><span>{{ now.toLocaleDateString('en-US', { month: 'long' }) }}</span><strong>{{ now.getDate() }}</strong><small>{{ now.toLocaleDateString('en-US', { weekday: 'long' }) }}</small></div>
             <div v-else class="nt-preview-notes"><Icon name="edit" :size="18" /><i /><i /><i /></div>
           </div>
-          <div class="nt-catalog-info"><h2>{{ entry.title }}</h2><p>{{ entry.description }}</p><button class="nt-add-button" :aria-label="`添加${entry.title}`" :disabled="settings.widgets.length >= MAX_WIDGETS" @click="addWidget(entry.kind)"><Icon name="plus" :size="14" /> Add</button></div>
+          <div class="nt-catalog-info"><h2>{{ entry.title }}</h2><p>{{ entry.description }}</p><button class="nt-add-button" :aria-label="`添加${entry.title}`" :disabled="settings.widgets.length >= MAX_WIDGETS" @click="addWidget(entry.kind, $event.currentTarget as HTMLElement)"><Icon name="plus" :size="14" /> Add</button></div>
         </article>
       </div>
       <p v-if="settings.widgets.length >= MAX_WIDGETS" class="nt-limit" role="status">最多添加 {{ MAX_WIDGETS }} 个小组件</p>
       <form class="nt-name-form" @submit.prevent="finishEditing"><label :for="`new-tab-name-${tabId || 'empty'}`">Your name</label><input :id="`new-tab-name-${tabId || 'empty'}`" v-model="name" maxlength="40" autocomplete="off" aria-label="首页称呼" :aria-invalid="Boolean(nameError)" @input="nameError = ''" /><span v-if="nameError" class="nt-form-error" role="alert">{{ nameError }}</span></form>
     </aside>
 
-    <button v-if="editing" class="nt-done-button" aria-label="完成编辑" @click="finishEditing">Done</button>
     <div class="nt-canvas">
       <div class="nt-home">
         <header v-if="!editing" class="nt-greeting">
@@ -148,19 +166,22 @@ function navigate(url: string, event?: MouseEvent) {
           <section class="nt-widgets" aria-label="小组件">
             <header class="nt-section-header"><h2>Widgets</h2><button v-if="!editing" ref="editButton" class="nt-edit-button" aria-label="编辑小组件" @click="beginEditing">Edit</button></header>
             <div class="nt-widget-grid">
-              <article v-for="(widget, index) in settings.widgets" :key="widget.id" class="nt-widget" :class="{ 'nt-widget-wide': widget.size === 'wide', 'nt-widget-dragging': dragged === widget.id, 'nt-widget-drop': dropTarget === widget.id }" :aria-label="widgetTitle(widget.kind)" @dragover="dragOver($event, widget.id)" @drop="dropWidget($event, widget.id)">
+              <article v-for="(widget, index) in settings.widgets" :key="widget.id" class="nt-widget" :class="{ 'nt-widget-wide': widget.size === 'wide', 'nt-widget-dragging': dragged === widget.id, 'nt-widget-drop': dropTarget === widget.id }" :aria-label="widgetTitle(widget.kind)" :data-widget-id="widget.id" @dragover="dragOver($event, widget.id)" @drop="dropWidget($event, widget.id)">
                 <div v-if="editing" class="nt-widget-toolbar">
                   <button class="nt-drag-handle" draggable="true" :aria-label="`拖动${widgetTitle(widget.kind)}排序`" title="拖动排序" @dragstart="dragStart($event, widget.id)" @dragend="dragged = undefined; dropTarget = undefined"><Icon name="more" :size="16" /></button>
                   <div><button :disabled="index === 0" :aria-label="`前移${widgetTitle(widget.kind)}`" @click="moveWidget(widget.id, -1)"><Icon name="back" :size="13" /></button><button :disabled="index === settings.widgets.length - 1" :aria-label="`后移${widgetTitle(widget.kind)}`" @click="moveWidget(widget.id, 1)"><Icon name="forward" :size="13" /></button><button :aria-label="`调整${widgetTitle(widget.kind)}宽度`" @click="patchWidget(widget.id, { size: widget.size === 'wide' ? 'small' : 'wide' })"><Icon name="expand" :size="13" /></button><button :aria-label="`移除${widgetTitle(widget.kind)}`" @click="removeWidget(widget.id)"><Icon name="close" :size="14" /></button></div>
                 </div>
                 <NewTabWidgetView :widget="widget" :now="now" :editing="editing" @patch="patchWidget(widget.id, $event)" @navigate="navigate($event)" />
               </article>
-              <button v-for="slot in placeholders" :key="`empty-${slot}`" class="nt-widget nt-widget-empty" aria-label="添加小组件" @click="editing ? addWidget('notes') : beginEditing()"><span><Icon name="plus" :size="22" /><small>{{ editing ? '添加便签' : 'Add a widget' }}</small></span></button>
+              <button v-for="slot in placeholders" :key="`empty-${slot}`" class="nt-widget nt-widget-empty" aria-label="添加小组件" @click="editing ? addWidget('notes', $event.currentTarget as HTMLElement) : beginEditing()"><span><Icon name="plus" :size="22" /><small>{{ editing ? '添加便签' : 'Add a widget' }}</small></span></button>
             </div>
           </section>
         </div>
       </div>
     </div>
+    </div>
+    <button v-if="editing" class="nt-done-button" aria-label="完成编辑" @click="finishEditing">Done</button>
+    <div class="nt-flight-layer" inert aria-hidden="true" />
     <span v-if="editing" class="nt-sr-only" role="status" aria-live="polite">{{ announcement }}</span>
   </section>
 </template>
