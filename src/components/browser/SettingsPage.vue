@@ -2,6 +2,10 @@
 // Zigzag SettingsView/FormGroup/FormRow port, Copyright 2026 Zigao Wang,
 // Apache-2.0. AppKit controls adapted to accessible Vue controls.
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import roveIcon from "../../../native/assets/icon.png";
+import googleIcon from "../../assets/onboarding/google.png";
+import bingIcon from "../../assets/onboarding/bing.svg";
+import duckDuckGoIcon from "../../assets/onboarding/duckDuckGo.png";
 import { useBrowser } from "../../stores/browser";
 import { INTERFACE_LANGUAGES } from "../../lib/language";
 import {
@@ -78,11 +82,27 @@ function trapFocus(event: KeyboardEvent) {
     first.focus();
   }
 }
+const navigationIds = [
+  ["general", "spaces", "shortcuts"],
+  ["privacy", "passwords", "translation", "about"],
+  ["extensions"],
+] as const satisfies readonly (readonly SettingsPane[])[];
+const navigationGroups = navigationIds.map((ids) =>
+  ids.map((id) => SETTINGS_PANES.find((item) => item.id === id)!),
+);
+const navigationOrder = navigationGroups.flat().map((item) => item.id);
+const engineIcons: Partial<Record<Settings["searchEngine"], string>> = {
+  google: googleIcon,
+  bing: bingIcon,
+  duckDuckGo: duckDuckGoIcon,
+};
+const engineIcon = computed(() => engineIcons[b.settings.searchEngine]);
 const pane = computed(() => settingsPane(props.url));
+const paneMeta = computed(() => SETTINGS_PANES.find((item) => item.id === pane.value)!);
 const paneDir = ref<0 | 1 | -1>(0);
 watch(pane, (next, prev) => {
   paneDir.value = paneDirection(
-    SETTINGS_PANES.map((item) => item.id),
+    navigationOrder,
     prev,
     next,
   );
@@ -148,6 +168,12 @@ const groups = computed<Group[]>(() => [
         setting: "searchSuggestions",
         keywords: "suggestions",
       },
+    ],
+  },
+  {
+    pane: "general",
+    title: b.t("窗口与外观"),
+    rows: [
       {
         id: "default",
         title: b.t("默认浏览器"),
@@ -156,12 +182,6 @@ const groups = computed<Group[]>(() => [
         action: b.t("设为默认浏览器"),
         keywords: "default browser",
       },
-    ],
-  },
-  {
-    pane: "general",
-    title: b.t("窗口与外观"),
-    rows: [
       {
         id: "language",
         title: b.t("界面语言"),
@@ -548,41 +568,44 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
 <template>
   <section class="settings-page" :aria-label="b.t('设置')">
     <div class="settings-layout" :inert="!!editing || !!pending">
-      <aside class="settings-navigation" :aria-label="b.t('设置分类')">
+      <aside class="settings-navigation">
         <div class="settings-brand">
-          <span>Rove</span>
+          <img :src="roveIcon" alt="" width="24" height="24" draggable="false" />
           <h1>{{ b.t('设置') }}</h1>
         </div>
-        <nav>
-          <button
-            v-for="item in SETTINGS_PANES"
-            :key="item.id"
-            :title="b.t(item.title)"
-            :aria-label="b.t(item.title)"
-            :aria-current="pane === item.id && !searching ? 'page' : undefined"
-            @click="pick(item.id)"
-          >
-            <Icon :name="item.icon" /><span>{{ b.t(item.title) }}</span>
-          </button>
+        <nav :aria-label="b.t('设置分类')">
+          <ul v-for="items in navigationGroups" :key="items[0]!.id" class="settings-nav-group">
+            <li v-for="item in items" :key="item.id">
+              <button
+                :title="b.t(item.title)"
+                :aria-label="b.t(item.title)"
+                :aria-current="pane === item.id && !searching ? 'page' : undefined"
+                @click="pick(item.id)"
+              >
+                <Icon :name="item.icon" :size="17" /><span>{{ b.t(item.title) }}</span>
+              </button>
+            </li>
+          </ul>
         </nav>
       </aside>
       <div class="settings-main">
         <header class="settings-page-header">
-          <h2>
-            {{
-              searching
-                ? b.t('搜索结果')
-                : b.t(SETTINGS_PANES.find((p) => p.id === pane)!.title)
-            }}
-          </h2>
-          <label class="settings-search"
-            ><Icon name="search" :size="14" /><input
-              v-model="query"
-              type="search"
-              :placeholder="b.t('查找设置')"
-              :aria-label="b.t('查找设置')"
-              @keydown.esc.stop="query = ''"
-          /></label>
+          <div class="settings-header-inner">
+            <label class="settings-search">
+              <Icon name="search" :size="15" />
+              <input
+                v-model="query"
+                type="search"
+                :placeholder="b.t('查找设置')"
+                :aria-label="b.t('查找设置')"
+                @keydown.esc.stop="query = ''"
+              />
+            </label>
+            <h2>
+              <Icon :name="searching ? 'search' : paneMeta.icon" :size="19" />
+              {{ searching ? b.t('搜索结果') : b.t(paneMeta.title) }}
+            </h2>
+          </div>
         </header>
         <div ref="scroll" class="settings-scroll" :data-page-dir="paneDir">
           <Transition name="settings-pane">
@@ -625,7 +648,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 </span>
                 <span><SearchHighlight :text="group.title" :words="words" /></span>
               </h3>
-              <div v-for="row in group.rows" :key="row.id" class="setting-row">
+              <div v-for="row in group.rows" :key="row.id" class="setting-row" :class="{ 'setting-engine-row': row.id === 'engine' }">
                 <div class="setting-description">
                   <label :for="`setting-${row.id}-${tabId}`"><SearchHighlight :text="row.title" :words="words" /></label>
                   <p v-if="row.detail"><SearchHighlight :text="row.detail" :words="words" /></p>
@@ -641,21 +664,23 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 >
                   <span />
                 </button>
-                <select
-                  v-else-if="row.kind === 'select'"
-                  :id="`setting-${row.id}-${tabId}`"
-                  :aria-label="row.title"
-                  :value="value(row)"
-                  @change="select(row, $event)"
-                >
-                  <option
-                    v-for="option in row.options"
-                    :key="option[0]"
-                    :value="option[0]"
+                <div v-else-if="row.kind === 'select'" class="setting-select" :class="{ 'setting-engine-select': row.id === 'engine' }">
+                  <span v-if="row.id === 'engine'" class="setting-select-leading" aria-hidden="true">
+                    <img v-if="engineIcon" :src="engineIcon" alt="" width="16" height="16" />
+                    <Icon v-else name="search" :size="16" />
+                  </span>
+                  <select
+                    :id="`setting-${row.id}-${tabId}`"
+                    :aria-label="row.title"
+                    :value="value(row)"
+                    @change="select(row, $event)"
                   >
-                    {{ option[1] }}
-                  </option>
-                </select>
+                    <option v-for="option in row.options" :key="option[0]" :value="option[0]">
+                      {{ option[1] }}
+                    </option>
+                  </select>
+                  <Icon class="setting-select-chevron" name="chevronDown" :size="13" />
+                </div>
                 <form
                   v-else-if="row.kind === 'input'"
                   class="setting-input-form"

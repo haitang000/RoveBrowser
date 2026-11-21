@@ -384,10 +384,32 @@ test("an available update waits for explicit confirmation and sends the displaye
   await expect(channel).toBeEnabled();
 });
 
+test("settings keep search aligned and visible while the content scrolls", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const nav = page.getByRole("navigation", { name: "设置分类" });
+  await expect(nav.getByRole("button", { name: "通用" })).toHaveAttribute("aria-current", "page");
+  const field = page.getByRole("searchbox", { name: "查找设置" });
+  const group = page.getByRole("region", { name: "搜索", exact: true });
+  await expect(group).toBeVisible();
+  await expect.poll(() => group.evaluate((group) => {
+    const search = group.closest(".settings-main")!.querySelector(".settings-search")!;
+    const searchBox = search.getBoundingClientRect();
+    const groupBox = group.getBoundingClientRect();
+    return Math.max(Math.abs(searchBox.x - groupBox.x), Math.abs(searchBox.width - groupBox.width));
+  })).toBeLessThan(1);
+  const scroll = page.locator(".settings-scroll");
+  await scroll.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect(field).toBeInViewport();
+  await field.fill("自动填充");
+  await expect(page.getByRole("heading", { name: "搜索结果" })).toBeVisible();
+  await expect(scroll).toHaveJSProperty("scrollTop", 0);
+});
+
 test("settings adapt to narrow panes without horizontal overflow", async ({
   page,
 }) => {
-  for (const width of [1280, 900, 700, 480]) {
+  for (const width of [1280, 900, 700, 360, 480]) {
     await page.setViewportSize({ width, height: 640 });
     await page.getByRole("button", { name: "通用", exact: true }).click();
     await expect(
