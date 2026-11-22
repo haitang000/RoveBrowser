@@ -46,6 +46,12 @@ export const SETTINGS_PANES = [
     keywords: "extensions 插件",
   },
   {
+    id: "experimental",
+    title: "实验性",
+    icon: "flask",
+    keywords: "experimental 实验性 實驗性",
+  },
+  {
     id: "shortcuts",
     title: "快捷键",
     icon: "keyboard",
@@ -146,6 +152,7 @@ export interface Settings {
   autofill: boolean;
   rememberHistory: boolean;
   webRtcAddressProtection: boolean;
+  devtoolsMcp: boolean;
   /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
   sleepTabs: boolean;
   downloadFolder: string;
@@ -167,6 +174,7 @@ export const defaultSettings = (): Settings => ({
   autofill: true,
   rememberHistory: true,
   webRtcAddressProtection: false,
+  devtoolsMcp: false,
   sleepTabs: true,
   downloadFolder: "",
   updateChannel: "preview",

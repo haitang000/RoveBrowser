@@ -20,6 +20,24 @@ test("default page zoom is selectable and searchable in accessibility settings",
   await expect(zoom).toHaveValue("1.25");
 });
 
+test("DevTools MCP has a dedicated experimental setting and appears in search", async ({ page }) => {
+  const toggle = page.getByRole("switch", { name: "Chrome DevTools MCP", exact: true });
+  await expect(toggle).toHaveCount(0);
+  await page.getByRole("button", { name: "实验性", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "实验性", exact: true })).toBeVisible();
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toHaveAccessibleDescription(/更改后重启 Rove 生效/);
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+
+  await page.getByRole("button", { name: "通用", exact: true }).click();
+  await expect(toggle).toHaveCount(0);
+  await page.getByRole("searchbox", { name: "查找设置" }).fill("DevTools MCP");
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+});
+
 test("interface language updates live, works in settings search and survives a reload", async ({ page }) => {
   const html = page.locator("html");
   const search = page.getByRole("searchbox", { name: /查找设置|Search settings/ });

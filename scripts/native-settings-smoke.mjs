@@ -54,12 +54,10 @@ async function state() {
   return ui.evaluate(() => window.__settingsTest.state);
 }
 async function launch() {
+  const env = { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) };
+  delete env.ROVE_DEVTOOLS_MCP;
   app = spawn(executable, [], {
-    env: {
-      ...process.env,
-      ERA_DATA_DIR: profile,
-      ERA_DEBUG_PORT: String(port),
-    },
+    env,
     windowsHide: true,
     stdio: "pipe",
   });
@@ -130,6 +128,12 @@ async function openWebRtcFixture() {
   );
   return waitFor(() => webBrowser.contexts().flatMap((c) => c.pages())
     .find((p) => p.url() === url), "WebRTC fixture");
+}
+async function debugTargets(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+    signal: AbortSignal.timeout(1000),
+  });
+  return response.json();
 }
 try {
   await launch();
@@ -353,6 +357,39 @@ try {
   assert.equal((await state()).settings.webRtcAddressProtection, false);
   assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), true);
   checks.push("WebRTC 地址保护默认关闭，重启后阻止直连 UDP 候选，关闭后再次重启恢复直连 UDP");
+
+  await send({ type: "settingsOpen" });
+  await ui.getByRole("button", { name: "Experimental", exact: true }).click();
+  const mcpToggle = () => ui.getByRole("switch", { name: "Chrome DevTools MCP", exact: true });
+  const discovery = join(profile, "WebView2", "EBWebView", "DevToolsActivePort");
+  assert.equal(await mcpToggle().getAttribute("aria-checked"), "false");
+  await mcpToggle().click();
+  await waitFor(async () => (await state()).settings.devtoolsMcp, "enable DevTools MCP");
+  await assert.rejects(readFile(discovery), { code: "ENOENT" });
+  await stop();
+  await launch();
+  await ui.getByRole("heading", { name: "Experimental", exact: true }).waitFor();
+  assert.equal(await mcpToggle().getAttribute("aria-checked"), "true");
+  const mcpUrl = base + "/devtools";
+  await send({ type: "new", url: mcpUrl });
+  const mcpPort = await waitFor(async () => {
+    const [port] = (await readFile(discovery, "utf8")).split(/\r?\n/);
+    const targets = await debugTargets(port);
+    return targets.some(target => target.url === mcpUrl) && port;
+  }, "DevTools MCP endpoint after restart");
+  assert.ok((await debugTargets(mcpPort)).every(target => !target.url.startsWith("https://era.ui/")));
+  await send({ type: "settingsOpen", pane: "experimental" });
+  await mcpToggle().click();
+  await waitFor(async () => (await state()).settings.devtoolsMcp === false, "disable DevTools MCP");
+  assert.ok((await debugTargets(mcpPort)).some(target => target.url === mcpUrl));
+  await stop();
+  await launch();
+  assert.equal(await mcpToggle().getAttribute("aria-checked"), "false");
+  await send({ type: "new", url: mcpUrl });
+  await waitFor(async () => (await debugTargets(port + 1)).some(target => target.url === mcpUrl),
+    "webpage launches with normal debug options");
+  await assert.rejects(debugTargets(mcpPort));
+  checks.push("实验性设置开关持久化，重启后开启或关闭网页的 MCP 调试端口");
   await writeFile(
     join(output, "native-settings.json"),
     JSON.stringify({ profile, checks }, null, 2),

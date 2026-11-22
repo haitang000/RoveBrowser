@@ -59,6 +59,7 @@ pub struct Settings {
     pub autofill: bool,
     pub remember_history: bool,
     pub web_rtc_address_protection: bool,
+    pub devtools_mcp: bool,
     /// Zigzag `TabSleep`: background pages nobody has seen for a while give
     /// their memory back. On unless the user turns it off.
     pub sleep_tabs: bool,
@@ -84,6 +85,7 @@ impl Default for Settings {
             autofill: true,
             remember_history: true,
             web_rtc_address_protection: false,
+            devtools_mcp: false,
             sleep_tabs: true,
             download_folder: String::new(),
             update_channel: "preview".into(),
@@ -111,7 +113,7 @@ pub fn normalize_settings_url(value: &str) -> Option<String> {
 pub fn settings_url(pane: Option<&str>) -> String {
     match pane {
         Some(
-            p @ ("spaces" | "passwords" | "privacy" | "translation" | "accessibility" | "extensions" | "shortcuts" | "about"),
+            p @ ("spaces" | "passwords" | "privacy" | "translation" | "accessibility" | "extensions" | "experimental" | "shortcuts" | "about"),
         ) => format!("rove://settings/{p}"),
         _ => "rove://settings".into(),
     }

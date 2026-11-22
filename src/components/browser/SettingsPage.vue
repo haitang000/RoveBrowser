@@ -87,6 +87,7 @@ const navigationIds = [
   ["general", "spaces", "shortcuts"],
   ["privacy", "passwords", "translation", "accessibility", "about"],
   ["extensions"],
+  ["experimental"],
 ] as const satisfies readonly (readonly SettingsPane[])[];
 const navigationGroups = navigationIds.map((ids) =>
   ids.map((id) => SETTINGS_PANES.find((item) => item.id === id)!),
@@ -127,11 +128,13 @@ type Row = {
   detail: string;
   kind: "toggle" | "select" | "input" | "button" | "status";
   setting?: keyof Settings;
+  forcedOn?: boolean;
   options?: readonly (readonly [string | number, string])[];
   action?: string;
   keywords?: string;
 };
 type Group = { pane: SettingsPane; title: string; rows: Row[] };
+const devtoolsMcpFromEnv = window.__ERA_DEVTOOLS_MCP_FROM_ENV__ === true;
 const groups = computed<Group[]>(() => [
   {
     pane: "general",
@@ -399,6 +402,24 @@ const groups = computed<Group[]>(() => [
       },
     ],
   },
+  {
+    pane: "experimental",
+    title: b.t("网页调试"),
+    rows: [
+      {
+        id: "devtoolsMcp",
+        title: "Chrome DevTools MCP",
+        detail: b.t("允许本机 MCP 客户端通过无需身份验证的端口访问和调试网页。") + " " +
+          b.t(devtoolsMcpFromEnv
+            ? "此接口由 ROVE_DEVTOOLS_MCP 启用。清除该变量并重启 Rove 后可在此更改。"
+            : "更改后重启 Rove 生效。"),
+        kind: "toggle",
+        setting: "devtoolsMcp",
+        forcedOn: devtoolsMcpFromEnv,
+        keywords: "cdp devtools remote debugging 开发者工具 開發人員工具",
+      },
+    ],
+  },
 ]);
 const visibleGroups = computed(() =>
   groups.value.flatMap((group) => {
@@ -473,6 +494,7 @@ function update(key: keyof Settings, value: unknown) {
   b.send({ type: "settingsUpdate", settings: { ...b.settings, [key]: value } });
 }
 function value(row: Row) {
+  if (row.forcedOn) return true;
   return row.id === "theme"
     ? b.state.theme
     : row.setting
@@ -713,6 +735,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   :id="`setting-${row.id}-${tabId}`"
                   class="setting-toggle"
                   role="switch"
+                  :disabled="row.forcedOn"
                   :aria-checked="!!value(row)"
                   :aria-label="row.title"
                   :aria-describedby="row.detail ? `setting-${row.id}-${tabId}-detail` : undefined"

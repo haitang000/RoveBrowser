@@ -26,6 +26,7 @@ const paths: Record<string, string> = {
   screen: "M2 2.5h12v8.5H2zM8 11v2.5M5 13.5h6",
   translate: "M1 3h9M5 1v2M8 3c-1 4-3 6-6 8M3 5c1 3 3 5 5 6M9 14l3-7 3 7M10 12h4",
   extension: "M2 2h4a2 2 0 1 1 4 0h4v4a2 2 0 1 0 0 4v4H9a2 2 0 1 0-4 0H2V9a2 2 0 1 0 0-4z",
+  flask: "M6 2h4M6.5 2v4l-4 6.5a1 1 0 0 0 .9 1.5h9.2a1 1 0 0 0 .9-1.5L9.5 6V2M4.6 9h6.8",
   keyboard: "M1 3h14v10H1zM4 6h1M7 6h1M10 6h1M4 9h1M7 9h1M10 9h1M5 11h6",
   trash: "M2 4h12M6 1h4l1 3M4 4l1 10h6l1-10M7 6v6M9 6v6",
   pin: "m6 2 5 5M4 4l3-3 6 6-3 3M4 4l-1 4 5 5 4-1M1 15l5-5",

@@ -82,11 +82,11 @@ fn surface_color(dark: bool) -> wry::RGBA {
         (255, 255, 255, 255)
     }
 }
-fn browser_args(ui: bool) -> String {
+fn browser_args(ui: bool, devtools_mcp: bool) -> String {
     let mut args = String::from("--autoplay-policy=user-gesture-required");
     // WebView2 writes the chosen port and browser endpoint to DevToolsActivePort.
     // Expose only the browsing environment through the opt-in MCP integration.
-    let port = (!ui && std::env::var("ROVE_DEVTOOLS_MCP").as_deref() == Ok("1")).then_some(0u16);
+    let port = (!ui && devtools_mcp).then_some(0u16);
     // The fixed ports used by native smoke tests remain debug-build only.
     #[cfg(debug_assertions)]
     let port = port.or_else(|| {
@@ -106,9 +106,10 @@ fn browser_args(ui: bool) -> String {
 fn browsing_webview(
     context: &mut WebContext,
     environment: Option<ICoreWebView2Environment>,
+    devtools_mcp: bool,
 ) -> WebViewBuilder<'_> {
     let builder = WebViewBuilder::new_with_web_context(context)
-        .with_additional_browser_args(browser_args(false))
+        .with_additional_browser_args(browser_args(false, devtools_mcp))
         .with_browser_extensions_enabled(true);
     if let Some(environment) = environment {
         builder.with_environment(environment)
@@ -459,6 +460,9 @@ struct App {
     /// Reuse the first WebView2 environment for every controller in the
     /// browsing profile. WebContext only stores its data path on Windows.
     web_environment: Option<ICoreWebView2Environment>,
+    // Snapshot the preference at startup for every WebView2 environment this process creates.
+    devtools_mcp_enabled: bool,
+    devtools_mcp_from_env: bool,
     web_rtc_preference_failed: bool,
     state: State,
     storage: Storage,
@@ -532,6 +536,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
     let mut storage = Storage::open(&data)?;
     // A malformed session is retained, and startup stops instead of overwriting it.
     let mut state = storage.load()?;
+    let devtools_mcp_from_env = std::env::var("ROVE_DEVTOOLS_MCP").as_deref() == Ok("1");
     let browsing_data = data.join("WebView2");
     let agent_data = data.join("AgentWebView2");
     let mut web_rtc_preference_failed = false;
@@ -658,6 +663,8 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         window: None,
         context: WebContext::new(Some(browsing_data)),
         web_environment: None,
+        devtools_mcp_enabled: state.settings.devtools_mcp || devtools_mcp_from_env,
+        devtools_mcp_from_env,
         web_rtc_preference_failed,
         state,
         storage,
@@ -1205,7 +1212,7 @@ impl App {
         let source_id = reader_id.clone();
         let initial_document = Cell::new(true);
         let ticket = self.reader_epoch;
-        let view = browsing_webview(&mut self.context, self.web_environment.clone())
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
             .with_visible(false).with_focused(false).with_javascript_disabled()
             .with_transparent(true)
             .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
@@ -1886,7 +1893,7 @@ impl App {
         let id2 = id.clone();
         let extension_id = url::Url::parse(&tab.url).ok()
             .as_ref().and_then(model::extension_id).map(str::to_owned);
-        let view = browsing_webview(&mut self.context, self.web_environment.clone())
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
             .with_visible(false)
             .with_focused(false)
             .with_background_color(surface_color(self.state.theme == "dark"))
@@ -2076,7 +2083,7 @@ impl App {
             let epoch = self.preview_epoch;
             let key = tab.id.clone();
             let proxy = self.proxy.clone();
-            let view = browsing_webview(&mut self.context, self.web_environment.clone())
+            let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
                 .with_visible(false).with_focused(false)
                 .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
                 .with_background_color(surface_color(self.state.theme == "dark"))
@@ -3397,7 +3404,7 @@ impl App {
         let ticket = uuid::Uuid::new_v4();
         let proxy = self.proxy.clone();
         let view = crate::extension_view::build(
-            browsing_webview(&mut self.context, self.web_environment.clone()),
+            browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled),
             window,
             &page.url,
             page.options.as_ref(),
@@ -3510,7 +3517,7 @@ impl App {
         // Settings can be the only open tab. Use the browsing profile without
         // keeping an extra WebView that extensions would see as a tab.
         let window = self.window.as_ref().ok_or("窗口尚未就绪")?;
-        let view = browsing_webview(&mut self.context, self.web_environment.clone())
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
             .with_url("about:blank")
             .with_visible(false)
             .with_focused(false)
@@ -4023,7 +4030,7 @@ impl App {
                 } else if kind == "cache" || kind == "siteData" {
                     if self.data_clear_view.is_some() { self.error("正在清除浏览数据，请稍候"); return; }
                     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-                        let view = browsing_webview(&mut self.context, self.web_environment.clone())
+                        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
                             .with_url("about:blank")
                             .with_visible(false)
                             .with_focused(false)
@@ -4884,9 +4891,10 @@ impl ApplicationHandler<Event> for App {
             let initialization = format!(
                 // Document-created scripts may run before documentElement exists.
                 // App.onMounted sets the DOM attribute before the hidden window is shown.
-                "window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};window.__ERA_WEB_RTC_PREFERENCE_FAILED__={};",
+                "window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};window.__ERA_WEB_RTC_PREFERENCE_FAILED__={};window.__ERA_DEVTOOLS_MCP_FROM_ENV__={};",
                 serde_json::to_string(&self.state)?,
                 self.web_rtc_preference_failed,
+                self.devtools_mcp_from_env,
             );
             let mut ui_context = WebContext::new(Some(self.ui_data.clone()));
             let ui=WebViewBuilder::new_with_web_context(&mut ui_context)
@@ -4899,7 +4907,7 @@ impl ApplicationHandler<Event> for App {
                         .header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src https://github-contributions-api.jogruber.de; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
                         .body(Cow::Borrowed(file.map(|f|f.contents()).unwrap_or(b"Not found"))).unwrap()
                 }).with_https_scheme(true).with_url("era://ui/index.html")
-                .with_additional_browser_args(browser_args(true))
+                .with_additional_browser_args(browser_args(true, false))
                 .with_background_color(surface_color(dark))
                 .with_transparent(true)
                 .with_theme(if dark { wry::Theme::Dark } else { wry::Theme::Light })
@@ -4933,7 +4941,7 @@ impl ApplicationHandler<Event> for App {
                         .header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
                         .body(Cow::Borrowed(file.map(|f|f.contents()).unwrap_or(b"Not found"))).unwrap()
                 }).with_https_scheme(true).with_url("era://ui/index.html?popup")
-                .with_additional_browser_args(browser_args(true))
+                .with_additional_browser_args(browser_args(true, false))
                 .with_environment(ui_environment)
                 .with_background_color((0, 0, 0, 0))
                 .with_transparent(true)
