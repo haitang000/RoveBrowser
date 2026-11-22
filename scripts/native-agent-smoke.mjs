@@ -35,6 +35,21 @@ const server = createServer((req, res) => {
   if (req.url === '/agent') res.setHeader('Set-Cookie', 'agent_session=separate; Path=/');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   if (req.url === '/slow') { slowResponse = res; return; }
+  if (req.url === '/controls/pagination') {
+    res.end(`<!doctype html><title>Snapshot pagination</title>
+      <span id="primary">Label</span><span id="secondary">  reference </span>
+      <button aria-labelledby="primary missing secondary" aria-label="Ignored">Fallback</button>
+      <button aria-label=" ">Visible <span>fallback</span></button>
+      ${Array.from({ length: 98 }, (_, index) => `<button aria-label="Entry ${index + 3}">Button</button>`).join('')}
+      <input type="password"><div role="heading">Unsupported role</div>
+      <div aria-hidden="true"><button>Hidden by ancestor</button></div>
+      <button disabled>Disabled</button><button hidden>Hidden</button>
+      <button id="last" aria-label="Last entry">Final button</button><p id="result"></p>
+      <script>document.querySelector('#last').onclick = () => {
+        document.querySelector('#result').textContent = 'Clicked the last entry';
+      };</script>`);
+    return;
+  }
   res.end(`<!doctype html><title>${req.url}</title><input id="typing">${req.url === '/agent' ? '<script>alert("hidden"); window.open("/popup");</script>' : ''}`);
 });
 await new Promise(done => server.listen(0, '127.0.0.1', done));
@@ -74,7 +89,11 @@ let child, uiBrowser, pageBrowser, disabledBrowser;
 const exe = resolve(process.env.ERA_SMOKE_EXE || 'native/target/debug/rove.exe');
 try {
   child = spawn(exe, [], {
-    env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(debug), ROVE_AGENT_PORT: String(port), ROVE_AGENT_TOKEN: token },
+    env: {
+      ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(debug),
+      ROVE_AGENT_PORT: String(port), ROVE_AGENT_TOKEN: token,
+      ROVE_AGENT_BROWSER_TABS: '1', ROVE_AGENT_PAGE_ACTIONS: '1',
+    },
     windowsHide: true, stdio: ['ignore', 'ignore', 'inherit'],
   });
   const exited = once(child, 'exit');
@@ -140,6 +159,28 @@ try {
   assert.deepEqual(await list(), []);
   assert.equal(await input.inputValue(), 'before while loading');
 
+  const paginationUrl = base + '/controls/pagination';
+  const { id: paginationTab } = await run({ op: 'browser_open', url: paginationUrl });
+  const pagination = (op, fields = {}) => run({ op, id: paginationTab, ...fields });
+  const first = await waitFor(async () => {
+    const response = await call({ op: 'page_snapshot', id: paginationTab });
+    return response.status === 'ok' && response.result.url === paginationUrl && response.result;
+  }, 'pagination fixture');
+  assert.equal(first.elements.length, 100);
+  assert.deepEqual(first.elements.slice(0, 3).map(entry => entry.label), ['Label reference', 'Visible fallback', 'Entry 3']);
+  assert.equal(first.elements.at(-1).label, 'Entry 100');
+  assert.equal(first.nextOffset, 100);
+  const last = await pagination('page_snapshot', { offset: first.nextOffset });
+  assert.equal(last.nextOffset, null);
+  assert.deepEqual(last.elements.map(({ element, label }) => [element, label]), [[1, 'Last entry']]);
+  await failure({ op: 'page_click', id: paginationTab, snapshot: first.snapshot, element: 1 }, 'stale_snapshot');
+  await pagination('page_click', { snapshot: last.snapshot, element: 1 });
+  const pastEnd = await pagination('page_snapshot', { offset: 101 });
+  assert.deepEqual(pastEnd.elements, []);
+  assert.equal(pastEnd.nextOffset, null);
+  assert.match(pastEnd.text, /Clicked the last entry/);
+  await pagination('browser_close');
+
   // Leave tabs open: they must not restore with the user's session.
   for (let i = 0; i < 4; i++) await run({ op: 'open', url: base + '/agent' });
   await failure({ op: 'open', url: base + '/agent' }, 'tab_limit');
@@ -150,7 +191,8 @@ try {
     const session = JSON.parse(saved.prepare('SELECT json FROM session WHERE id=1').get().json);
     assert.equal(session.activeTab, 'start');
     assert.deepEqual(session.tabs.map(tab => tab.url), [base + '/user']);
-    assert.equal(saved.prepare('SELECT count(*) AS count FROM history WHERE url LIKE ? AND url <> ?').get(base + '/%', base + '/user').count, 0);
+    assert.equal(saved.prepare('SELECT count(*) AS count FROM history WHERE url LIKE ? AND url NOT IN (?, ?)')
+      .get(base + '/%', base + '/user', paginationUrl).count, 0);
   } finally { saved.close(); }
   const env = { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(debug + 2) };
   delete env.ROVE_AGENT_PORT;

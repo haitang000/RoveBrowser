@@ -20,35 +20,46 @@
   const initial = checkPage();
   if (initial) return error(initial);
 
-  function describe(element) {
-    if (!(element instanceof HTMLElement) || !element.isConnected ||
-        element.closest('[inert],[aria-hidden="true"],[aria-disabled="true"]') ||
+  function elementKind(element) {
+    if (element instanceof HTMLInputElement) {
+      if (TEXT_INPUTS.has(element.type) && !element.readOnly) return "text";
+      return CLICK_INPUTS.has(element.type) ? "click" : null;
+    }
+    if (element instanceof HTMLTextAreaElement) return element.readOnly ? null : "text";
+    return element.matches("a[href],button,summary") || ROLES.has(element.getAttribute("role"))
+      ? "click" : null;
+  }
+
+  function actionableKind(element) {
+    if (!(element instanceof HTMLElement) || !element.isConnected) return null;
+    const kind = elementKind(element);
+    if (!kind || element.closest('[inert],[aria-hidden="true"],[aria-disabled="true"]') ||
         element.matches(":disabled") || !element.getClientRects().length ||
         !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return null;
+    return kind;
+  }
 
-    let kind;
-    if (element instanceof HTMLInputElement) {
-      if (TEXT_INPUTS.has(element.type) && !element.readOnly) kind = "text";
-      if (CLICK_INPUTS.has(element.type)) kind = "click";
-    } else if (element instanceof HTMLTextAreaElement) {
-      if (!element.readOnly) kind = "text";
-    } else if (element.matches("a[href],button,summary") || ROLES.has(element.getAttribute("role"))) {
-      kind = "click";
-    }
-    if (!kind) return null;
+  function normalizeLabel(value) {
+    return value?.slice(0, 1024).replace(/\s+/g, " ").trim();
+  }
 
-    const labelledBy = (element.getAttribute("aria-labelledby") || "").trim().split(/\s+/);
-    const referenced = labelledBy.map(id => document.getElementById(id)?.textContent || "").join(" ");
-    const labels = Array.from(element.labels || [], label => label.innerText).join(" ");
-    const candidates = [
-      referenced, element.getAttribute("aria-label"), labels, element.innerText,
-      element.getAttribute("placeholder"), element.getAttribute("alt"),
-      element instanceof HTMLInputElement && kind === "click" && element.getAttribute("value"),
-      element.getAttribute("title"), element.getAttribute("name"),
-    ];
-    const label = candidates.map(value => typeof value === "string"
-      ? value.slice(0, 1024).replace(/\s+/g, " ").trim()
-      : "").find(Boolean) || element.localName;
+  function referencedLabel(element) {
+    const ids = element.getAttribute("aria-labelledby")?.trim();
+    if (!ids) return "";
+    return ids.split(/\s+/).map(id => document.getElementById(id)?.textContent || "").join(" ");
+  }
+
+  function describe(element, kind) {
+    const label = normalizeLabel(referencedLabel(element)) ||
+      normalizeLabel(element.getAttribute("aria-label")) ||
+      normalizeLabel(Array.from(element.labels || [], label => label.innerText).join(" ")) ||
+      normalizeLabel(element.innerText) ||
+      normalizeLabel(element.getAttribute("placeholder")) ||
+      normalizeLabel(element.getAttribute("alt")) ||
+      (element instanceof HTMLInputElement && kind === "click" && normalizeLabel(element.getAttribute("value"))) ||
+      normalizeLabel(element.getAttribute("title")) ||
+      normalizeLabel(element.getAttribute("name")) ||
+      element.localName;
     const href = element instanceof HTMLAnchorElement ? element.href : "";
     return { kind, label: label.slice(0, 180).toWellFormed(), href };
   }
@@ -58,8 +69,8 @@
     let skipped = 0;
     let nextOffset = null;
     for (const element of document.querySelectorAll(TARGETS)) {
-      const description = describe(element);
-      if (!description) continue;
+      const kind = actionableKind(element);
+      if (!kind) continue;
       if (skipped < params.offset) {
         skipped += 1;
         continue;
@@ -68,7 +79,7 @@
         nextOffset = params.offset + MAX_ELEMENTS;
         break;
       }
-      entries.push({ element, ...description });
+      entries.push({ element, ...describe(element, kind) });
     }
 
     if (!globalThis.__roveAgentPageSnapshot) {
@@ -99,8 +110,10 @@
   function checkElement() {
     const page = checkPage();
     if (page) return page;
-    const current = describe(element);
-    return current?.kind === entry.kind && current.label === entry.label && current.href === entry.href
+    const kind = actionableKind(element);
+    if (!kind) return "stale_element";
+    const current = describe(element, kind);
+    return current.kind === entry.kind && current.label === entry.label && current.href === entry.href
       ? null : "stale_element";
   }
 
