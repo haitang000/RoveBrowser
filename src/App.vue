@@ -9,6 +9,7 @@ import CommandBar from "./components/browser/CommandBar.vue";
 import Desk from "./components/browser/Desk.vue";
 import SettingsPanel from "./components/browser/SettingsPanel.vue";
 import TabPreview from "./components/browser/TabPreview.vue";
+import TabSwitcher from "./components/browser/TabSwitcher.vue";
 import FindBar from "./components/browser/FindBar.vue";
 import StatusToast from "./components/browser/StatusToast.vue";
 import ActionToast from "./components/browser/ActionToast.vue";
@@ -16,7 +17,7 @@ import ErrorToast from "./components/browser/ErrorToast.vue";
 import OnboardingPage from "./components/browser/OnboardingPage.vue";
 import QuitDialog from "./components/browser/QuitDialog.vue";
 import Icon from "./components/common/Icon.vue";
-import { browserKey } from "./lib/browser-key";
+import { browserKey, browserKeyUp } from "./lib/browser-key";
 import { SPACE_SWIPE } from "./lib/space-swipe";
 import { coverage, isSeeThrough } from "./lib/page-frame";
 import { frameOf, lookOf } from "./lib/space-look";
@@ -175,11 +176,17 @@ watch(
 );
 function syncTransparency() { transparencyReduced.value = reducedTransparency.matches; }
 const key = (event: KeyboardEvent) => browserKey(b, event);
+const keyUp = (event: KeyboardEvent) => browserKeyUp(b, event);
+function previewBlur() {
+  refreshGrainTexture();
+  if (b.tabSwitcher) b.switchTab({ action: "cancel" });
+}
 function dismissCommand() { if (b.native) b.commandOpen = false; }
 
 onMounted(async () => {
   window.addEventListener("keydown", key);
-  if (!b.native) window.addEventListener("blur", refreshGrainTexture);
+  window.addEventListener("keyup", keyUp);
+  if (!b.native) window.addEventListener("blur", previewBlur);
   document.addEventListener("pointerdown", dismissCommand, true);
   reducedMotion.addEventListener("change", finishFrameAnimation);
   reducedTransparency.addEventListener("change", syncTransparency);
@@ -200,7 +207,8 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", key);
-  window.removeEventListener("blur", refreshGrainTexture);
+  window.removeEventListener("keyup", keyUp);
+  window.removeEventListener("blur", previewBlur);
   document.removeEventListener("pointerdown", dismissCommand, true);
   reducedMotion.removeEventListener("change", finishFrameAnimation);
   reducedTransparency.removeEventListener("change", syncTransparency);
@@ -247,6 +255,7 @@ onBeforeUnmount(() => {
       ><PageArea ref="pageArea"><CommandBar v-if="!b.native" /><FindBar v-if="!b.native" /><StatusToast v-if="!b.native" /><ActionToast v-if="!b.native" /></PageArea>
     </div>
     <Desk v-if="!b.native" /><SettingsPanel v-if="!b.native" /><BrowserMenu v-if="!b.native" /><TabPreview />
+    <TabSwitcher v-if="!b.native" />
     <ErrorToast v-if="!b.native" /><DownloadsPanel v-if="!b.native" />
     </template>
     <QuitDialog v-if="!b.native && b.quitOpen" />

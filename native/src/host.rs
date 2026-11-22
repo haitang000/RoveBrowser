@@ -4,7 +4,7 @@ use crate::{
     clip::WindowClip,
     downloads::{DownloadItem, DownloadState, Downloads},
     extensions,
-    model::{self, Command, PeekPhase, Point, Rect, State, Tab},
+    model::{self, Command, PeekPhase, Point, Rect, State, Tab, TabSwitcherInput},
     permissions,
     storage::Storage,
 };
@@ -13,7 +13,7 @@ use serde_json::json;
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::{Path as FilePath, PathBuf},
     rc::Rc,
     time::{Duration, Instant},
@@ -44,7 +44,7 @@ use windows::{
         Foundation::{HWND, POINT, RECT},
         Graphics::Gdi::ScreenToClient,
         UI::{
-            Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
+            Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
             Shell::ShellExecuteW,
             WindowsAndMessaging::{
                 GetCursorPos, GetGUIThreadInfo, IsChild, IsWindowVisible, SetWindowPos,
@@ -345,11 +345,18 @@ struct PageShared {
     peek_visible: Rc<Cell<bool>>,
     find_open: Rc<Cell<bool>>,
     downloads_open: Rc<Cell<bool>>,
+    tab_switching: Rc<Cell<bool>>,
     downloads: Rc<RefCell<Downloads>>,
     download_ops: Rc<RefCell<HashMap<String, ICoreWebView2DownloadOperation>>>,
     download_sources: Rc<RefCell<HashMap<String, String>>>,
     save_path: crate::page_output::SavePath,
 }
+struct TabSwitcher {
+    ids: Vec<String>,
+    index: usize,
+    show_at: Option<Instant>,
+}
+
 /// Tabs removed together by Clear or Close Others/Below, with the active tab
 /// before the batch so the Undo toast can put everything back as it was.
 struct UndoBatch {
@@ -411,6 +418,9 @@ struct App {
     preview_captures: crate::thumbnails::Captures,
     next_tab_capture: Option<Instant>,
     tab_preview: Option<(String, Rect)>,
+    tab_switcher: Option<TabSwitcher>,
+    tab_switching: Rc<Cell<bool>>,
+    recent_tab_ids: RefCell<VecDeque<String>>,
     preview_renders: HashMap<String, PreviewRender>,
     preview_epoch: u64,
     find: Option<crate::find::Session>,
@@ -594,6 +604,9 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         preview_captures: crate::thumbnails::Captures::default(),
         next_tab_capture: None,
         tab_preview: None,
+        tab_switcher: None,
+        tab_switching: Rc::default(),
+        recent_tab_ids: RefCell::default(),
         preview_renders: HashMap::new(),
         preview_epoch: 0,
         find: None,
@@ -822,6 +835,13 @@ impl App {
     }
     fn publish(&self) {
         if self.ready {
+            let id = &self.state.active_tab;
+            let mut recent = self.recent_tab_ids.borrow_mut();
+            if !id.is_empty() && recent.front() != Some(id) {
+                recent.retain(|item| item != id);
+                recent.push_front(id.clone());
+                recent.truncate(24);
+            }
             self.pending_publish.set(true);
         }
     }
@@ -1194,7 +1214,7 @@ impl App {
         }));
         unsafe { view.webview().cast::<ICoreWebView2_2>()?.add_DOMContentLoaded(&handler, &mut 0)?; }
         self.track_webview_focus(&view)?;
-        register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.live_settings.clone(), None)?;
+        register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.tab_switching.clone(), self.live_settings.clone(), None)?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
             permission_document: Default::default(),
@@ -1785,6 +1805,7 @@ impl App {
             peek_visible: self.peek_visible.clone(),
             find_open: self.find_open.clone(),
             downloads_open: self.downloads_open.clone(),
+            tab_switching: self.tab_switching.clone(),
             downloads: self.downloads.clone(),
             download_ops: self.download_ops.clone(),
             download_sources: self.download_sources.clone(),
@@ -3052,6 +3073,96 @@ impl App {
         }
         Ok(())
     }
+    fn can_switch_tabs(&self) -> bool {
+        self.state.onboarding.completed && !self.overlay && !self.quit_pending
+            && !self.downloads_open.get() && self.peek.is_none() && self.extension_popup.is_none()
+            && self.extension_view.is_none() && self.permission_state["permissionPrompt"].is_null()
+    }
+
+    fn publish_tab_switcher(&self) {
+        let switcher = self.tab_switcher.as_ref().map(|session| json!({
+            "ids": session.ids,
+            "selected": session.ids[session.index],
+            "visible": session.show_at.is_none(),
+        }));
+        self.emit(json!({"type":"tabSwitcher","switcher":switcher}));
+    }
+
+    fn end_tab_switcher(&mut self) -> Option<TabSwitcher> {
+        let session = self.tab_switcher.take()?;
+        self.tab_switching.set(false);
+        self.publish_tab_switcher();
+        Some(session)
+    }
+
+    fn tab_switcher_input(&mut self, input: TabSwitcherInput) {
+        match input {
+            TabSwitcherInput::Cancel => { self.end_tab_switcher(); }
+            TabSwitcherInput::Commit { id } => {
+                let Some(session) = self.end_tab_switcher() else { return };
+                let selected = id.as_ref().unwrap_or(&session.ids[session.index]);
+                if self.can_switch_tabs() && session.ids[0] == self.state.active_tab
+                    && selected != &self.state.active_tab && session.ids.contains(selected)
+                    && self.state.tabs.iter().any(|tab| &tab.id == selected)
+                {
+                    self.command(Command::Activate { id: selected.clone() }, None);
+                }
+            }
+            TabSwitcherInput::Step { reverse } => {
+                if !self.can_switch_tabs() { return; }
+                let session = self.tab_switcher.get_or_insert_with(|| {
+                    let by_id: HashMap<_, _> = self.state.tabs.iter().map(|tab| (&tab.id, tab)).collect();
+                    let mut ordered: Vec<_> = self.state.tabs.iter().collect();
+                    ordered.sort_by_key(|tab| std::cmp::Reverse(tab.last_activated));
+                    let recent = self.recent_tab_ids.borrow();
+                    let mut seen = HashSet::new();
+                    let ids = std::iter::once(&self.state.active_tab)
+                        .chain(recent.iter()).chain(ordered.into_iter().map(|tab| &tab.id))
+                        .filter_map(|id| {
+                            let tab = by_id.get(id)?;
+                            if !seen.insert(id) { return None; }
+                            seen.extend(tab.split_with.iter());
+                            Some(id.clone())
+                        }).collect();
+                    TabSwitcher { ids, index: 0, show_at: Some(Instant::now() + Duration::from_millis(120)) }
+                });
+                let count = session.ids.len();
+                if count < 2 {
+                    self.tab_switcher = None;
+                    return;
+                }
+                session.index = if reverse { (session.index + count - 1) % count } else { (session.index + 1) % count };
+                self.tab_switching.set(true);
+                self.publish_tab_switcher();
+            }
+        }
+    }
+
+    fn advance_tab_switcher(&mut self, now: Instant) -> Option<Instant> {
+        let session = self.tab_switcher.as_ref()?;
+        if !self.can_switch_tabs() || session.ids[0] != self.state.active_tab {
+            self.end_tab_switcher();
+            return None;
+        }
+        // Focus can move from the page WebView to the popup while Ctrl is down.
+        if unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) } >= 0 {
+            self.tab_switcher_input(TabSwitcherInput::Commit { id: None });
+            return None;
+        }
+        if session.show_at.is_some_and(|due| now >= due) {
+            if self.fullscreen_page.is_some() {
+                if let Err(error) = self.restore_page_window(true).and_then(|_| self.sync_layout()) {
+                    self.error(error);
+                }
+            }
+            self.dismiss_tab_preview();
+            self.refresh_visible_thumbnails();
+            if let Some(session) = &mut self.tab_switcher { session.show_at = None; }
+            self.publish_tab_switcher();
+        }
+        Some(now + Duration::from_millis(16))
+    }
+
     fn shortcut(&mut self, key: String, shift: bool) {
         if self.quit_pending { return; }
         if !self.state.onboarding.completed { return; }
@@ -3734,6 +3845,10 @@ impl App {
                     | Command::Move { .. }
             );
         match c {
+            Command::TabSwitcher { input } => {
+                self.tab_switcher_input(input);
+                return;
+            }
             Command::UpdateCheck => {
                 if self.updating { return; }
                 self.update_offer = None;
@@ -5401,6 +5516,7 @@ impl ApplicationHandler<Event> for App {
                 self.publish_default_browser();
             }
             WindowEvent::Focused(false) => {
+                self.end_tab_switcher();
                 self.close_extension_menu();
                 self.emit(json!({"type":"windowDeactivated"}));
                 self.dismiss_tab_preview();
@@ -5479,8 +5595,11 @@ impl ApplicationHandler<Event> for App {
         if self.extension_view.as_ref().and_then(|view| view.next_measure).is_some_and(|due| Instant::now() >= due) {
             self.measure_extension_view();
         }
-        self.advance_thumbnail_work(Instant::now());
+        let now = Instant::now();
+        let next_tab_switcher = self.advance_tab_switcher(now);
+        self.advance_thumbnail_work(now);
         let due = self.next_download_poll.into_iter().chain(self.next_session_save)
+            .chain(next_tab_switcher)
             .chain(self.extension_view.as_ref().and_then(|view| view.next_measure))
             .chain(self.next_tab_capture)
             .chain(self.tab_captures.next_deadline()).chain(self.preview_captures.next_deadline())
@@ -5512,7 +5631,7 @@ fn register_page_events(
     settings: Rc<RefCell<crate::settings::Settings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let fullscreen = Rc::new(Cell::new(false));
-    register_accelerators(view, proxy.clone(), shared.find_open.clone(), shared.peek_visible.clone(), shared.downloads_open.clone(), settings.clone(), Some(fullscreen.clone()))?;
+    register_accelerators(view, proxy.clone(), shared.find_open.clone(), shared.peek_visible.clone(), shared.downloads_open.clone(), shared.tab_switching.clone(), settings.clone(), Some(fullscreen.clone()))?;
     let mut token = 0;
     let fullscreen_id = id.clone();
     let fullscreen_hwnd = view.hwnd().0 as isize;
@@ -5968,6 +6087,7 @@ mod motion_tests {
 fn register_accelerators(
     view: &WebView, proxy: EventLoopProxy<Event>, find_open: Rc<Cell<bool>>,
     peek_visible: Rc<Cell<bool>>, downloads_open: Rc<Cell<bool>>,
+    tab_switching: Rc<Cell<bool>>,
     settings: Rc<RefCell<crate::settings::Settings>>, page_fullscreen: Option<Rc<Cell<bool>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let p = proxy.clone();
@@ -5988,6 +6108,20 @@ fn register_accelerators(
                 let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
                 let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
                 let alt = GetKeyState(VK_MENU.0 as i32) < 0;
+                if tab_switching.get() && !alt {
+                    let input = match key {
+                        27 => Some(TabSwitcherInput::Cancel),
+                        13 => Some(TabSwitcherInput::Commit { id: None }),
+                        37 | 38 => Some(TabSwitcherInput::Step { reverse: true }),
+                        39 | 40 => Some(TabSwitcherInput::Step { reverse: false }),
+                        _ => None,
+                    };
+                    if let Some(input) = input {
+                        args.SetHandled(true)?;
+                        let _ = p.send_event(Event::Command(Command::TabSwitcher { input }));
+                        return Ok(());
+                    }
+                }
                 let action = if key == 27 && !ctrl && !alt && !shift {
                     // WebView2 handles Escape for its fullscreen element first.
                     if page_fullscreen.as_ref().is_some_and(|fullscreen| fullscreen.get()) { return Ok(()); }
@@ -6019,6 +6153,11 @@ fn register_accelerators(
                     };
                 if let Some(action) = action {
                     args.SetHandled(true)?;
+                    if key == 9 && ctrl && !alt && matches!(action.as_str(), "cycle" | "cyclePrevious") {
+                        let input = TabSwitcherInput::Step { reverse: action == "cyclePrevious" };
+                        let _ = p.send_event(Event::Command(Command::TabSwitcher { input }));
+                        return Ok(());
+                    }
                     if matches!(action.as_str(), "historyOpen" | "printPage" | "savePageAs") {
                         let mut status = Default::default();
                         args.PhysicalKeyStatus(&mut status)?;

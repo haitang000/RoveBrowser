@@ -183,6 +183,7 @@ declare global {
       origin?: Point | null;
       surface?: string | null;
       images?: Record<string, string>;
+      switcher?: import("./tab-switcher").TabSwitcherState | null;
       image?: string | null;
       kept?: string[];
       popup?: Record<string, unknown>;

@@ -220,6 +220,14 @@ impl Rect {
     }
 }
 #[derive(Deserialize, Debug)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum TabSwitcherInput {
+    Step { reverse: bool },
+    Commit { id: Option<String> },
+    Cancel,
+}
+
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Command {
     #[serde(rename = "importScan")]
@@ -305,6 +313,11 @@ pub enum Command {
     Presented,
     #[serde(rename = "thumbnails")]
     Thumbnails,
+    #[serde(rename = "tabSwitcher")]
+    TabSwitcher {
+        #[serde(flatten)]
+        input: TabSwitcherInput,
+    },
     #[serde(rename = "tabPreview")]
     TabPreview {
         id: Option<String>,

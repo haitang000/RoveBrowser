@@ -3,6 +3,15 @@ import { SHORTCUTS, sameShortcut, shortcutFor, shortcutFromEvent } from "./setti
 export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   if (e.defaultPrevented || e.isComposing) return;
   if (b.quitOpen || b.extensions.popup) return;
+  if (b.tabSwitcher) {
+    const reverse = e.key === "ArrowLeft" || e.key === "ArrowUp";
+    if (e.key === "Escape" || e.key === "Enter" || reverse || e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      b.switchTab(e.key === "Escape" ? { action: "cancel" }
+        : e.key === "Enter" ? { action: "commit" } : { action: "step", reverse });
+      return;
+    }
+  }
   if (e.key === "Escape" && b.extensionMenuAnchor) {
     e.preventDefault();
     b.extensionMenuAnchor = undefined;
@@ -88,7 +97,11 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   if (action === "address") b.openCommand("edit");
   else if (action === "new") b.openCommand();
   else if (action === "settings") b.openSettings();
-  else if (action === "cycle" || action === "cyclePrevious") b.cycle(action === "cyclePrevious");
+  else if (action === "cycle" || action === "cyclePrevious") {
+    const reverse = action === "cyclePrevious";
+    if (e.key === "Tab" && e.ctrlKey && !e.altKey && !e.metaKey) b.switchTab({ action: "step", reverse });
+    else b.cycle(reverse);
+  }
   else if (action === "desk") b.deskOpen = !b.deskOpen;
   else if (action === "find") {
     // A dialog owns the keyboard while it is up; otherwise ⌘F toggles, so
@@ -98,4 +111,8 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
     if (b.findOpen && field instanceof HTMLInputElement && field.closest(".find-bar")) b.closeFind();
     else b.openFind();
   } else b.send({ type: action });
+}
+
+export function browserKeyUp(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
+  if (b.tabSwitcher && e.key === "Control" && !e.ctrlKey) b.switchTab({ action: "commit" });
 }

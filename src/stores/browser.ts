@@ -27,6 +27,7 @@ import { NEW_TAB_STORAGE_KEY, newTabSettings, type NewTabSettings } from "../lib
 import { interfaceLanguage, LANGUAGE_STORAGE_KEY, translate } from "../lib/language";
 import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from "../lib/state-snapshot";
 import { useNowPlaying } from "../lib/now-playing";
+import { tabSwitcherIds, type TabSwitcherInput, type TabSwitcherState } from "../lib/tab-switcher";
 import type { HistoryCursor, HistoryEdit, HistoryReply, HistoryVisit } from "../lib/history";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
@@ -111,6 +112,7 @@ export const useBrowser = defineStore("browser", () => {
   const commandOpen = ref(false),
     quitOpen = ref(false),
     thumbnails = ref<Record<string, string>>({}),
+    tabSwitcher = shallowRef<TabSwitcherState>(),
     previewTarget = ref<string>(),
     previewHiddenTicket = ref(0),
     previewDismissals = ref(0),
@@ -413,6 +415,7 @@ export const useBrowser = defineStore("browser", () => {
         "overlay",
         "tabDropTarget",
         "thumbnails",
+        "tabSwitcher",
         "tabPreview",
         "tabPreviewRefresh",
         "nowPlayingDetails",
@@ -586,6 +589,42 @@ export const useBrowser = defineStore("browser", () => {
     const t = list[(i + (reverse ? -1 : 1) + list.length) % list.length];
     if (t) send({ type: "activate", id: t.id });
   }
+  let tabSwitcherTimer: ReturnType<typeof setTimeout> | undefined;
+  function switchTab(input: TabSwitcherInput) {
+    if (native) {
+      send({ type: "tabSwitcher", ...input });
+      return;
+    }
+    const session = tabSwitcher.value;
+    if (input.action !== "step") {
+      clearTimeout(tabSwitcherTimer);
+      tabSwitcher.value = undefined;
+      if (session && input.action === "commit") {
+        const id = input.id ?? session.selected;
+        if (session.ids.includes(id) && id !== state.value.activeTab && state.value.tabs.some((tab) => tab.id === id)) {
+          send({ type: "activate", id });
+        }
+      }
+      return;
+    }
+    if (overlay.value || peek.value || downloadsOpen.value || permissionPrompt.value) return;
+    const ids = session?.ids ?? tabSwitcherIds(state.value.tabs, state.value.activeTab, recent.value);
+    if (ids.length < 2) return;
+    const index = session ? ids.indexOf(session.selected) : 0;
+    const selected = ids[(index + (input.reverse ? -1 : 1) + ids.length) % ids.length]!;
+    tabSwitcher.value = { ids, selected, visible: session?.visible ?? false };
+    if (!session) {
+      tabSwitcherTimer = setTimeout(() => {
+        if (tabSwitcher.value) tabSwitcher.value = { ...tabSwitcher.value, visible: true };
+      }, 120);
+    }
+  }
+  if (!native) {
+    watch([overlay, () => state.value.activeTab], () => {
+      if (tabSwitcher.value) switchTab({ action: "cancel" });
+    });
+    onScopeDispose(() => clearTimeout(tabSwitcherTimer));
+  }
   function resetFind() {
     findOpen.value = false;
     findQuery.value = "";
@@ -747,6 +786,7 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "tabPreviewHidden" && e.ticket !== undefined) previewHiddenTicket.value = e.ticket;
     if (e.type === "tabPreviewDismissed") previewDismissals.value++;
     if (e.type === "popupState" && e.popup) receivePopup(e.popup);
+    if (e.type === "tabSwitcher") tabSwitcher.value = e.switcher ?? undefined;
     if (e.type === "thumbnails" && e.images) thumbnails.value = e.images;
     if (e.type === "thumbnail" && e.id) {
       const allowed = new Set(e.kept || Object.keys(thumbnails.value));
@@ -980,6 +1020,8 @@ export const useBrowser = defineStore("browser", () => {
     hoverPreview,
     previewAnimationDone,
     thumbnails,
+    tabSwitcher,
+    switchTab,
     previewTarget,
     previewHiddenTicket,
     previewDismissals,

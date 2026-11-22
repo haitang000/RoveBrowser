@@ -313,6 +313,7 @@ export const english: Readonly<Record<string, string>> = {
   "搜索全部标签页": "Search all tabs",
   "关闭全部标签页视图": "Close all-tabs view",
   "尚无网页快照": "No page snapshot yet",
+  "切换标签页": "Switch Tabs",
   "界面预览": "Interface preview",
   "没有匹配的标签页": "No matching tabs",
   "拖动标签页到此工作区": "Drag a tab to this workspace",

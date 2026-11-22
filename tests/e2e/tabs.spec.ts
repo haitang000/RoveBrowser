@@ -33,6 +33,46 @@ async function finishMotion(page: Page) {
   await expect(page.locator(".tab-enter-active, .tab-leave-active, .tab-move")).toHaveCount(0);
 }
 
+test("Ctrl+Tab previews recent tabs and commits the highlighted tab on release", async ({ page }) => {
+  const picture = "data:image/svg+xml," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8"><rect width="12" height="8" fill="teal"/></svg>',
+  );
+  await page.route("**/favicon.ico", (route) => route.abort());
+  await setup(page);
+  await page.locator('[data-tab-id="alpha"]').click();
+  await page.locator('[data-tab-id="beta"]').click();
+  await page.evaluate((image) => window.__ERA_RECEIVE__?.({ type: "thumbnail", id: "alpha", image }), picture);
+
+  const menu = page.getByRole("listbox", { name: "切换标签页" });
+  const chosen = menu.getByRole("option", { selected: true });
+  await page.keyboard.down("Control");
+  await page.keyboard.press("Tab");
+  await expect(chosen).toHaveText("alpha");
+  await expect(menu).toBeFocused();
+  await expect(menu).toHaveCSS("outline-style", "none");
+  await expect(chosen.locator(".tab-switcher-snapshot")).toHaveAttribute("src", picture);
+  await chosen.locator(".tab-switcher-snapshot").evaluate((image: HTMLImageElement) => image.decode());
+  const fallback = menu.getByRole("option", { name: "beta" });
+  await expect(fallback.locator(".tab-switcher-snapshot")).toHaveCount(0);
+  await expect(fallback.locator(".tab-switcher-picture svg")).toBeVisible();
+  await expect(page.locator('[data-tab-id="beta"]')).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Tab");
+  await expect(chosen).toHaveText("New Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(chosen).toHaveText("alpha");
+  await page.keyboard.up("Control");
+  await expect(menu).toBeHidden();
+  await expect(page.locator('[data-tab-id="alpha"]')).toHaveAttribute("aria-selected", "true");
+
+  await page.keyboard.down("Control");
+  await page.keyboard.press("Tab");
+  await expect(chosen).toHaveText("beta");
+  await page.keyboard.press("Escape");
+  await page.keyboard.up("Control");
+  await expect(menu).toBeHidden();
+  await expect(page.locator('[data-tab-id="alpha"]')).toHaveAttribute("aria-selected", "true");
+});
+
 test("a split occupies one sidebar row and reopens both panes from either title", async ({ page }) => {
   await setup(page);
   const tabs = page.getByRole("tablist", { name: "标签页", exact: true });

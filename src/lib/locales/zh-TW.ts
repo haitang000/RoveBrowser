@@ -1,6 +1,7 @@
 export const traditionalChinese: Readonly<Record<string, string>> = {
   // Settings and shared controls
   "设置": "設定",
+  "切换标签页": "切換分頁",
   "设置分类": "設定分類",
   "搜索结果": "搜尋結果",
   "查找设置": "尋找設定",
