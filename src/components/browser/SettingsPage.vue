@@ -11,6 +11,7 @@ import { INTERFACE_LANGUAGES } from "../../lib/language";
 import {
   SETTINGS_PANES,
   PAGE_ZOOM_STEPS,
+  READ_ALOUD_RATES,
   SEARCH_ENGINES,
   SHORTCUTS,
   settingsPane,
@@ -250,6 +251,29 @@ const groups = computed<Group[]>(() => [
         setting: "defaultPageZoom",
         options: PAGE_ZOOM_STEPS.map((factor) => [factor, `${Math.round(factor * 100)}%`]),
         keywords: "default page zoom 网页缩放 頁面縮放 網頁縮放",
+      },
+    ],
+  },
+  {
+    pane: "accessibility",
+    title: b.t("语音"),
+    rows: [
+      {
+        id: "read-aloud-enabled",
+        title: b.t("文本朗读"),
+        detail: b.t("打开后可用快捷键朗读网页，或右键朗读所选文本。"),
+        kind: "toggle",
+        setting: "readAloudEnabled",
+        keywords: "read aloud text to speech tts 朗讀",
+      },
+      {
+        id: "read-aloud-rate",
+        title: b.t("朗读语速"),
+        detail: b.t("语速在下次开始朗读时生效。"),
+        kind: "select",
+        setting: "readAloudRate",
+        options: READ_ALOUD_RATES.map(([rate, label]) => [rate, b.t(label)]),
+        keywords: "read aloud text to speech tts narration speech rate 朗讀 語速",
       },
     ],
   },

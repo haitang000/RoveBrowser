@@ -233,6 +233,8 @@ onBeforeUnmount(() => {
     :style="shellStyle"
   >
     <WindowControls :split="split" />
+    <span class="read-aloud-status" aria-live="polite" aria-atomic="true">{{ b.readAloud?.phase === 'loading' ? b.t('正在准备朗读')
+      : b.readAloud?.phase === 'speaking' ? b.t('正在朗读') : b.readAloud?.phase === 'paused' ? b.t('朗读已暂停') : '' }}</span>
     <OnboardingPage v-if="b.onboardingOpen" />
     <template v-else>
     <div class="browser-body">
@@ -261,3 +263,7 @@ onBeforeUnmount(() => {
     <QuitDialog v-if="!b.native && b.quitOpen" />
   </div>
 </template>
+
+<style scoped>
+.read-aloud-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>

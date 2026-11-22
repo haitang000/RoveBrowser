@@ -92,7 +92,7 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
     if (!e.repeat) b.outputPage(value.key === 80 ? "printPage" : "savePageAs");
     return;
   }
-  if (!action) return;
+  if (!action || (action === "readAloud" && !b.settings.readAloudEnabled)) return;
   e.preventDefault();
   if (action === "address") b.openCommand("edit");
   else if (action === "new") b.openCommand();
@@ -103,6 +103,9 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
     else b.cycle(reverse);
   }
   else if (action === "desk") b.deskOpen = !b.deskOpen;
+  else if (action === "readAloud") {
+    if (!e.repeat) b.toggleReadAloud();
+  }
   else if (action === "find") {
     // A dialog owns the keyboard while it is up; otherwise ⌘F toggles, so
     // pressing it while typing in the bar closes it, as in Zigzag.

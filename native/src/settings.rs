@@ -28,6 +28,7 @@ pub fn default_shortcuts() -> Vec<(&'static str, Shortcut)> {
         ("forward", 39, false, true, false),
         ("find", 70, true, false, false),
         ("reader", 82, true, true, false),
+        ("readAloud", 85, true, false, true),
     ]
     .into_iter()
     .map(|(id, key, ctrl, alt, shift)| {
@@ -53,6 +54,8 @@ pub struct Settings {
     pub large_space_names: bool,
     pub favorites_per_row: u8,
     pub default_page_zoom: f64,
+    pub read_aloud_enabled: bool,
+    pub read_aloud_rate: i32,
     pub reduce_motion: bool,
     pub ask_before_quit: bool,
     pub save_passwords: bool,
@@ -79,6 +82,8 @@ impl Default for Settings {
             large_space_names: true,
             favorites_per_row: 4,
             default_page_zoom: 1.0,
+            read_aloud_enabled: false,
+            read_aloud_rate: 0,
             reduce_motion: false,
             ask_before_quit: true,
             save_passwords: true,
@@ -157,6 +162,9 @@ impl Settings {
         if !crate::model::ZOOM_STEPS.contains(&self.default_page_zoom) {
             self.default_page_zoom = 1.0;
         }
+        if !crate::read_aloud::RATES.contains(&self.read_aloud_rate) {
+            self.read_aloud_rate = 0;
+        }
         if self.validate().is_err() {
             self.shortcuts.clear();
         }
@@ -202,6 +210,9 @@ impl Settings {
         if !crate::model::ZOOM_STEPS.contains(&self.default_page_zoom) {
             return Err("默认页面缩放比例无效".into());
         }
+        if !crate::read_aloud::RATES.contains(&self.read_aloud_rate) {
+            return Err("朗读语速无效".into());
+        }
         self.download_folder = self.download_folder.trim().to_string();
         if !self.download_folder.is_empty() {
             let path = std::path::Path::new(&self.download_folder);
@@ -219,7 +230,7 @@ impl Settings {
         }
         let mut used = vec![];
         for (id, default) in defaults {
-            let Some(value) = self.shortcuts.get(id).cloned().unwrap_or(Some(default)) else {
+            let Some(value) = self.shortcut(id, default) else {
                 continue;
             };
             let key = value.key;
@@ -243,9 +254,19 @@ impl Settings {
         }
         Ok(())
     }
+    fn shortcut(&self, id: &str, default: Shortcut) -> Option<Shortcut> {
+        if let Some(binding) = self.shortcuts.get(id) {
+            return binding.clone();
+        }
+        // Leave existing custom shortcuts in place when upgrading to Read Aloud.
+        if id == "readAloud" && self.shortcuts.values().any(|binding| binding.as_ref() == Some(&default)) {
+            return None;
+        }
+        Some(default)
+    }
     pub fn action(&self, value: &Shortcut) -> Option<String> {
         default_shortcuts().into_iter().find_map(|(id, default)| {
-            let bound = self.shortcuts.get(id).cloned().unwrap_or(Some(default));
+            let bound = self.shortcut(id, default);
             (bound.as_ref() == Some(value)).then(|| id.into())
         })
     }
@@ -439,6 +460,15 @@ mod tests {
                 .as_deref(),
             Some("address")
         );
+    }
+    #[test]
+    fn read_aloud_does_not_replace_an_existing_custom_shortcut() {
+        let mut settings = Settings::default();
+        let binding = Shortcut { key: 85, ctrl: true, alt: false, shift: true };
+        assert_eq!(settings.action(&binding).as_deref(), Some("readAloud"));
+        settings.shortcuts.insert("new".into(), Some(binding.clone()));
+        settings.repair();
+        assert_eq!(settings.action(&binding).as_deref(), Some("new"));
     }
     #[test]
     fn update_channel_defaults_to_preview_and_drops_unknown_values() {

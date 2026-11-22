@@ -595,6 +595,10 @@ pub enum Command {
     Reader { id: Option<String> },
     #[serde(rename = "readerClose")]
     ReaderClose,
+    #[serde(rename = "readAloud")]
+    ReadAloud { id: Option<String> },
+    #[serde(rename = "readAloudStop")]
+    ReadAloudStop,
     #[serde(rename = "readerPreferences")]
     ReaderPreferences { preferences: crate::reader::Preferences },
     #[serde(rename = "findClose")]

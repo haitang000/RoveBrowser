@@ -133,6 +133,10 @@ export interface Point {
   y: number;
 }
 export type PeekPhase = "opening" | "open" | "closing";
+export interface ReadAloudState {
+  id: string;
+  phase: "loading" | "speaking" | "paused";
+}
 export type Command = { type: string; [key: string]: unknown };
 declare global {
   const __APP_VERSION__: string;
@@ -152,6 +156,7 @@ declare global {
       type: string;
       visible?: boolean;
       reader?: import("./reader").ReaderState;
+      readAloud?: ReadAloudState | null;
       importSources?: import("./import").ImportSource[];
       importBusy?: boolean;
       extensions?: import("./extensions").ExtensionsState;

@@ -60,6 +60,7 @@ const paths: Record<string, string> = {
   folder: "M2 4h4l1.5 2H14v8H2z",
   pause: "M5 3v10M11 3v10",
   play: "M5 3v10l8-5z",
+  stop: "M4 4h8v8H4z",
   more: "M4 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0M9 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0M14 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0",
   mediaPictureInPicture: "M8 13H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v4M4 5l3 3M5 8h2V6",
   mediaVolume: "M11 5.5a3.5 3.5 0 0 1 0 5M13 4a5.5 5.5 0 0 1 0 8",

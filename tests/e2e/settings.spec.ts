@@ -38,6 +38,23 @@ test("DevTools MCP has a dedicated experimental setting and appears in search", 
   await expect(toggle).not.toBeChecked();
 });
 
+test("read aloud starts off and the accessibility switch follows the interface language", async ({ page }) => {
+  const search = page.getByRole("searchbox", { name: "查找设置" });
+  await search.fill("文本朗读");
+  const readAloud = page.getByRole("switch", { name: "文本朗读", exact: true });
+  await expect(readAloud).not.toBeChecked();
+  await readAloud.press("Space");
+  await expect(readAloud).toBeChecked();
+
+  await search.fill("界面语言");
+  await page.getByRole("combobox", { name: "界面语言" }).selectOption("en");
+  await page.getByRole("button", { name: "Accessibility", exact: true }).click();
+  const english = page.getByRole("switch", { name: "Read aloud", exact: true });
+  await expect(english).toBeChecked();
+  await english.click();
+  await expect(english).not.toBeChecked();
+});
+
 test("interface language updates live, works in settings search and survives a reload", async ({ page }) => {
   const html = page.locator("html");
   const search = page.getByRole("searchbox", { name: /查找设置|Search settings/ });

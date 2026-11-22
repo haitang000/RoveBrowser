@@ -19,6 +19,8 @@ use windows::{
 };
 use wry::{WebView, WebViewExtWindows};
 
+pub const READ_ALOUD_SELECTION: i32 = i32::MIN;
+
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Item {
@@ -108,11 +110,33 @@ pub struct Request {
     pub source: HWND,
     location: POINT,
     pub items: Vec<Item>,
+    pub selection: Option<String>,
     args: ICoreWebView2ContextMenuRequestedEventArgs,
     deferral: ICoreWebView2Deferral,
 }
 
 impl Request {
+    pub fn allow_read_aloud(&mut self) {
+        if self.selection.is_none() { return; }
+        self.items.insert(0, Item::Separator);
+        self.items.insert(0, Item::Command {
+            id: READ_ALOUD_SELECTION,
+            label: "朗读所选文本".into(),
+            enabled: true,
+            shortcut: String::new(),
+            checked: None,
+            radio: false,
+        });
+    }
+
+    pub fn take_read_aloud_selection(&mut self) -> Option<String> {
+        if self.items.iter().any(|item| item.allows(READ_ALOUD_SELECTION)) {
+            self.selection.take()
+        } else {
+            None
+        }
+    }
+
     pub fn anchor(&self, popup: HWND, scale: f64) -> Point {
         let mut origin = POINT::default();
         unsafe {
@@ -148,9 +172,26 @@ impl Drop for Request {
 
 pub type Inbox = Rc<RefCell<Option<Request>>>;
 
+fn selected_text(args: &ICoreWebView2ContextMenuRequestedEventArgs) -> windows::core::Result<Option<String>> {
+    unsafe {
+        let target = args.ContextMenuTarget()?;
+        let mut editable = BOOL::default();
+        let mut selected = BOOL::default();
+        target.IsEditable(&mut editable)?;
+        target.HasSelection(&mut selected)?;
+        if editable.as_bool() || !selected.as_bool() { return Ok(None); }
+        let mut text = PWSTR::null();
+        target.SelectionText(&mut text)?;
+        let text = take_pwstr(text);
+        let text: String = text.trim().chars().take(crate::read_aloud::TEXT_LIMIT).collect();
+        Ok((!text.is_empty()).then_some(text))
+    }
+}
+
 pub fn register(
     view: &WebView,
     inbox: Inbox,
+    read_aloud_enabled: impl Fn() -> bool + 'static,
     wake: impl Fn() -> bool + 'static,
 ) -> windows::core::Result<()> {
     let source = view.hwnd();
@@ -170,6 +211,7 @@ pub fn register(
                 source,
                 location,
                 items,
+                selection: if read_aloud_enabled() { selected_text(&args).ok().flatten() } else { None },
                 args,
                 deferral,
             };

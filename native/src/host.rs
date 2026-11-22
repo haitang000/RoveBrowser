@@ -174,6 +174,7 @@ enum Event {
     ReaderMotionDone(u64, bool),
     ReaderMotionFailed(u64),
     ReaderResources(u64, u8),
+    ReadAloudText(u64, Option<crate::read_aloud::Text>),
     /// A page's controller reported a new zoom factor.
     Zoom(String, isize, f64),
     /// A page started or stopped playing sound.
@@ -415,6 +416,9 @@ struct App {
     reader_available: HashMap<String, bool>,
     reader_request: Option<(String, String, u64)>,
     reader_epoch: u64,
+    read_aloud: Option<ReadAloudSession>,
+    read_aloud_ticket: u64,
+    read_aloud_announcement: Option<(crate::read_aloud::Speech, Instant)>,
     data_clear_view: Option<WebView>,
     live_settings: Rc<RefCell<crate::settings::Settings>>,
     peek: Option<Peek>,
@@ -512,6 +516,13 @@ struct ReaderSession {
     ready: bool,
     closing: bool,
     transitioning: bool,
+}
+struct ReadAloudSession {
+    id: String,
+    hwnd: isize,
+    url: String,
+    playback: Option<crate::read_aloud::Speech>,
+    deadline: Instant,
 }
 struct PreviewRender {
     view: WebView,
@@ -624,6 +635,9 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         reader_available: HashMap::new(),
         reader_request: None,
         reader_epoch: 0,
+        read_aloud: None,
+        read_aloud_ticket: 0,
+        read_aloud_announcement: None,
         peek: None,
         peek_visible: Rc::new(Cell::new(false)),
         caption: None,
@@ -1075,6 +1089,141 @@ impl App {
             "rect":rect.map(|r| json!({"x":r.x,"y":r.y,"width":r.width,"height":r.height}))
         }}));
     }
+    fn publish_read_aloud(&self) {
+        let speech = self.read_aloud.as_ref().map(|session| {
+            let phase = match &session.playback {
+                None => "loading",
+                Some(speech) if speech.paused => "paused",
+                Some(_) => "speaking",
+            };
+            json!({"id":session.id,"phase":phase})
+        });
+        self.emit(json!({"type":"readAloudState","readAloud":speech}));
+    }
+    fn stop_read_aloud(&mut self) {
+        if self.read_aloud.take().is_some() {
+            self.publish_read_aloud();
+        }
+    }
+    fn announce_read_aloud_setting(&mut self) {
+        self.stop_read_aloud();
+        self.read_aloud_announcement.take();
+        let settings = &self.state.settings;
+        let text = crate::read_aloud::setting_announcement(settings.read_aloud_enabled, &settings.language);
+        match crate::read_aloud::Speech::start(&text, settings.read_aloud_rate) {
+            Ok(Some(speech)) => {
+                self.read_aloud_announcement = Some((speech, Instant::now() + Duration::from_millis(250)));
+            }
+            Ok(None) => {}
+            Err(_) => self.toast(crate::read_aloud::PLAYBACK_ERROR, None),
+        }
+    }
+    fn read_aloud_page(&self, id: &str, hwnd: isize) -> Option<&Page> {
+        if !self.state.settings.read_aloud_enabled { return None; }
+        let page = self.page_with_handle(id, hwnd)?;
+        let visible = self.peek.as_ref().map_or_else(
+            || self.state.visible_tab(id),
+            |peek| peek.tab.id == id && peek.phase == PeekPhase::Open,
+        );
+        let reader_ready = self.reader.as_ref().is_none_or(|reader| {
+            reader.id != id || (reader.ready && !reader.closing)
+        });
+        (visible && page.visible.get() && reader_ready && model::is_web(&page.url)
+            && !page.error_page.is_failed()).then_some(page)
+    }
+    fn read_aloud_source_valid(&self, session: &ReadAloudSession) -> bool {
+        self.read_aloud_page(&session.id, session.hwnd).is_some_and(|page| page.url == session.url)
+    }
+    fn toggle_read_aloud(&mut self, id: Option<String>) {
+        if !self.state.settings.read_aloud_enabled || self.quit_pending || self.space_form_open() { return; }
+        if self.read_aloud.as_ref().is_some_and(|session| !self.read_aloud_source_valid(session)) {
+            self.stop_read_aloud();
+        }
+        if let Some(session) = self.read_aloud.as_mut().filter(|session| id.as_ref().is_none_or(|id| id == &session.id)) {
+            match session.playback.as_mut().map(|speech| speech.toggle_pause()) {
+                Some(Ok(())) => self.publish_read_aloud(),
+                Some(Err(_)) => self.read_aloud_failed(crate::read_aloud::PLAYBACK_ERROR),
+                None => self.stop_read_aloud(),
+            }
+            return;
+        }
+        let id = id.unwrap_or_else(|| {
+            if let Some(peek) = &self.peek { return peek.tab.id.clone(); }
+            if let Some(other) = self.state.active().and_then(|tab| tab.split_with.as_ref()) {
+                let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+                if self.pages.get(other).is_some_and(|page| unsafe {
+                    let hwnd = page.view.hwnd();
+                    GetGUIThreadInfo(0, &mut info).is_ok()
+                        && (hwnd == info.hwndFocus || IsChild(hwnd, info.hwndFocus).as_bool())
+                }) {
+                    return other.clone();
+                }
+            }
+            self.state.active_tab.clone()
+        });
+        let page = self.peek.as_ref().filter(|peek| peek.tab.id == id).map(|peek| &peek.page)
+            .or_else(|| self.pages.get(&id));
+        if let Some(page) = page {
+            self.start_read_aloud(id, page.view.hwnd().0 as isize, None);
+        }
+    }
+    fn start_read_aloud(&mut self, id: String, hwnd: isize, selection: Option<String>) {
+        let Some(page) = self.read_aloud_page(&id, hwnd) else { return; };
+        let core = page.view.webview();
+        let url = page.url.clone();
+        let reader = self.reader.as_ref().is_some_and(|reader| reader.id == id);
+        self.read_aloud_announcement.take();
+        self.read_aloud_ticket += 1;
+        let ticket = self.read_aloud_ticket;
+        self.read_aloud = Some(ReadAloudSession {
+            id, hwnd, url: url.clone(), playback: None, deadline: Instant::now() + Duration::from_secs(5),
+        });
+        self.publish_read_aloud();
+        let proxy = self.proxy.clone();
+        crate::read_aloud::extract(&core, (!reader).then_some(url.as_str()), selection, move |text| {
+            let _ = proxy.send_event(Event::ReadAloudText(ticket, text));
+        });
+    }
+    fn read_aloud_failed(&mut self, message: &str) {
+        self.stop_read_aloud();
+        self.toast(message, None);
+    }
+    fn advance_read_aloud(&mut self, now: Instant) -> Option<Instant> {
+        if let Some((speech, due)) = &mut self.read_aloud_announcement {
+            if now < *due { return Some(*due); }
+            match speech.finished() {
+                Ok(false) => {
+                    *due = now + Duration::from_millis(250);
+                    return Some(*due);
+                }
+                Ok(true) => {}
+                Err(_) => self.toast(crate::read_aloud::PLAYBACK_ERROR, None),
+            }
+            self.read_aloud_announcement.take();
+        }
+        let session = self.read_aloud.as_ref()?;
+        if !self.read_aloud_source_valid(session) {
+            self.stop_read_aloud();
+            return None;
+        }
+        if now < session.deadline { return Some(session.deadline); }
+        match session.playback.as_ref().map(|speech| speech.finished()) {
+            Some(Ok(false)) => {
+                let due = now + Duration::from_millis(250);
+                self.read_aloud.as_mut()?.deadline = due;
+                Some(due)
+            }
+            Some(Ok(true)) => { self.stop_read_aloud(); None }
+            Some(Err(_)) => {
+                self.read_aloud_failed(crate::read_aloud::PLAYBACK_ERROR);
+                None
+            }
+            None => {
+                self.read_aloud_failed("无法读取当前网页的文本。");
+                None
+            }
+        }
+    }
     fn probe_reader(&self, id: &str, url: &str) {
         if self.reader.as_ref().is_some_and(|r| r.id == id) { return; }
         let Some(page) = self.pages.get(id).filter(|p| p.url == url) else { return; };
@@ -1450,22 +1599,29 @@ impl App {
     }
     fn register_page_menu(&self, view: &WebView) {
         let proxy = self.proxy.clone();
+        let settings = self.live_settings.clone();
         // Older runtimes can continue to present their built-in menu.
-        let _ = crate::page_menu::register(view, self.page_menu_inbox.clone(), move || {
-            proxy.send_event(Event::PageMenuRequested).is_ok()
-        });
+        let _ = crate::page_menu::register(
+            view,
+            self.page_menu_inbox.clone(),
+            move || settings.borrow().read_aloud_enabled,
+            move || proxy.send_event(Event::PageMenuRequested).is_ok(),
+        );
     }
-    fn page_menu_source(&self, source: HWND) -> Option<&WebView> {
+    fn page_menu_page(&self, source: HWND) -> Option<(&str, &Page)> {
         if let Some(peek) = &self.peek {
-            return (peek.shown.get() && peek.page.view.hwnd() == source).then_some(&peek.page.view);
+            return (peek.shown.get() && peek.page.view.hwnd() == source).then_some((&peek.tab.id, &peek.page));
         }
         self.pages.iter().find_map(|(id, page)| {
             (page.view.hwnd() == source && page.visible.get() && self.state.visible_tab(id))
-                .then_some(&page.view)
+                .then_some((id.as_str(), page))
         })
     }
+    fn page_menu_source(&self, source: HWND) -> Option<&WebView> {
+        self.page_menu_page(source).map(|(_, page)| &page.view)
+    }
     fn show_page_menu(&mut self) {
-        let Some(request) = self.page_menu_inbox.take() else { return };
+        let Some(mut request) = self.page_menu_inbox.take() else { return };
         if self.quit_pending || self.overlay || self.tab_switching.get() || self.extension_popup.is_some()
             || self.page_menu_source(request.source).is_none()
         {
@@ -1478,6 +1634,11 @@ impl App {
         let (Some(popup), Some(window)) = (&self.popup, &self.window) else { return };
         self.page_menu_ticket += 1;
         let anchor = request.anchor(popup.hwnd(), window.scale_factor());
+        if self.page_menu_page(request.source).is_some_and(|(id, _)| {
+            self.read_aloud_page(id, request.source.0 as isize).is_some()
+        }) {
+            request.allow_read_aloud();
+        }
         self.emit(json!({"type":"pageContextMenu", "pageMenu": {
             "ticket":self.page_menu_ticket, "anchor":anchor, "items":request.items,
             "fullscreen":self.fullscreen_page.is_some(),
@@ -1501,15 +1662,23 @@ impl App {
     }
     fn complete_page_menu(&mut self, ticket: u64, command: Option<i32>) {
         if ticket != self.page_menu_ticket { return; }
-        let Some(request) = self.page_menu.take() else { return };
+        let Some(mut request) = self.page_menu.take() else { return };
         let _ = self.raise_fullscreen_surface(false);
-        if let Some(view) = self.page_menu_source(request.source) {
-            let _ = view.focus();
+        let mut read_aloud = None;
+        if let Some((id, page)) = self.page_menu_page(request.source) {
+            let _ = page.view.focus();
+            if command == Some(crate::page_menu::READ_ALOUD_SELECTION) {
+                read_aloud = request.take_read_aloud_selection().map(|text| (id.to_owned(), request.source.0 as isize, text));
+            } else if let Some(command) = command {
+                request.select(command);
+            }
             self.page_menu_focus = Some(request.source);
-            if let Some(id) = command { request.select(id); }
         }
         drop(request);
         self.emit(json!({"type":"pageContextMenu", "pageMenu":null, "ticket":ticket}));
+        if let Some((id, hwnd, text)) = read_aloud {
+            self.start_read_aloud(id, hwnd, Some(text));
+        }
     }
     fn capture_context_menu_backdrop(&self, ticket: u64) {
         let Some(window) = &self.window else { return };
@@ -3296,6 +3465,10 @@ impl App {
     fn shortcut(&mut self, key: String, shift: bool) {
         if self.quit_pending { return; }
         if !self.state.onboarding.completed { return; }
+        if key == "readAloud" {
+            self.toggle_read_aloud(None);
+            return;
+        }
         if self.fullscreen_page.is_some() {
             if let Err(error) = self.restore_page_window(true).and_then(|_| self.sync_layout()) {
                 self.error(error);
@@ -4247,6 +4420,7 @@ impl App {
                 self.publish_default_browser();
                 self.publish_sleep_state();
                 self.publish_reader();
+                self.publish_read_aloud();
                 self.publish_permission_rules();
                 if let Err(e) = self.sync() {
                     self.error(e);
@@ -4371,6 +4545,7 @@ impl App {
                 self.popup_ready = true;
                 self.close_page_menu();
                 self.publish_reader();
+                self.publish_read_aloud();
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
                 self.emit(json!({"type":"quitConfirmation","visible":self.quit_pending}));
@@ -4543,6 +4718,8 @@ impl App {
                 self.dismiss_reader(); return;
             }
             Command::ReaderPreferences { preferences } => { self.apply_reader_preferences(preferences); return; }
+            Command::ReadAloud { id } => { self.toggle_read_aloud(id); return; }
+            Command::ReadAloudStop => { self.stop_read_aloud(); return; }
             Command::FindOpen => {
                 self.open_find();
                 return;
@@ -4816,6 +4993,7 @@ impl App {
                     self.error(error);
                 }
                 let previous_default_zoom = self.state.settings.default_page_zoom;
+                let previous_read_aloud = self.state.settings.read_aloud_enabled;
                 if let Err(e) = self.state.apply(&c) {
                     self.finish_split_resize();
                     self.error(e);
@@ -4827,6 +5005,9 @@ impl App {
                 if matches!(c, Command::UpdateSettings { .. }) {
                     if self.state.settings.default_page_zoom != previous_default_zoom {
                         self.apply_default_page_zoom();
+                    }
+                    if self.state.settings.read_aloud_enabled != previous_read_aloud {
+                        self.announce_read_aloud_setting();
                     }
                     if self.update_offer.as_ref().is_some_and(|offer| offer.channel.as_str() != self.state.settings.update_channel) {
                         self.update_offer = None;
@@ -5271,6 +5452,28 @@ impl ApplicationHandler<Event> for App {
             Event::Suggestions(ticket, items) => {
                 self.emit(json!({"type":"suggestions","ticket":ticket,"suggestions":items}));
             }
+            Event::ReadAloudText(ticket, text) => {
+                let Some(session) = self.read_aloud.as_ref() else { return; };
+                if ticket != self.read_aloud_ticket || session.playback.is_some() { return; }
+                if !self.read_aloud_source_valid(session) {
+                    self.stop_read_aloud();
+                    return;
+                }
+                let speech = text.as_ref().map_or(Ok(None), |text| {
+                    crate::read_aloud::Speech::start(text, self.state.settings.read_aloud_rate)
+                });
+                match speech {
+                    Ok(Some(speech)) => {
+                        if let Some(session) = &mut self.read_aloud {
+                            session.playback = Some(speech);
+                            session.deadline = Instant::now() + Duration::from_millis(250);
+                        }
+                        self.publish_read_aloud();
+                    }
+                    Ok(None) => self.read_aloud_failed("当前网页没有可朗读的文本。"),
+                    Err(_) => self.read_aloud_failed(crate::read_aloud::PLAYBACK_ERROR),
+                }
+            }
             Event::ReaderAvailable(id, url, available) => {
                 if self.state.tabs.iter().any(|t| t.id == id && t.url == url && !t.loading) {
                     self.reader_available.insert(id, available); self.publish_reader();
@@ -5476,6 +5679,9 @@ impl ApplicationHandler<Event> for App {
             }
             Event::Load(id, url, loading) => {
                 if loading {
+                    if self.read_aloud.as_ref().is_some_and(|session| session.id == id) {
+                        self.stop_read_aloud();
+                    }
                     if self.page_menu.as_ref().is_some_and(|request| {
                         self.page_with_handle(&id, request.source.0 as isize).is_some()
                     }) {
@@ -5571,6 +5777,9 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::Source(id, url, new_document) => {
+                if self.read_aloud.as_ref().is_some_and(|session| session.id == id && (new_document || session.url != url)) {
+                    self.stop_read_aloud();
+                }
                 if self.reader.as_ref().is_some_and(|r| r.id == id && r.url != url) { self.close_reader(); }
                 let source_changed = self.pages.get(&id).is_some_and(|p| p.url != url);
                 if source_changed && self.extension_menu_tab() == Some(id.as_str()) {
@@ -5761,9 +5970,11 @@ impl ApplicationHandler<Event> for App {
         }
         let now = Instant::now();
         let next_tab_switcher = self.advance_tab_switcher(now);
+        let next_read_aloud = self.advance_read_aloud(now);
         self.advance_thumbnail_work(now);
         let due = self.next_download_poll.into_iter().chain(self.next_session_save)
             .chain(next_tab_switcher)
+            .chain(next_read_aloud)
             .chain(self.extension_view.as_ref().and_then(|view| view.next_measure))
             .chain(self.next_tab_capture)
             .chain(self.tab_captures.next_deadline()).chain(self.preview_captures.next_deadline())
@@ -5775,6 +5986,8 @@ impl ApplicationHandler<Event> for App {
         event_loop.set_control_flow(due.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.read_aloud.take();
+        self.read_aloud_announcement.take();
         self.agent_tabs.take();
         self.permissions.inbox.take();
         self.permissions.waiting.clear();
@@ -6307,7 +6520,9 @@ fn register_accelerators(
                     else if ctrl && !alt && !shift && (key == 48 || key == 96) { Some("zoomReset".into()) }
                     else if ctrl && !alt && !shift && (49..=57).contains(&key) { Some(format!("space:{}", key - 49)) }
                     else {
-                        shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift})
+                        let settings = shortcut_settings.borrow();
+                        settings.action(&crate::settings::Shortcut {key, ctrl, alt, shift})
+                            .filter(|action| action != "readAloud" || settings.read_aloud_enabled)
                             .or_else(|| match (ctrl, alt, shift, key) {
                                 (true, false, false, 72) => Some("historyOpen".into()),
                                 (true, false, false, 80) => Some("printPage".into()),
@@ -6322,7 +6537,7 @@ fn register_accelerators(
                         let _ = p.send_event(Event::Command(Command::TabSwitcher { input }));
                         return Ok(());
                     }
-                    if matches!(action.as_str(), "historyOpen" | "printPage" | "savePageAs") {
+                    if matches!(action.as_str(), "historyOpen" | "printPage" | "savePageAs" | "readAloud") {
                         let mut status = Default::default();
                         args.PhysicalKeyStatus(&mut status)?;
                         if status.WasKeyDown.as_bool() { return Ok(()); }

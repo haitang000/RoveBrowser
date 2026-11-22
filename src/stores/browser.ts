@@ -10,6 +10,7 @@ import type {
   Favorite,
   Point,
   PeekPhase,
+  ReadAloudState,
 } from "../lib/types";
 import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
@@ -156,6 +157,7 @@ export const useBrowser = defineStore("browser", () => {
     findFocusTicket = ref(0),
     pageZoom = ref(1),
     reader = ref<ReaderState>({ id: null, waiting: null, closing: false, available: [], rect: null }),
+    readAloud = ref<ReadAloudState | null>(null),
     audio = ref<Record<string, boolean>>({}),
     /** Zigzag TabSleep: loaded pages the host put to sleep, by tab id. */
     asleep = ref<Record<string, boolean>>({}),
@@ -197,6 +199,24 @@ export const useBrowser = defineStore("browser", () => {
     if (!canOutputPage(action) || commandOpen.value || deskOpen.value || settingsOpen.value || spaceFormOpen.value) return;
     browserMenuOpen.value = false;
     send({ type: action });
+  }
+  function canReadAloud() {
+    const tab = peek.value ?? active.value;
+    return native && !!tab && /^https?:\/\//i.test(tab.url);
+  }
+  function readAloudLabel() {
+    const phase = readAloud.value?.phase;
+    return t(phase === "loading" ? "取消朗读" : phase === "speaking" ? "暂停朗读"
+      : phase === "paused" ? "继续朗读" : "朗读网页");
+  }
+  function toggleReadAloud() {
+    if (!native || !settings.value.readAloudEnabled || commandOpen.value || deskOpen.value || settingsOpen.value || spaceFormOpen.value) return;
+    browserMenuOpen.value = false;
+    send({ type: "readAloud" });
+  }
+  function stopReadAloud() {
+    browserMenuOpen.value = false;
+    send({ type: "readAloudStop" });
   }
   const splitPartner = computed(() =>
     state.value.tabs.find((tab) => tab.id === active.value?.splitWith),
@@ -797,6 +817,7 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "permissionRules" && e.rules) permissionRules.value = e.rules;
     if (e.type === "quitConfirmation") quitOpen.value = Boolean(e.visible);
     if (e.type === "readerState" && e.reader) reader.value = e.reader;
+    if (e.type === "readAloudState") readAloud.value = e.readAloud ?? null;
     if (e.type === "sidebarResize" && typeof e.width === "number" && Number.isFinite(e.width))
       sidebarResize.value = { width: e.width, resizing: Boolean(e.resizing), reset: Boolean(e.reset) };
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
@@ -944,7 +965,7 @@ export const useBrowser = defineStore("browser", () => {
       asleep.value = Object.fromEntries(e.ids.map((id) => [id, true]));
     if (e.type === "downloads" && e.items) downloads.value = e.items;
     if (e.type === "toast" && e.message) {
-      notify(e.message, e.action, e.action === "undoBatch" ? 4000 : 2400);
+      notify(t(e.message), e.action, e.action === "undoBatch" ? 4000 : 2400);
       if (e.action === "undoBatch") armUndoWindow();
     }
     if (e.type === "shortcut") {
@@ -1029,6 +1050,7 @@ export const useBrowser = defineStore("browser", () => {
   send({ type: popupWindow ? "popupReady" : "ready" });
   return {
     canOutputPage, pageOutputShortcut, outputPage,
+    canReadAloud, readAloudLabel, toggleReadAloud, stopReadAloud,
     importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser, extensions, extensionBackground,
     extensionMenuAnchor, extensionView, pinnedExtensions, placeExtensionMenu, toggleExtensionMenu,
     onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,
@@ -1099,6 +1121,7 @@ export const useBrowser = defineStore("browser", () => {
     findStep,
     pageZoom,
     reader,
+    readAloud,
     audio,
     nowPlayingCards: nowPlaying.cards,
     nowPlayingDetails: nowPlaying.details,

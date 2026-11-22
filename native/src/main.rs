@@ -34,6 +34,7 @@ mod permissions;
 mod pin_folders;
 mod preview;
 mod reader;
+mod read_aloud;
 mod resize_motion;
 mod resize_surface;
 mod shadow;

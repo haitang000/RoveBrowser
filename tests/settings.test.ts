@@ -126,6 +126,15 @@ describe("Zigzag settings port", () => {
     settings.shortcuts.new = null;
     expect(shortcutFor("new", settings)).toBeNull();
   });
+  it("keeps an existing custom binding when the default read-aloud shortcut uses the same keys", () => {
+    const settings = defaultSettings();
+    const binding = { key: 85, ctrl: true, shift: true, alt: false };
+    expect(shortcutFor("readAloud", settings)).toEqual(binding);
+    settings.shortcuts.new = binding;
+    expect(shortcutFor("readAloud", settings)).toBeNull();
+    expect(shortcutFor("new", settings)).toEqual(binding);
+    expect(() => validateShortcuts(settings)).not.toThrow();
+  });
   it("creates spaces without leaving settings, reorders, and retains shared favorites on deletion", () => {
     let state = reduce(initialState(), {
       type: "settingsOpen",

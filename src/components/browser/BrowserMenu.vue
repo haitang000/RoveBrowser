@@ -62,6 +62,11 @@ function installStoreExtension() {
   close();
   if (tab) b.send({ type: "extensionsChromeStoreTab", id: tab.id });
 }
+function readAloud(stop = false) {
+  close(true);
+  if (stop) b.stopReadAloud();
+  else b.toggleReadAloud();
+}
 function selectSpace(id: string) {
   close(true);
   if (id === b.state.activeSpace) b.toggleSpaceEditor(id);
@@ -103,6 +108,13 @@ onBeforeUnmount(() => {
             </div>
             <hr role="separator" />
             <div role="group" :aria-label="b.t('网页')">
+              <button v-if="b.native && b.settings.readAloudEnabled" role="menuitem" tabindex="-1" :disabled="!b.readAloud && !b.canReadAloud()" @click="readAloud()">
+                <Icon :name="b.readAloud?.phase === 'speaking' ? 'pause' : b.readAloud?.phase === 'paused' ? 'play' : 'speaker'" :size="16" />
+                <span>{{ b.readAloudLabel() }}</span><kbd v-if="b.shortcutLabel('readAloud')" aria-hidden="true">{{ b.shortcutLabel('readAloud') }}</kbd>
+              </button>
+              <button v-if="b.readAloud && b.readAloud.phase !== 'loading'" role="menuitem" tabindex="-1" @click="readAloud(true)">
+                <Icon name="stop" :size="16" /><span>{{ b.t('停止朗读') }}</span>
+              </button>
               <button role="menuitem" tabindex="-1" :disabled="!b.canOutputPage('savePageAs')"
                 aria-haspopup="dialog" :aria-keyshortcuts="b.pageOutputShortcut('savePageAs') ? 'Control+S' : undefined"
                 @click="b.outputPage('savePageAs')">

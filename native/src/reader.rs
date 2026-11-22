@@ -145,7 +145,7 @@ fn title(article: &Article, author: &str) -> String {
     }
     title.into()
 }
-fn language(declared: &str, sample: &str) -> String {
+pub(crate) fn language(declared: &str, sample: &str) -> String {
     let (mut letters, mut han, mut kana, mut hangul) = (0, 0, 0, 0);
     for c in sample.chars().filter(|c| c.is_alphabetic()) {
         letters += 1;

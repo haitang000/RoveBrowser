@@ -26,7 +26,10 @@ const levels = computed(() => [
   ...submenus.value,
 ].map((level) => ({
   ...level,
-  rows: level.items.map((item) => ({ item, label: "label" in item ? parseLabel(item.label) : null })),
+  rows: level.items.map((item) => ({
+    item,
+    label: "label" in item ? parseLabel(item.kind === "command" && item.id < 0 ? b.t(item.label) : item.label) : null,
+  })),
 })));
 
 function close(command: number | null = null) {

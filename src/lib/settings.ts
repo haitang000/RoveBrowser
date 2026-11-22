@@ -95,6 +95,7 @@ export const SHORTCUTS = [
   { id: "address", title: "编辑地址", group: "浏览", value: combo(76) },
   { id: "find", title: "页内查找", group: "浏览", value: combo(70) },
   { id: "reader", title: "阅读模式", group: "浏览", value: combo(82, true, false, true) },
+  { id: "readAloud", title: "文本朗读", group: "浏览", value: combo(85, true, true) },
   { id: "new", title: "新建标签页", group: "标签页", value: combo(84) },
   { id: "close", title: "关闭标签页", group: "标签页", value: combo(87) },
   {
@@ -133,6 +134,7 @@ export const SHORTCUTS = [
     value: combo(39, false, false, true),
   },
 ] as const;
+export const READ_ALOUD_RATES = [[-3, "较慢"], [-1, "稍慢"], [0, "标准语速"], [1, "稍快"], [3, "较快"]] as const;
 // Matches the page zoom steps used by the native host.
 export const PAGE_ZOOM_STEPS: readonly number[] = [
   0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3,
@@ -146,6 +148,8 @@ export interface Settings {
   largeSpaceNames: boolean;
   favoritesPerRow: number;
   defaultPageZoom: number;
+  readAloudEnabled: boolean;
+  readAloudRate: number;
   reduceMotion: boolean;
   askBeforeQuit: boolean;
   savePasswords: boolean;
@@ -168,6 +172,8 @@ export const defaultSettings = (): Settings => ({
   largeSpaceNames: true,
   favoritesPerRow: 4,
   defaultPageZoom: 1,
+  readAloudEnabled: false,
+  readAloudRate: 0,
   reduceMotion: false,
   askBeforeQuit: true,
   savePasswords: true,
@@ -194,6 +200,8 @@ export function settingsFor(value?: Partial<Settings>): Settings {
   const settings = { ...defaultSettings(), ...value };
   settings.language = interfaceLanguage(settings.language);
   if (!PAGE_ZOOM_STEPS.includes(settings.defaultPageZoom)) settings.defaultPageZoom = 1;
+  settings.readAloudEnabled = settings.readAloudEnabled === true;
+  if (!READ_ALOUD_RATES.some(([rate]) => rate === settings.readAloudRate)) settings.readAloudRate = 0;
   settings.updateChannel = settings.updateChannel === "canary" ? "canary" : "preview";
   return settings;
 }
@@ -260,9 +268,10 @@ export function searchName(settings?: Partial<Settings>): string {
   );
 }
 export function shortcutFor(id: string, settings: Settings): Shortcut | null {
-  return Object.hasOwn(settings.shortcuts, id)
-    ? settings.shortcuts[id]!
-    : SHORTCUTS.find((s) => s.id === id)?.value || null;
+  if (Object.hasOwn(settings.shortcuts, id)) return settings.shortcuts[id]!;
+  const value = SHORTCUTS.find((s) => s.id === id)?.value ?? null;
+  if (id === "readAloud" && Object.values(settings.shortcuts).some((binding) => sameShortcut(binding, value))) return null;
+  return value;
 }
 export function shortcutText(value: Shortcut | null): string {
   if (!value) return "未设置";
