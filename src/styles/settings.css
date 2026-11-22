@@ -272,6 +272,12 @@
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
+.settings-group-detail {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--quiet);
+}
 .settings-group h3.settings-result-heading {
   display: flex;
   flex-wrap: wrap;
@@ -561,7 +567,7 @@
   gap: 8px;
   font-size: 12px;
 }
-.settings-space-editor input:not([type="range"]) {
+.settings-space-editor input:not([type="range"], [type="checkbox"]) {
   height: 32px;
   width: 100%;
   padding: 0 10px;
@@ -593,6 +599,37 @@
 }
 .settings-space-editor .swatches {
   gap: 7px;
+}
+.settings-clear-options {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+.settings-clear-options label {
+  flex-direction: row;
+  align-items: center;
+}
+.settings-clear-options input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.settings-clear-options p {
+  margin: 0;
+}
+.settings-clear-results {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0 0 10px;
+  list-style: none;
+  font-size: 12px;
+  color: var(--quiet);
+}
+.settings-clear-results li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
 }
 .settings-page button:disabled {
   opacity: 0.45;

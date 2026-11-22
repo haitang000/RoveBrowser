@@ -1,6 +1,7 @@
 // Ported from Zigzag SettingsView, SettingsPage, SearchEngine and Shortcuts.
 // Copyright 2026 Zigao Wang. Apache-2.0; adapted for Windows and Vue.
 import { DEFAULT_INTERFACE_LANGUAGE, interfaceLanguage, type InterfaceLanguage } from "./language";
+import { permissionKinds, type PermissionDefault, type PermissionKind } from "./permissions";
 
 export const SETTINGS_PANES = [
   {
@@ -157,6 +158,15 @@ export const PAGE_ZOOM_STEPS: readonly number[] = [
   0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3,
 ];
 
+export const TRACKING_PROTECTION_LEVELS = [["basic", "基础"], ["balanced", "平衡"], ["strict", "严格"]] as const;
+export const BROWSING_DATA_OPTIONS = [
+  ["history", "浏览历史"],
+  ["cache", "缓存的图片和文件"],
+  ["siteData", "Cookie 和网站数据"],
+  ["downloads", "已结束的下载记录"],
+] as const;
+export type BrowsingDataKind = (typeof BROWSING_DATA_OPTIONS)[number][0];
+
 export interface Settings {
   language: InterfaceLanguage;
   searchEngine: string;
@@ -173,6 +183,8 @@ export interface Settings {
   savePasswords: boolean;
   autofill: boolean;
   rememberHistory: boolean;
+  trackingProtection: (typeof TRACKING_PROTECTION_LEVELS)[number][0];
+  permissionDefaults: Record<PermissionKind, PermissionDefault>;
   webRtcAddressProtection: boolean;
   devtoolsMcp: boolean;
   /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
@@ -198,6 +210,8 @@ export const defaultSettings = (): Settings => ({
   savePasswords: true,
   autofill: true,
   rememberHistory: true,
+  trackingProtection: "balanced",
+  permissionDefaults: { camera: "ask", microphone: "ask", location: "ask", notifications: "ask", screen: "ask" },
   webRtcAddressProtection: false,
   devtoolsMcp: false,
   sleepTabs: true,
@@ -217,6 +231,13 @@ export function updateChannelDetail(channel: UpdateChannel): string {
 }
 export function settingsFor(value?: Partial<Settings>): Settings {
   const settings = { ...defaultSettings(), ...value };
+  if (settings.trackingProtection !== "basic" && settings.trackingProtection !== "strict") {
+    settings.trackingProtection = "balanced";
+  }
+  settings.permissionDefaults = { ...settings.permissionDefaults };
+  for (const kind of permissionKinds) {
+    if (settings.permissionDefaults[kind] !== "block") settings.permissionDefaults[kind] = "ask";
+  }
   settings.language = interfaceLanguage(settings.language);
   settings.sidebarDensity = sidebarDensityFor(settings.sidebarDensity);
   if (!PAGE_ZOOM_STEPS.includes(settings.defaultPageZoom)) settings.defaultPageZoom = 1;

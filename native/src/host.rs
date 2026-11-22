@@ -7,6 +7,7 @@ use crate::{
     model::{self, Command, PeekPhase, Point, Rect, State, Tab, TabSwitcherInput},
     permissions,
     storage::Storage,
+    web_settings::{self, BrowsingDataKind},
 };
 use include_dir::{include_dir, Dir};
 use serde_json::json;
@@ -25,7 +26,7 @@ use webview2_com::{
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2Environment,
-        ICoreWebView2NavigationStartingEventArgs3,
+        ICoreWebView2NavigationStartingEventArgs3, ICoreWebView2Profile3,
         ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2NewWindowRequestedEventArgs3,
         ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
         ICoreWebView2_4, ICoreWebView2_9,
@@ -69,6 +70,13 @@ use wry::{
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../dist");
 const AGENT_TAB_PAGE_SIZE: usize = 8;
+
+struct BrowsingDataClear {
+    request_id: Option<String>,
+    pending: VecDeque<BrowsingDataKind>,
+    view: Option<WebView>,
+}
+
 // Match theme.css --surface, including the empty frame before a document paints.
 fn app_icon() -> Result<Icon, Box<dyn std::error::Error>> {
     let image = image::load_from_memory(include_bytes!("../assets/icon.png"))?.into_rgba8();
@@ -133,7 +141,7 @@ enum Event {
     SplitResize,
     SidebarResize,
     SplitExited(u64),
-    DataCleared(String, bool),
+    DataCleared(BrowsingDataKind, bool),
     HistoryCleared(bool),
     HistoryPage(String, rusqlite::Result<crate::history::Page>),
     HistoryEdited(String, rusqlite::Result<(bool, bool)>),
@@ -419,7 +427,7 @@ struct App {
     read_aloud: Option<ReadAloudSession>,
     read_aloud_ticket: u64,
     read_aloud_announcement: Option<(crate::read_aloud::Speech, Instant)>,
-    data_clear_view: Option<WebView>,
+    data_clear: Option<BrowsingDataClear>,
     live_settings: Rc<RefCell<crate::settings::Settings>>,
     peek: Option<Peek>,
     peek_visible: Rc<Cell<bool>>,
@@ -464,6 +472,7 @@ struct App {
     /// Reuse the first WebView2 environment for every controller in the
     /// browsing profile. WebContext only stores its data path on Windows.
     web_environment: Option<ICoreWebView2Environment>,
+    tracking_profile: Option<ICoreWebView2Profile3>,
     // Snapshot the preference at startup for every WebView2 environment this process creates.
     devtools_mcp_enabled: bool,
     devtools_mcp_from_env: bool,
@@ -624,7 +633,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         split_exit: None,
         split_exit_ticket: 0,
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
-        data_clear_view: None,
+        data_clear: None,
         page_menu_inbox: Rc::default(),
         page_menu: None,
         page_menu_ticket: 0,
@@ -677,6 +686,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         window: None,
         context: WebContext::new(Some(browsing_data)),
         web_environment: None,
+        tracking_profile: None,
         devtools_mcp_enabled: state.settings.devtools_mcp || devtools_mcp_from_env,
         devtools_mcp_from_env,
         web_rtc_preference_failed,
@@ -738,7 +748,7 @@ impl App {
     }
 
     fn sync_permissions(&mut self) {
-        self.permissions.reconcile();
+        self.permissions.reconcile(&self.state.settings.permission_defaults);
         if self.permissions.waiting.is_empty()
             && self.permission_state["permissionTabs"].as_array().is_some_and(Vec::is_empty) {
             return;
@@ -1857,6 +1867,108 @@ impl App {
             self.error(error);
         }
     }
+    fn clear_finished_downloads(&mut self, discard_partials: bool) -> rusqlite::Result<()> {
+        let mut next = Downloads { items: self.downloads.borrow().items.clone() };
+        let removed = next.clear_clearable();
+        if removed.is_empty() {
+            return Ok(());
+        }
+        self.storage.save_downloads(&next.items)?;
+        *self.downloads.borrow_mut() = next;
+        if discard_partials {
+            for item in &removed {
+                self.discard_partial(item);
+            }
+        }
+        self.download_ops
+            .borrow_mut()
+            .retain(|id, _| self.downloads.borrow().get(id).is_some());
+        self.publish_downloads();
+        Ok(())
+    }
+    fn clear_browsing_data(
+        &mut self,
+        kinds: impl IntoIterator<Item = BrowsingDataKind>,
+        request_id: Option<String>,
+    ) {
+        let mut pending = VecDeque::new();
+        for kind in kinds {
+            if !pending.contains(&kind) {
+                pending.push_back(kind);
+            }
+        }
+        if pending.is_empty() {
+            return;
+        }
+        if self.data_clear.is_some() {
+            for kind in pending {
+                self.emit_data_cleared(request_id.as_deref(), kind, false);
+            }
+            return;
+        }
+        self.data_clear = Some(BrowsingDataClear { request_id, pending, view: None });
+        self.clear_next_browsing_data();
+    }
+
+    fn clear_next_browsing_data(&mut self) {
+        while let Some(kind) = self.data_clear.as_mut().and_then(|clear| clear.pending.pop_front()) {
+            let result = match kind {
+                BrowsingDataKind::History => {
+                    // Update recently closed before quit can save the session again.
+                    self.state.closed.clear();
+                    self.save();
+                    self.publish();
+                    let proxy = self.proxy.clone();
+                    self.session_writer.clear_history(move |ok| {
+                        let _ = proxy.send_event(Event::HistoryCleared(ok));
+                    });
+                    return;
+                }
+                BrowsingDataKind::Downloads => self.clear_finished_downloads(false).map_err(Into::into),
+                BrowsingDataKind::Cache | BrowsingDataKind::SiteData => match self.clear_web_browsing_data(kind) {
+                    Ok(view) => {
+                        self.data_clear.as_mut().unwrap().view = Some(view);
+                        return;
+                    }
+                    Err(error) => Err(error),
+                },
+            };
+            self.report_data_clear(kind, result.is_ok());
+            if let Err(error) = result {
+                eprintln!("Rove clear {kind:?}: {error}");
+            }
+        }
+        self.data_clear = None;
+    }
+
+    fn clear_web_browsing_data(&mut self, kind: BrowsingDataKind) -> Result<WebView, Box<dyn std::error::Error>> {
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
+            .with_url("about:blank")
+            .with_visible(false)
+            .with_focused(false)
+            .build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
+        self.remember_web_environment(&view);
+        let proxy = self.proxy.clone();
+        web_settings::clear(&view, kind, move |ok| {
+            let _ = proxy.send_event(Event::DataCleared(kind, ok));
+        })?;
+        Ok(view)
+    }
+
+    fn emit_data_cleared(&self, request_id: Option<&str>, kind: BrowsingDataKind, ok: bool) {
+        let message = match (kind, ok) {
+            (_, false) => "清除失败，请重试",
+            (BrowsingDataKind::History, true) => "已清除浏览历史",
+            _ => "已清除浏览数据",
+        };
+        self.emit(json!({"type":"dataCleared", "requestId":request_id, "action":kind, "ok":ok, "message":message}));
+    }
+
+    fn report_data_clear(&self, kind: BrowsingDataKind, ok: bool) {
+        let request_id = self.data_clear.as_ref().and_then(|clear| clear.request_id.as_deref());
+        self.emit_data_cleared(request_id, kind, ok);
+    }
+
     fn refresh_downloads(&mut self) {
         // COM calls can dispatch callbacks. Never hold a RefCell borrow while
         // querying an operation or releasing its last reference.
@@ -1948,15 +2060,9 @@ impl App {
             return;
         }
         if action == "clearFinished" {
-            let removed = self.downloads.borrow_mut().clear_clearable();
-            for item in &removed {
-                self.discard_partial(item);
+            if let Err(error) = self.clear_finished_downloads(true) {
+                self.error(error);
             }
-            self.download_ops
-                .borrow_mut()
-                .retain(|id, _| self.downloads.borrow().get(id).is_some());
-            self.save_downloads();
-            self.publish_downloads();
             return;
         }
         let Some(id) = id else { return };
@@ -2047,6 +2153,16 @@ impl App {
     fn remember_web_environment(&mut self, view: &WebView) {
         if self.web_environment.is_none() {
             self.web_environment = Some(view.environment());
+            match web_settings::tracking_profile(view) {
+                Ok(profile) => {
+                    let result = web_settings::set_tracking_protection(&profile, self.state.settings.tracking_protection);
+                    self.tracking_profile = Some(profile);
+                    if result.is_err() {
+                        self.error("无法应用跟踪防护等级，请重试。");
+                    }
+                }
+                Err(_) => self.error("无法应用跟踪防护等级，请重试。"),
+            }
         }
     }
 
@@ -4190,33 +4306,8 @@ impl App {
                 self.publish_default_browser();
                 return;
             }
-            Command::ClearBrowsingData { kind } => {
-                if kind == "history" {
-                    // Apply the in-memory part now: a close/quit can arrive
-                    // before the background DELETE finishes.
-                    self.state.closed.clear();
-                    self.save();
-                    self.publish();
-                    let proxy = self.proxy.clone();
-                    self.session_writer.clear_history(move |ok| {
-                        let _ = proxy.send_event(Event::HistoryCleared(ok));
-                    });
-                } else if kind == "cache" || kind == "siteData" {
-                    if self.data_clear_view.is_some() { self.error("正在清除浏览数据，请稍候"); return; }
-                    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-                        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
-                            .with_url("about:blank")
-                            .with_visible(false)
-                            .with_focused(false)
-                            .build_as_child(self.window.as_ref().ok_or("窗口尚未就绪")?)?;
-                        self.remember_web_environment(&view);
-                        let proxy = self.proxy.clone(); let action = kind.clone();
-                        crate::web_settings::clear(&view, &kind, move |ok| { let _ = proxy.send_event(Event::DataCleared(action.clone(), ok)); })?;
-                        self.data_clear_view = Some(view);
-                        Ok(())
-                    })();
-                    if let Err(e) = result { self.error(e); self.emit(json!({"type":"dataCleared","message":"清除失败，请重试"})); }
-                } else { self.error("未知浏览数据类型"); }
+            Command::ClearBrowsingData { kind, kinds, request_id } => {
+                self.clear_browsing_data(kind.into_iter().chain(kinds), request_id);
                 return;
             }
             Command::TabPreview { id, rect, ticket } => {
@@ -4994,10 +5085,18 @@ impl App {
                 }
                 let previous_default_zoom = self.state.settings.default_page_zoom;
                 let previous_read_aloud = self.state.settings.read_aloud_enabled;
+                let previous_tracking = self.state.settings.tracking_protection;
                 if let Err(e) = self.state.apply(&c) {
                     self.finish_split_resize();
                     self.error(e);
                     return;
+                }
+                if self.state.settings.tracking_protection != previous_tracking && self.web_environment.is_some()
+                    && !self.tracking_profile.as_ref().is_some_and(|profile| {
+                        web_settings::set_tracking_protection(profile, self.state.settings.tracking_protection).is_ok()
+                    }) {
+                    self.state.settings.tracking_protection = previous_tracking;
+                    self.error("无法应用跟踪防护等级，请重试。");
                 }
                 // A tab closed through the generic path stops being "playing".
                 self.playing.retain(|id| self.state.tabs.iter().any(|tab| &tab.id == id));
@@ -5330,8 +5429,11 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::DataCleared(kind, ok) => {
-                self.data_clear_view = None;
-                self.emit(json!({"type":"dataCleared","action":kind,"message":if ok { "已清除浏览数据" } else { "清除失败，请重试" }}));
+                if let Some(clear) = &mut self.data_clear {
+                    clear.view.take();
+                }
+                self.report_data_clear(kind, ok);
+                self.clear_next_browsing_data();
             }
             Event::UpdateChecked(result) => {
                 self.updating = false;
@@ -5374,9 +5476,10 @@ impl ApplicationHandler<Event> for App {
             }
             Event::HistoryCleared(ok) => {
                 if ok {
-                    self.emit(json!({"type":"dataCleared","action":"history","message":"已清除浏览历史"}));
                     self.emit(json!({"type":"historyChanged","canUndo":false}));
                 }
+                self.report_data_clear(BrowsingDataKind::History, ok);
+                self.clear_next_browsing_data();
             }
             Event::HistoryPage(ticket, result) => match result {
                 Ok(page) => self.emit(json!({"type":"historyPage","requestId":ticket,"historyPage":page})),

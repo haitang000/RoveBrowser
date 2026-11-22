@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
+import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
 const profile = await mkdtemp(join(tmpdir(), "rove-settings-"));
 createLegacyNativeProfile(profile);
@@ -20,7 +21,14 @@ await mkdir(output, { recursive: true });
 const port = 19786,
   checks = [];
 let app, uiBrowser, webBrowser, ui;
+let cacheRequests = 0;
 const server = createServer((req, res) => {
+  if (req.url === "/cache-check") {
+    cacheRequests++;
+    res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "max-age=3600" });
+    res.end("Cache fixture");
+    return;
+  }
   if (req.url === "/file") {
     res.writeHead(200, {
       "Content-Type": "text/plain",
@@ -52,6 +60,26 @@ async function send(command) {
 }
 async function state() {
   return ui.evaluate(() => window.__settingsTest.state);
+}
+function changeDownloadClearFailure(enabled) {
+  const db = new DatabaseSync(join(profile, "era.sqlite"), { timeout: 5000 });
+  try {
+    db.exec(enabled
+      ? "CREATE TRIGGER test_fail_download_clear BEFORE DELETE ON downloads BEGIN SELECT RAISE(ABORT, 'test download clear failure'); END"
+      : "DROP TRIGGER IF EXISTS test_fail_download_clear");
+  } finally {
+    db.close();
+  }
+}
+async function chooseBrowsingData(...labels) {
+  await ui.getByRole("button", { name: "清除浏览数据", exact: true }).click();
+  const dialog = ui.getByRole("dialog", { name: "清除浏览数据", exact: true });
+  for (const label of labels) await dialog.getByRole("checkbox", { name: label, exact: true }).check();
+  await dialog.getByRole("button", { name: "确认清除", exact: true }).click();
+}
+async function expectClearResult(label, status) {
+  await ui.locator(".settings-clear-results li").filter({ hasText: label })
+    .getByText(status, { exact: true }).waitFor();
 }
 async function launch() {
   const env = { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) };
@@ -234,6 +262,10 @@ try {
     localStorage.setItem("settings-check", "saved");
     document.cookie = "settings-check=present; path=/";
   });
+  const loadCacheFixture = () => page.evaluate(() => fetch("/cache-check").then((response) => response.text()));
+  assert.equal(await loadCacheFixture(), "Cache fixture");
+  assert.equal(await loadCacheFixture(), "Cache fixture");
+  assert.equal(cacheRequests, 1);
   await page.getByText("Download fixture", { exact: true }).click();
   assert.equal(
     await waitFor(
@@ -282,22 +314,35 @@ try {
   await send({ type: "unsplit" });
   await ui.locator(".page-area.split").waitFor({ state: "hidden" });
   checks.push("内部设置与真实网页支持分屏并可恢复单页");
-  for (const kind of ["history", "cache", "siteData"]) {
-    await send({ type: "clearBrowsingData", kind });
-    await waitFor(
-      () =>
-        ui.evaluate(
-          (kind) =>
-            window.__settingsTest.events.some(
-              (e) =>
-                e.type === "dataCleared" &&
-                e.action === kind &&
-                e.message.startsWith("已清除"),
-            ),
-          kind,
-        ),
-      "clear " + kind,
-    );
+  const tracking = ui.getByRole("combobox", { name: "跟踪防护", exact: true });
+  assert.equal(await tracking.inputValue(), "balanced");
+  for (const level of ["basic", "strict"]) {
+    await tracking.selectOption(level);
+    await waitFor(async () => (await state()).settings.trackingProtection === level, `apply ${level} tracking prevention`);
+  }
+  const downloadItems = () => ui.evaluate(() => window.__settingsTest.events.findLast((e) => e.type === "downloads")?.items);
+  await waitFor(async () => (await downloadItems())?.filter((item) => item.state === "finished").length === 2, "finished downloads");
+  changeDownloadClearFailure(true);
+  try {
+    await chooseBrowsingData("缓存的图片和文件", "已结束的下载记录");
+    await expectClearResult("缓存的图片和文件", "已清除");
+    await expectClearResult("已结束的下载记录", "清除失败，请重试");
+    assert.equal((await downloadItems()).length, 2);
+  } finally {
+    changeDownloadClearFailure(false);
+  }
+  assert.equal(await loadCacheFixture(), "Cache fixture");
+  assert.equal(cacheRequests, 2);
+  assert.equal(await page.evaluate(() => localStorage.getItem("settings-check")), "saved");
+  assert.match(await page.evaluate(() => document.cookie), /settings-check=present/);
+
+  await chooseBrowsingData("浏览历史", "Cookie 和网站数据", "已结束的下载记录");
+  for (const label of ["浏览历史", "Cookie 和网站数据", "已结束的下载记录"]) {
+    await expectClearResult(label, "已清除");
+  }
+  assert.deepEqual(await downloadItems(), []);
+  for (const file of ["settings-port.txt", "settings-port (1).txt"]) {
+    assert.equal(await readFile(join(downloads, file), "utf8"), "Rove settings download");
   }
   await send({ type: "history", query: "" });
   await waitFor(
@@ -319,7 +364,7 @@ try {
     { local: null, cookies: "" },
   );
   checks.push(
-    "清除 SQLite 历史、WebView2 缓存与 Cookie／DOM 存储，等待原生完成回调",
+    "多选清理独立清除历史、缓存、Cookie／DOM 存储和下载记录，下载写入失败可重试且文件可读",
   );
   await send({
     type: "settingsUpdate",
@@ -343,6 +388,7 @@ try {
   assert.equal(restored.settings.downloadFolder, downloads);
   assert.equal(restored.settings.searchEngine, "custom");
   assert.equal(restored.settings.rememberHistory, false);
+  assert.equal(restored.settings.trackingProtection, "strict");
   assert.equal(restored.settings.reduceMotion, true);
   assert.equal(restored.settings.language, "en");
   assert.equal(restored.settings.sidebarDensity, "compact");
@@ -355,10 +401,13 @@ try {
   await ui.locator(".settings-page").waitFor();
   await ui.locator('.sidebar[data-sidebar-density="compact"]').waitFor();
   await ui.getByRole("heading", { name: "Privacy", exact: true }).waitFor();
+  assert.equal(await ui.getByRole("combobox", { name: "Tracking prevention", exact: true }).inputValue(), "strict");
   assert.equal(await webRtcToggle("WebRTC address protection").getAttribute("aria-checked"), "true");
   await ui.screenshot({ path: join(output, "native-settings-restored.png") });
   checks.push("设置和浏览器菜单即时切换英语；重启后恢复界面语言、引擎、外观、动态效果、快捷键、下载路径及设置分类");
   assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), false);
+  assert.equal(await ui.evaluate(() => window.__settingsTest.events.some((e) => e.type === "error" && /跟踪防护/.test(e.message))), false);
+  checks.push("通过真实 WebView2 配置切换基础和严格跟踪防护，重启后恢复严格等级");
   await send({ type: "settingsOpen", pane: "privacy" });
   await webRtcToggle("WebRTC address protection").click();
   await waitFor(async () => (await state()).settings.webRtcAddressProtection === false, "disable WebRTC address protection");

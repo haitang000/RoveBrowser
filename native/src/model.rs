@@ -306,7 +306,13 @@ pub enum Command {
     #[serde(rename = "spaceReorder")]
     ReorderSpace { id: String, before: String },
     #[serde(rename = "clearBrowsingData")]
-    ClearBrowsingData { kind: String },
+    ClearBrowsingData {
+        kind: Option<crate::web_settings::BrowsingDataKind>,
+        #[serde(default)]
+        kinds: Vec<crate::web_settings::BrowsingDataKind>,
+        #[serde(rename = "requestId")]
+        request_id: Option<String>,
+    },
     #[serde(rename = "systemSettings")]
     SystemSettings,
     #[serde(rename = "defaultBrowserStatus")]

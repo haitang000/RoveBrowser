@@ -20,6 +20,49 @@ test("default page zoom is selectable and searchable in accessibility settings",
   await expect(zoom).toHaveValue("1.25");
 });
 
+test("privacy settings expose selectable defaults and a confirmation for selected data", async ({ page }) => {
+  const privacy = page.getByRole("button", { name: "隐私", exact: true });
+  await privacy.click();
+  const tracking = page.getByRole("combobox", { name: "跟踪防护", exact: true });
+  await expect(tracking).toHaveValue("balanced");
+  await tracking.selectOption("strict");
+  await expect(tracking).toHaveValue("strict");
+  await expect(tracking).toHaveAccessibleDescription(/请刷新网页/);
+  const permissions = page.getByRole("region", { name: "网站权限默认行为" });
+  const choices = permissions.getByRole("combobox");
+  await expect(choices).toHaveCount(5);
+  for (const choice of await choices.all()) await expect(choice).toHaveValue("ask");
+  await permissions.getByRole("combobox", { name: "摄像头" }).selectOption("block");
+  await expect(permissions.getByRole("combobox", { name: "麦克风" })).toHaveValue("ask");
+
+  const clear = page.getByRole("button", { name: "清除浏览数据" });
+  const dialog = page.getByRole("dialog", { name: "清除浏览数据" });
+  await clear.click();
+  const confirm = dialog.getByRole("button", { name: "确认清除" });
+  const checkboxes = dialog.getByRole("checkbox");
+  await expect(checkboxes).toHaveCount(4);
+  for (const checkbox of await checkboxes.all()) await expect(checkbox).not.toBeChecked();
+  await expect(confirm).toBeDisabled();
+  const cookies = dialog.getByRole("checkbox", { name: "Cookie 和网站数据" });
+  await cookies.check();
+  await expect(confirm).toBeEnabled();
+  await expect(dialog.getByRole("status")).toContainText("退出网站登录");
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await expect(clear).toBeFocused();
+  await clear.click();
+  await expect(cookies).not.toBeChecked();
+  await dialog.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "转到搜索建议" }).click();
+  await expect(page.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "搜索建议", exact: true })).toBeFocused();
+  await page.getByRole("combobox", { name: "界面语言", exact: true }).selectOption("zh-TW");
+  await page.getByRole("button", { name: "隱私", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "追蹤防護", exact: true })).toHaveValue("strict");
+  await expect(page.getByRole("region", { name: "預設網站權限" }).getByRole("combobox", { name: "攝影機" })).toHaveValue("block");
+});
+
 test("DevTools MCP has a dedicated experimental setting and appears in search", async ({ page }) => {
   const toggle = page.getByRole("switch", { name: "Chrome DevTools MCP", exact: true });
   await expect(toggle).toHaveCount(0);
@@ -70,7 +113,9 @@ test("interface language updates live, works in settings search and survives a r
   await expect(page.getByRole("button", { name: "Privacy", exact: true })).toBeVisible();
 
   await search.fill("cached images");
-  await expect(page.locator(".setting-description label mark")).toHaveText(["Cached", "images"]);
+  const clear = page.getByRole("region", { name: "Browsing data", exact: true });
+  await expect(clear.locator(".setting-description p mark")).toHaveText(["cached", "images"]);
+  await expect(clear.getByRole("button", { name: "Clear browsing data", exact: true })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Browser menu", exact: true }).click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
@@ -150,7 +195,7 @@ test("settings are a reusable tab with searchable sections and live preferences"
   ).toBeVisible();
   await page.screenshot({ path: "test-results/settings-dark-privacy.png" });
   await page.keyboard.press("Control+t");
-  await page.getByRole("combobox").fill("独立搜索词");
+  await page.getByRole("combobox", { name: "搜索或输入地址", exact: true }).fill("独立搜索词");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("tab", { selected: true })).toHaveAttribute(
     "title",
@@ -280,7 +325,7 @@ test("settings search highlights titles, descriptions and result paths without c
   await expect(group.locator("label mark")).toHaveText("表单");
   await expect(group.locator(".setting-description p mark")).toHaveText(["表单", "登录"]);
   await search.fill("隐私");
-  await expect(page.locator(".settings-result-pane mark")).toHaveText(["隐私", "隐私"]);
+  await expect(page.locator(".settings-result-pane mark")).toHaveText(["隐私", "隐私", "隐私"]);
   await search.fill("WebRTC");
   const protection = page.getByRole("switch", { name: "WebRTC 地址保护", exact: true });
   await expect(protection).toHaveAccessibleDescription(/重启 Rove 生效/);
@@ -338,7 +383,7 @@ test("search highlights adapt to light, dark and narrow settings panes", async (
     for (const width of [1280, 700, 480]) {
       await page.setViewportSize({ width, height: 640 });
       await expect(page.locator(".setting-description label mark")).toHaveText("自动填充");
-      expect(await page.locator(".settings-scroll").evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+      await expect.poll(() => page.locator(".settings-scroll").evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
       await page.screenshot({ path: `test-results/settings-search-${theme}-${width}.png` });
     }
   }

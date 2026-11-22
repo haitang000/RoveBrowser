@@ -9,18 +9,21 @@ import duckDuckGoIcon from "../../assets/onboarding/duckDuckGo.png";
 import { useBrowser } from "../../stores/browser";
 import { INTERFACE_LANGUAGES } from "../../lib/language";
 import {
+  BROWSING_DATA_OPTIONS,
   SETTINGS_PANES,
   PAGE_ZOOM_STEPS,
   READ_ALOUD_RATES,
   SEARCH_ENGINES,
   SHORTCUTS,
   SIDEBAR_DENSITIES,
+  TRACKING_PROTECTION_LEVELS,
   settingsPane,
   shortcutFor,
   shortcutText,
   shortcutFromEvent,
   validateShortcuts,
   validSearchTemplate,
+  type BrowsingDataKind,
   type SettingsPane,
   type Settings,
 } from "../../lib/settings";
@@ -33,7 +36,7 @@ import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 import SpaceLookEditor from "./SpaceLookEditor.vue";
 import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } from "../../lib/space-look";
 import { paneDirection } from "../../lib/page-motion";
-import { permissions, type PermissionScope } from "../../lib/permissions";
+import { permissionKinds, permissions, type PermissionKind, type PermissionScope } from "../../lib/permissions";
 import SettingsAbout from "./SettingsAbout.vue";
 import SettingsExtensions from "./SettingsExtensions.vue";
 const props = defineProps<{ tabId: string; url: string }>();
@@ -50,11 +53,13 @@ const editing = ref<string>(),
   pickingIcon = ref(false),
   spaceLook = ref<LookFields>({ color: "sky" });
 const pending = ref<{
-  kind: string;
+  kind: "space" | "update" | "data";
   id?: string;
   title: string;
   detail: string;
 }>();
+const clearKinds = ref<BrowsingDataKind[]>([]);
+const clearLabels = Object.fromEntries(BROWSING_DATA_OPTIONS) as Record<BrowsingDataKind, string>;
 const modal = ref<HTMLElement>();
 let previousFocus: HTMLElement | null = null;
 watch(
@@ -104,6 +109,7 @@ const engineIcon = computed(() => engineIcons[b.settings.searchEngine]);
 const pane = computed(() => settingsPane(props.url));
 const paneMeta = computed(() => SETTINGS_PANES.find((item) => item.id === pane.value)!);
 const paneDir = ref<0 | 1 | -1>(0);
+let focusSuggestions = false;
 watch(pane, (next, prev) => {
   paneDir.value = paneDirection(
     navigationOrder,
@@ -111,7 +117,12 @@ watch(pane, (next, prev) => {
     next,
   );
   if (scroll.value) scroll.value.scrollTop = 0;
+  if (focusSuggestions && next === "general") focusSearchSuggestions();
 });
+function focusSearchSuggestions() {
+  focusSuggestions = false;
+  nextTick(() => document.getElementById(`setting-suggestions-${props.tabId}`)?.focus());
+}
 const searching = computed(() => !!query.value.trim());
 const words = computed(() => settingsSearchWords(query.value));
 function matches(...text: string[]) {
@@ -122,7 +133,7 @@ const visiblePermissionRules = computed(() => b.permissionRules.filter(([scope])
 ));
 function setPermission(scope: PermissionScope, event: Event) {
   const choice = (event.target as HTMLSelectElement).value;
-  b.send({ type: "permissionRule", scope, allowed: choice === "ask" ? null : choice === "allow" });
+  b.send({ type: "permissionRule", scope, allowed: choice === "default" ? null : choice === "allow" });
 }
 type Row = {
   id: string;
@@ -130,12 +141,13 @@ type Row = {
   detail: string;
   kind: "toggle" | "select" | "input" | "button" | "status";
   setting?: keyof Settings;
+  permission?: PermissionKind;
   forcedOn?: boolean;
   options?: readonly (readonly [string | number, string])[];
   action?: string;
   keywords?: string;
 };
-type Group = { pane: SettingsPane; title: string; rows: Row[] };
+type Group = { pane: SettingsPane; title: string; detail?: string; rows: Row[] };
 const devtoolsMcpFromEnv = window.__ERA_DEVTOOLS_MCP_FROM_ENV__ === true;
 const groups = computed<Group[]>(() => [
   {
@@ -383,6 +395,15 @@ const groups = computed<Group[]>(() => [
     title: b.t("网络连接"),
     rows: [
       {
+        id: "tracking-protection",
+        title: b.t("跟踪防护"),
+        detail: b.t("限制跨站跟踪。更改后请刷新网页，严格模式可能影响部分网站。"),
+        kind: "select",
+        setting: "trackingProtection",
+        options: TRACKING_PROTECTION_LEVELS.map(([id, label]) => [id, b.t(label)]),
+        keywords: "tracking prevention tracker 防追踪 防跟踪",
+      },
+      {
         id: "webRtcAddressProtection",
         title: b.t("WebRTC 地址保护"),
         detail: b.t("限制 WebRTC 使用未经过代理的 UDP 连接，减少 IP 地址暴露。部分音视频通话可能受影响。") + " " +
@@ -392,6 +413,14 @@ const groups = computed<Group[]>(() => [
         kind: "toggle",
         setting: "webRtcAddressProtection",
         keywords: "webrtc ip address protection proxy vpn udp 代理",
+      },
+      {
+        id: "search-privacy",
+        title: b.t("搜索时发送的输入"),
+        detail: b.t("使用 Google 并开启搜索建议时，提交搜索前输入的内容可能会发送给 Google。"),
+        kind: "button",
+        action: b.t("转到搜索建议"),
+        keywords: "search suggestions Google remote privacy",
       },
     ],
   },
@@ -403,36 +432,34 @@ const groups = computed<Group[]>(() => [
         id: "remember",
         title: b.t("记录浏览历史"),
         detail:
-          b.t("将访问过的网页保存在本机，用于查看历史记录和地址栏搜索。关闭后保留已有历史。"),
+          b.t("关闭后将停止写入 Rove 的访问历史。已有历史会保留，打开的和最近关闭的标签页仍会随会话保存。"),
         kind: "toggle",
         setting: "rememberHistory",
         keywords: "remember browsing history",
       },
       {
-        id: "history",
-        title: b.t("浏览历史"),
-        detail: b.t("清除本机历史记录和已关闭标签页记录。"),
+        id: "clear-data",
+        title: b.t("清除浏览数据"),
+        detail: b.t("选择要清除的浏览历史、缓存的图片和文件、Cookie 和网站数据或下载记录。"),
         kind: "button",
         action: b.t("清除…"),
-        keywords: "clear history",
-      },
-      {
-        id: "cache",
-        title: b.t("缓存的图片和文件"),
-        detail: b.t("释放网页缓存。再次访问时会重新下载内容。"),
-        kind: "button",
-        action: b.t("清除…"),
-        keywords: "clear cache",
-      },
-      {
-        id: "siteData",
-        title: b.t("Cookie 和网站数据"),
-        detail: b.t("清除全部网站的 Cookie 和本地存储，会退出网站登录。"),
-        kind: "button",
-        action: b.t("清除…"),
-        keywords: "cookies site data storage",
+        keywords: "clear history cache cookies site data storage downloads",
       },
     ],
+  },
+  {
+    pane: "privacy",
+    title: b.t("网站权限默认行为"),
+    detail: b.t("已保存的网站权限优先。"),
+    rows: permissionKinds.map((kind) => ({
+      id: `permission-${kind}`,
+      title: b.t(permissions[kind].name),
+      detail: "",
+      kind: "select",
+      permission: kind,
+      options: [["ask", b.t("询问")], ["block", b.t("阻止")]],
+      keywords: `site permissions default ${kind}`,
+    })),
   },
   {
     pane: "translation",
@@ -541,6 +568,7 @@ function update(key: keyof Settings, value: unknown) {
 }
 function value(row: Row) {
   if (row.forcedOn) return true;
+  if (row.permission) return b.settings.permissionDefaults[row.permission];
   return row.id === "theme"
     ? b.state.theme
     : row.setting
@@ -551,6 +579,8 @@ function select(row: Row, event: Event) {
   const selected = (event.target as HTMLSelectElement).value;
   if (row.id === "theme") {
     if (selected !== b.state.theme) b.send({ type: "theme" });
+  } else if (row.permission) {
+    update("permissionDefaults", { ...b.settings.permissionDefaults, [row.permission]: selected });
   } else if (row.setting) {
     const option = row.options?.find(([value]) => String(value) === selected);
     if (option) update(row.setting, option[0]);
@@ -577,11 +607,14 @@ function action(row: Row) {
     b.send({ type: "systemSettings" });
     return;
   }
-  pending.value = {
-    kind: row.id,
-    title: b.t("清除{item}？", { item: row.title }),
-    detail: row.detail,
-  };
+  if (row.id === "search-privacy") {
+    focusSuggestions = true;
+    pick("general");
+    if (pane.value === "general") focusSearchSuggestions();
+  } else if (row.id === "clear-data") {
+    clearKinds.value = [];
+    pending.value = { kind: "data", title: b.t("清除浏览数据"), detail: b.t("选择要清除的项目。清理范围为全部时间。") };
+  }
 }
 function editSpace(space?: Space) {
   editing.value = space?.id || "new";
@@ -635,8 +668,7 @@ function confirm() {
   else if (pending.value.kind === "update") {
     if (pending.value.id) b.installUpdate(pending.value.id);
   } else if (b.native) {
-    b.dataStatus = b.t("正在清除…");
-    b.send({ type: "clearBrowsingData", kind: pending.value.kind });
+    b.clearBrowsingData(BROWSING_DATA_OPTIONS.map(([kind]) => kind).filter((kind) => clearKinds.value.includes(kind)));
   } else notice.value = b.t("界面预览不保存真实浏览数据；请在 Windows 应用中清除。");
   pending.value = undefined;
 }
@@ -752,11 +784,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
               <Icon name="forward" :size="13" />
             </button>
             <p
-              v-if="(pane !== 'about' || searching) && (notice || b.dataStatus)"
+              v-if="(pane !== 'about' || searching) && notice"
               class="settings-feedback"
               role="status"
             >
-              {{ notice || b.t(b.dataStatus) }}
+              {{ notice }}
             </p>
             <section
               v-for="group in visibleGroups"
@@ -771,6 +803,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 </span>
                 <span><SearchHighlight :text="group.title" :words="words" /></span>
               </h3>
+              <p v-if="group.detail" class="settings-group-detail">{{ group.detail }}</p>
               <div v-for="row in group.rows" :key="row.id" class="setting-row" :class="{ 'setting-engine-row': row.id === 'engine' }">
                 <div class="setting-description">
                   <label :for="`setting-${row.id}-${tabId}`"><SearchHighlight :text="row.title" :words="words" /></label>
@@ -833,14 +866,20 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   v-else-if="row.kind === 'button'"
                   :id="`setting-${row.id}-${tabId}`"
                   class="setting-button"
-                  :disabled="row.id === 'default' && !b.native"
-                  :aria-label="row.id === 'onboarding' ? b.t('打开欢迎引导') : row.id === 'default' ? row.action : `${row.action}${row.title}`"
+                  :disabled="(row.id === 'default' && !b.native) || (row.id === 'clear-data' && b.dataClearPending)"
+                  :aria-label="row.id === 'onboarding' ? b.t('打开欢迎引导') : row.id === 'clear-data' ? row.title : row.action"
                   @click="action(row)"
                 >
                   <SearchHighlight :text="row.action!" :words="words" />
                 </button>
                 <span v-else class="setting-status"><SearchHighlight :text="row.action!" :words="words" /></span>
               </div>
+              <ul v-if="b.dataClear && group.rows.some((row) => row.id === 'clear-data')" class="settings-clear-results" aria-live="polite">
+                <li v-for="result in b.dataClear.results" :key="result.kind">
+                  <span>{{ b.t(clearLabels[result.kind]) }}</span>
+                  <span>{{ b.t(result.ok === null ? '正在清除…' : result.ok ? '已清除' : '清除失败，请重试') }}</span>
+                </li>
+              </ul>
             </section>
             <section
               v-if="b.native && (searching ? visiblePermissionRules.length : pane === 'privacy')"
@@ -859,7 +898,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 </div>
                 <select :id="`permission-rule-${tabId}-${index}`" :value="allowed ? 'allow' : 'block'"
                   @change="setPermission(scope, $event)">
-                  <option value="ask">{{ b.t('询问') }}</option>
+                  <option value="default">{{ b.t('使用默认设置') }}</option>
                   <option value="allow">{{ b.t('允许') }}</option>
                   <option value="block">{{ b.t('阻止') }}</option>
                 </select>
@@ -1043,17 +1082,24 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
       <section
         v-else-if="pending"
         class="settings-space-editor"
-        role="alertdialog"
+        :role="pending.kind === 'data' ? 'dialog' : 'alertdialog'"
         aria-modal="true"
         :aria-label="pending.title"
         :aria-describedby="`settings-confirm-detail-${tabId}`"
       >
         <h2>{{ pending.title }}</h2>
         <p :id="`settings-confirm-detail-${tabId}`">{{ pending.detail }}</p>
+        <div v-if="pending.kind === 'data'" class="settings-clear-options">
+          <label v-for="[kind, label] in BROWSING_DATA_OPTIONS" :key="kind">
+            <input type="checkbox" v-model="clearKinds" :value="kind" />
+            <span>{{ b.t(label) }}</span>
+          </label>
+          <p v-if="clearKinds.includes('siteData')" role="status">{{ b.t('清除 Cookie 和网站数据会退出网站登录。') }}</p>
+        </div>
         <footer>
           <button class="setting-button" @click="pending = undefined">
             {{ b.t('取消') }}</button
-          ><button class="primary-button" @click="confirm">
+            ><button class="primary-button" :disabled="pending.kind === 'data' && (!clearKinds.length || b.dataClearPending)" @click="confirm">
             {{ pending.kind === "update" ? b.t('确认更新并重启') : pending.kind === "space" ? b.t('删除工作区') : b.t('确认清除') }}
           </button>
         </footer>

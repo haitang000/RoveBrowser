@@ -131,6 +131,17 @@ try {
   await card().press("Escape");
   await card().waitFor({ state: "hidden", timeout: 8000 });
 
+  await send({ type: "settingsOpen", pane: "privacy" });
+  const defaultNotifications = () => shell.getByRole("combobox", { name: "通知", exact: true });
+  assert.equal(await defaultNotifications().inputValue(), "ask");
+  await defaultNotifications().selectOption("block");
+  await until(async () => (await defaultNotifications().inputValue()) === "block", "block notifications by default");
+  await send({ type: "new", url: `${otherAddress}?blocked` });
+  const blocked = await pageAt(`${otherAddress}?blocked`);
+  await ask(blocked);
+  await expectTitle(blocked, "denied");
+  assert.equal(await card().count(), 0);
+
   await stop();
   await launch();
   await send({ type: "new", url: `${address}?restart` });
@@ -142,11 +153,20 @@ try {
   await send({ type: "settingsOpen", pane: "privacy" });
   const rule = shell.getByLabel(`通知 · ${origin}`);
   await rule.waitFor({ timeout: 8000 });
+  assert.equal(await defaultNotifications().inputValue(), "block");
   assert.equal(await rule.inputValue(), "allow");
-  await rule.selectOption("ask");
+  await rule.selectOption({ label: "使用默认设置" });
   await rule.waitFor({ state: "detached", timeout: 8000 });
   await send({ type: "new", url: `${address}?reset` });
   site = await pageAt(`${address}?reset`);
+  await ask(site);
+  await expectTitle(site, "denied");
+  assert.equal(await card().count(), 0);
+
+  await send({ type: "settingsOpen", pane: "privacy" });
+  await defaultNotifications().selectOption("ask");
+  await send({ type: "new", url: `${address}?ask` });
+  site = await pageAt(`${address}?ask`);
   await ask(site);
   await card().waitFor({ timeout: 8000 });
   await card().getByRole("button", { name: "暂不处理" }).click();
@@ -165,7 +185,7 @@ try {
   await frame.evaluate(() => document.getElementById("location").click());
   const location = popup.getByRole("dialog", { name: "允许访问你的位置吗？" });
   await location.waitFor({ timeout: 8000 });
-  assert.match(await location.innerText(), /http:\/\/localhost:\d+\s+嵌入在 http:\/\/127\.0\.0\.1:\d+/);
+  assert.match(await location.innerText(), /http:\/\/localhost:\d+\s*嵌入在 http:\/\/127\.0\.0\.1:\d+/);
   await location.getByRole("button", { name: "不允许", exact: true }).click();
   await until(async () => embed.frame({ name: "embedded" })?.evaluate(() => document.title === "location 1"), "embedded location denial");
 
@@ -173,7 +193,15 @@ try {
   await card().waitFor({ timeout: 8000 });
   await Promise.all([embed.waitForEvent("domcontentloaded"), send({ type: "reload" })]);
   await card().waitFor({ state: "hidden", timeout: 8000 });
-  console.log("Native permission requests, persistence, navigation, screen sharing, and embedded-origin checks passed.");
+
+  await send({ type: "settingsOpen", pane: "privacy" });
+  await shell.getByRole("combobox", { name: "屏幕共享", exact: true }).selectOption("block");
+  await send({ type: "new", url: `${address}?screen-blocked` });
+  site = await pageAt(`${address}?screen-blocked`);
+  await site.getByRole("button", { name: "Share screen" }).click();
+  await expectTitle(site, "NotAllowedError");
+  assert.equal(await screen.count(), 0);
+  console.log("Native permission defaults, saved-rule priority, persistence, navigation, screen sharing, and embedded-origin checks passed.");
 } finally {
   await stop();
   server.close();

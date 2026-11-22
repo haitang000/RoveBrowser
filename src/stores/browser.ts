@@ -19,7 +19,7 @@ import type { ExtensionsState } from "../lib/extensions";
 import type { PermissionPrompt, PermissionRule } from "../lib/permissions";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
-import { SHORTCUTS, SIDEBAR_DENSITY_STORAGE_KEY, sameShortcut, settingsFor, shortcutFor, shortcutText, sidebarDensityFor, type SettingsPane, type UpdateChannel } from "../lib/settings";
+import { SHORTCUTS, SIDEBAR_DENSITY_STORAGE_KEY, sameShortcut, settingsFor, shortcutFor, shortcutText, sidebarDensityFor, type BrowsingDataKind, type SettingsPane, type UpdateChannel } from "../lib/settings";
 import { upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
 import type { LookFields } from "../lib/space-look";
@@ -353,7 +353,14 @@ export const useBrowser = defineStore("browser", () => {
     const label = shortcutLabel(id);
     return label ? `${title} (${label})` : title;
   }
-  const dataStatus = ref("");
+  const dataClear = ref<{ requestId: string; results: { kind: BrowsingDataKind; ok: boolean | null }[] }>();
+  const dataClearPending = computed(() => dataClear.value?.results.some((result) => result.ok === null) ?? false);
+  function clearBrowsingData(kinds: BrowsingDataKind[]) {
+    if (!native || !kinds.length || dataClearPending.value) return;
+    const requestId = crypto.randomUUID();
+    dataClear.value = { requestId, results: kinds.map((kind) => ({ kind, ok: null })) };
+    send({ type: "clearBrowsingData", requestId, kinds });
+  }
   function closeSpaceEditor() {
     spaceEditor.value = undefined;
     spacePreview.value = undefined;
@@ -942,8 +949,15 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "historyChanged") historyChanged(e.canUndo);
     if (e.type === "historyRefresh") historyVersion.value++;
     if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions && settings.value.searchSuggestions) suggestions.value = e.suggestions;
-    if (e.type === "dataCleared") { dataStatus.value = e.message || "已清除"; if (e.action === "history") history.value = []; }
-    if (e.type === "error") error.value = e.message || "操作失败";
+    if (e.type === "dataCleared") {
+      if (e.ok && e.action === "history") history.value = [];
+      const clear = dataClear.value;
+      if (clear && clear.requestId === e.requestId && typeof e.ok === "boolean") {
+        const result = clear.results.find(({ kind }) => kind === e.action);
+        if (result) result.ok = e.ok;
+      }
+    }
+    if (e.type === "error") error.value = t(e.message || "操作失败");
     if (e.type === "findOpen") {
       resetFind();
       findOpen.value = true;
@@ -1105,7 +1119,9 @@ export const useBrowser = defineStore("browser", () => {
     installUpdate,
     shortcutLabel,
     shortcutTitle,
-    dataStatus,
+    dataClear,
+    dataClearPending,
+    clearBrowsingData,
     openSettings,
     openHistory,
     browserShortcutLabel,

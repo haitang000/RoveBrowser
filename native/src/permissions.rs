@@ -26,6 +26,37 @@ pub enum Kind {
     Screen,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DefaultAction {
+    #[default]
+    Ask,
+    Block,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct Defaults {
+    camera: DefaultAction,
+    microphone: DefaultAction,
+    location: DefaultAction,
+    notifications: DefaultAction,
+    screen: DefaultAction,
+}
+
+impl Defaults {
+    fn blocks(&self, kind: Kind) -> bool {
+        let action = match kind {
+            Kind::Camera => self.camera,
+            Kind::Microphone => self.microphone,
+            Kind::Location => self.location,
+            Kind::Notifications => self.notifications,
+            Kind::Screen => self.screen,
+        };
+        action == DefaultAction::Block
+    }
+}
+
 impl Kind {
     fn from_webview(kind: COREWEBVIEW2_PERMISSION_KIND) -> Option<Self> {
         match kind {
@@ -234,7 +265,7 @@ impl Requests {
         rows
     }
 
-    pub fn reconcile(&mut self) {
+    pub fn reconcile(&mut self, defaults: &Defaults) {
         for incoming in self.inbox.take() {
             if let Some(existing) = self.waiting.iter_mut().find(|r| {
                 r.document.ptr_eq(&incoming.document)
@@ -257,6 +288,7 @@ impl Requests {
                     .rules
                     .get(&request.scope)
                     .copied()
+                    .or_else(|| defaults.blocks(request.scope.kind).then_some(false))
                     .or_else(|| document.answers.borrow().get(&request.scope).copied());
                 if let Some(allowed) = known {
                     request.answer(allowed, false);

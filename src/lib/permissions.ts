@@ -8,10 +8,14 @@ export const permissions = {
   screen: { name: "屏幕共享", question: "允许共享屏幕吗？", icon: "screen" },
 } as const;
 
+export type PermissionKind = keyof typeof permissions;
+export type PermissionDefault = "ask" | "block";
+export const permissionKinds = Object.keys(permissions) as PermissionKind[];
+
 export interface PermissionScope {
   page: string;
   requester: string;
-  kind: keyof typeof permissions;
+  kind: PermissionKind;
 }
 
 export type PermissionRule = [scope: PermissionScope, allowed: boolean];

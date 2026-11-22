@@ -44,6 +44,15 @@ pub fn default_shortcuts() -> Vec<(&'static str, Shortcut)> {
     })
     .collect()
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackingProtection {
+    Basic,
+    #[default]
+    Balanced,
+    Strict,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
@@ -62,6 +71,8 @@ pub struct Settings {
     pub save_passwords: bool,
     pub autofill: bool,
     pub remember_history: bool,
+    pub tracking_protection: TrackingProtection,
+    pub permission_defaults: crate::permissions::Defaults,
     pub web_rtc_address_protection: bool,
     pub devtools_mcp: bool,
     /// Zigzag `TabSleep`: background pages nobody has seen for a while give
@@ -91,6 +102,8 @@ impl Default for Settings {
             save_passwords: true,
             autofill: true,
             remember_history: true,
+            tracking_protection: TrackingProtection::default(),
+            permission_defaults: crate::permissions::Defaults::default(),
             web_rtc_address_protection: false,
             devtools_mcp: false,
             sleep_tabs: true,

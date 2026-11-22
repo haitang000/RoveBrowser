@@ -1,5 +1,6 @@
 //! WebView2 equivalents of Zigzag's WebKit preferences and browsing-data actions.
-use crate::settings::Settings;
+use crate::settings::{Settings, TrackingProtection};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
     fs,
@@ -10,13 +11,48 @@ use std::{
 use webview2_com::{
     ClearBrowsingDataCompletedHandler,
     Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2Profile2, ICoreWebView2Profile6, ICoreWebView2Settings4, ICoreWebView2_13,
+        ICoreWebView2Profile2, ICoreWebView2Profile3, ICoreWebView2Profile6, ICoreWebView2Settings4,
+        ICoreWebView2_13,
         COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_DOM_STORAGE, COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES,
-        COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE,
+        COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE, COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BASIC,
+        COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BALANCED, COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_STRICT,
     },
 };
 use windows::core::{Interface, HSTRING};
 use wry::{WebView, WebViewExtWindows};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BrowsingDataKind {
+    History,
+    Cache,
+    SiteData,
+    Downloads,
+}
+
+pub fn tracking_profile(view: &WebView) -> windows::core::Result<ICoreWebView2Profile3> {
+    unsafe { view.webview().cast::<ICoreWebView2_13>()?.Profile()?.cast() }
+}
+
+pub fn set_tracking_protection(
+    profile: &ICoreWebView2Profile3,
+    protection: TrackingProtection,
+) -> windows::core::Result<()> {
+    let level = match protection {
+        TrackingProtection::Basic => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BASIC,
+        TrackingProtection::Balanced => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BALANCED,
+        TrackingProtection::Strict => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_STRICT,
+    };
+    let mut applied = Default::default();
+    unsafe {
+        profile.SetPreferredTrackingPreventionLevel(level)?;
+        profile.PreferredTrackingPreventionLevel(&mut applied)?;
+    }
+    if applied != level {
+        return Err(windows::core::Error::from(windows::Win32::Foundation::E_FAIL));
+    }
+    Ok(())
+}
 
 /// WebView2 reads Chromium's IP handling preference when it opens the profile.
 /// Run before creating a WebView and wait out a previous session's final writes.
@@ -100,12 +136,12 @@ pub fn apply(view: &WebView, settings: &Settings) -> windows::core::Result<()> {
 }
 pub fn clear(
     view: &WebView,
-    kind: &str,
+    kind: BrowsingDataKind,
     callback: impl Fn(bool) + 'static,
 ) -> windows::core::Result<()> {
     let kinds = match kind {
-        "cache" => COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE,
-        "siteData" => {
+        BrowsingDataKind::Cache => COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE,
+        BrowsingDataKind::SiteData => {
             COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES
                 | COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_DOM_STORAGE
         }
