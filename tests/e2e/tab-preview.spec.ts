@@ -84,6 +84,7 @@ test("preview stays inside a narrow viewport and works with reduced motion and d
   await page.setViewportSize({ width: 480, height: 400 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await chooseBrowserMenuItem(page, "设置");
+  await page.getByRole('button', { name: '外观', exact: true }).click();
   await page.getByRole('combobox', { name: '外观', exact: true }).selectOption('dark');
   await page.keyboard.press('Control+w');
   await expect(page.locator(".settings-page")).toHaveCount(0);

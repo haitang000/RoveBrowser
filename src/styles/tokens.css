@@ -5,6 +5,9 @@
   --sidebar-edge: 6px;
   --row-height: 30px;
   --row-gap: 2px;
+  --row-padding-block: 4px;
+  --row-padding-inline: 5px;
+  --sidebar-list-inset: 12px;
   --favicon: 16px;
   --icon-gap: 8px;
   --row-inset: 6px;

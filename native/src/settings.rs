@@ -51,6 +51,7 @@ pub struct Settings {
     pub search_engine: String,
     pub custom_search_template: String,
     pub search_suggestions: bool,
+    pub sidebar_density: String,
     pub large_space_names: bool,
     pub favorites_per_row: u8,
     pub default_page_zoom: f64,
@@ -79,6 +80,7 @@ impl Default for Settings {
             search_engine: "google".into(),
             custom_search_template: String::new(),
             search_suggestions: true,
+            sidebar_density: "standard".into(),
             large_space_names: true,
             favorites_per_row: 4,
             default_page_zoom: 1.0,
@@ -118,7 +120,7 @@ pub fn normalize_settings_url(value: &str) -> Option<String> {
 pub fn settings_url(pane: Option<&str>) -> String {
     match pane {
         Some(
-            p @ ("spaces" | "passwords" | "privacy" | "translation" | "accessibility" | "extensions" | "experimental" | "shortcuts" | "about"),
+            p @ ("appearance" | "spaces" | "passwords" | "privacy" | "translation" | "accessibility" | "extensions" | "experimental" | "shortcuts" | "about"),
         ) => format!("rove://settings/{p}"),
         _ => "rove://settings".into(),
     }
@@ -172,6 +174,9 @@ impl Settings {
     fn normalize_choices(&mut self) {
         if !matches!(self.language.as_str(), "zh-CN" | "zh-TW" | "en") {
             self.language = "zh-CN".into();
+        }
+        if !matches!(self.sidebar_density.as_str(), "compact" | "standard" | "comfortable") {
+            self.sidebar_density = "standard".into();
         }
         if self.update_channel != "preview" && self.update_channel != "canary" {
             self.update_channel = "preview".into();

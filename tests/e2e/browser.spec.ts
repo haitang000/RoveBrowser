@@ -88,6 +88,7 @@ test("spaces, dark mode, pinning and split container", async ({ page }) => {
   await expect(page.locator(".page-pane")).toHaveCount(1);
   await expect(page.locator(".titlebar")).toBeVisible();
   await chooseBrowserMenuItem(page, "设置");
+  await page.getByRole("button", { name: "外观", exact: true }).click();
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator(".browser-shell")).toHaveCSS(

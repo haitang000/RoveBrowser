@@ -122,6 +122,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
       if (attribute.name !== "class") item.removeAttribute(attribute.name);
     }
     item.setAttribute("aria-hidden", "true");
+    item.dataset.sidebarDensity = b.settings.sidebarDensity;
     item.inert = true;
     Object.assign(item.style, {
       width: `${rect.width}px`, height: `${rect.height}px`,

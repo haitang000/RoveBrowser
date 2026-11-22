@@ -32,7 +32,7 @@ function showMenu(e: MouseEvent, tab: Tab) {
 }
 </script>
 <template>
-  <aside ref="sidebar" class="sidebar" :aria-label="b.t('浏览器侧栏')" @wheel="spaceDeck?.wheel($event)"
+  <aside ref="sidebar" class="sidebar" :data-sidebar-density="b.settings.sidebarDensity" :aria-label="b.t('浏览器侧栏')" @wheel="spaceDeck?.wheel($event)"
     @pointerdown="tabDrag.press" @lostpointercapture="tabDrag.captureLost">
     <template v-if="b.splitPartner">
       <div class="split-sidebar-top" data-window-drag data-chrome-motion="sidebar-toolbar">

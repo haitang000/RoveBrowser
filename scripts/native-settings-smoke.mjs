@@ -158,6 +158,14 @@ try {
     async () => (await state()).settings.searchEngine === "custom",
     "preferences broadcast",
   );
+  await send({ type: "settingsOpen" });
+  await ui.getByRole("button", { name: "外观", exact: true }).click();
+  await waitFor(async () => (await state()).tabs.some((tab) => tab.url === "rove://settings/appearance"), "appearance pane");
+  const density = ui.getByRole("combobox", { name: "侧边栏紧凑程度", exact: true });
+  assert.equal(await density.inputValue(), "standard");
+  await density.selectOption("compact");
+  await waitFor(async () => (await state()).settings.sidebarDensity === "compact", "sidebar density saved");
+  await ui.locator('.sidebar[data-sidebar-density="compact"]').waitFor();
   await send({ type: "settingsOpen", pane: "privacy" });
   await ui.locator(".settings-page").waitFor();
   const id = (await state()).activeTab;
@@ -337,6 +345,7 @@ try {
   assert.equal(restored.settings.rememberHistory, false);
   assert.equal(restored.settings.reduceMotion, true);
   assert.equal(restored.settings.language, "en");
+  assert.equal(restored.settings.sidebarDensity, "compact");
   assert.equal(restored.settings.shortcuts.new.key, 89);
   assert.equal(restored.theme, "dark");
   assert.equal(
@@ -344,6 +353,7 @@ try {
     "rove://settings/privacy",
   );
   await ui.locator(".settings-page").waitFor();
+  await ui.locator('.sidebar[data-sidebar-density="compact"]').waitFor();
   await ui.getByRole("heading", { name: "Privacy", exact: true }).waitFor();
   assert.equal(await webRtcToggle("WebRTC address protection").getAttribute("aria-checked"), "true");
   await ui.screenshot({ path: join(output, "native-settings-restored.png") });

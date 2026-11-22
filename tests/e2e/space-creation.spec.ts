@@ -27,6 +27,8 @@ test("the footer keeps the tab overview separate and the browser menu supports k
   await page.keyboard.press("ArrowDown");
   await expect(menu.getByRole("menuitem", { name: "新建 Space", exact: true })).toBeFocused();
   await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: "历史记录", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(menu.getByRole("menuitem", { name: "下载", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
@@ -135,6 +137,7 @@ test("command action opens the creation page and Enter submits the name", async 
 
 test("creation and theme editor fit narrow, short and dark windows", async ({ page }) => {
   await chooseBrowserMenuItem(page, "设置");
+  await page.getByRole("button", { name: "外观", exact: true }).click();
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await page.keyboard.press("Control+w");
   await openCreation(page);

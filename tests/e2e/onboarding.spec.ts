@@ -189,7 +189,9 @@ test("skip discards uncommitted picks and small windows keep actions reachable",
 test("existing sessions reopen the welcome without losing tabs or custom search", async ({ page }) => {
   await page.goto("/");
   await chooseBrowserMenuItem(page, "设置");
+  await page.getByRole("button", { name: "外观", exact: true }).click();
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
+  await page.getByRole("button", { name: "通用", exact: true }).click();
   await page.getByRole("combobox", { name: "搜索引擎", exact: true }).selectOption("baidu");
   const originalTabs = await page.getByRole("tab").count();
   await page.getByRole("button", { name: "打开欢迎引导", exact: true }).click();

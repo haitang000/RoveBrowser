@@ -88,9 +88,9 @@ function openMenu(event: MouseEvent, id?: string) {
 .pin-folder-header {
   display: flex;
   align-items: center;
-  min-height: 30px;
-  margin-bottom: 2px;
-  padding-right: 3px;
+  min-height: var(--row-height);
+  margin-bottom: var(--row-gap);
+  padding-inline-end: calc(var(--row-padding-inline) - 2px);
   border: 1px solid transparent;
   border-radius: 6px;
   color: var(--ink);
@@ -105,7 +105,7 @@ function openMenu(event: MouseEvent, id?: string) {
   flex: 1;
   gap: 6px;
   min-width: 0;
-  padding: 0 4px;
+  padding: 0 calc(var(--row-padding-inline) - 1px);
   font-size: 13px;
   text-align: left;
 }

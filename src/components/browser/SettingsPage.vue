@@ -14,6 +14,7 @@ import {
   READ_ALOUD_RATES,
   SEARCH_ENGINES,
   SHORTCUTS,
+  SIDEBAR_DENSITIES,
   settingsPane,
   shortcutFor,
   shortcutText,
@@ -85,7 +86,7 @@ function trapFocus(event: KeyboardEvent) {
   }
 }
 const navigationIds = [
-  ["general", "spaces", "shortcuts"],
+  ["general", "appearance", "spaces", "shortcuts"],
   ["privacy", "passwords", "translation", "accessibility", "about"],
   ["extensions"],
   ["experimental"],
@@ -177,7 +178,7 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "general",
-    title: b.t("窗口与外观"),
+    title: b.t("窗口"),
     rows: [
       {
         id: "default",
@@ -197,6 +198,20 @@ const groups = computed<Group[]>(() => [
         keywords: "language locale 界面语言 简体中文 繁體中文 介面語言 English",
       },
       {
+        id: "quit",
+        title: b.t("退出前询问"),
+        detail: b.t("关闭窗口前确认，避免意外关闭所有标签页。"),
+        kind: "toggle",
+        setting: "askBeforeQuit",
+        keywords: "ask before quitting",
+      },
+    ],
+  },
+  {
+    pane: "appearance",
+    title: b.t("主题"),
+    rows: [
+      {
         id: "theme",
         title: b.t("外观"),
         detail: b.t("选择浏览器界面的浅色或深色外观。"),
@@ -206,6 +221,21 @@ const groups = computed<Group[]>(() => [
           ["dark", b.t("深色")],
         ],
         keywords: "theme appearance 深色模式 浅色模式",
+      },
+    ],
+  },
+  {
+    pane: "appearance",
+    title: b.t("侧边栏设置"),
+    rows: [
+      {
+        id: "sidebar-density",
+        title: b.t("侧边栏紧凑程度"),
+        detail: b.t("调整侧边栏元素之间的间距和标签按钮的内边距。"),
+        kind: "select",
+        setting: "sidebarDensity",
+        options: SIDEBAR_DENSITIES.map(([id, label]) => [id, b.t(label)]),
+        keywords: "sidebar density spacing padding compact comfortable 侧栏 紧凑程度",
       },
       {
         id: "names",
@@ -228,14 +258,6 @@ const groups = computed<Group[]>(() => [
           [4, "4"],
         ],
         keywords: "favorites per row",
-      },
-      {
-        id: "quit",
-        title: b.t("退出前询问"),
-        detail: b.t("关闭窗口前确认，避免意外关闭所有标签页。"),
-        kind: "toggle",
-        setting: "askBeforeQuit",
-        keywords: "ask before quitting",
       },
     ],
   },

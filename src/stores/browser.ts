@@ -19,7 +19,7 @@ import type { ExtensionsState } from "../lib/extensions";
 import type { PermissionPrompt, PermissionRule } from "../lib/permissions";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
-import { SHORTCUTS, sameShortcut, settingsFor, shortcutFor, shortcutText, type SettingsPane, type UpdateChannel } from "../lib/settings";
+import { SHORTCUTS, SIDEBAR_DENSITY_STORAGE_KEY, sameShortcut, settingsFor, shortcutFor, shortcutText, sidebarDensityFor, type SettingsPane, type UpdateChannel } from "../lib/settings";
 import { upgradeLibrary } from "../lib/bookmarks";
 import { onboardingPreview, ONBOARDING_PREVIEW_KEY } from "../lib/onboarding";
 import type { LookFields } from "../lib/space-look";
@@ -107,7 +107,7 @@ export const useBrowser = defineStore("browser", () => {
     });
   }
   // Native preferences live in the session database. The standalone preview
-  // remembers only the new-tab layout and language, not the demo session.
+  // stores the new-tab layout, interface language and sidebar density locally.
   if (!native && !popupWindow) {
     try {
       const saved = localStorage.getItem(NEW_TAB_STORAGE_KEY);
@@ -117,6 +117,10 @@ export const useBrowser = defineStore("browser", () => {
       const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
       if (saved) state.value.settings = settingsFor({ ...state.value.settings, language: interfaceLanguage(saved) });
     } catch { /* Keep the default language. */ }
+    try {
+      const saved = localStorage.getItem(SIDEBAR_DENSITY_STORAGE_KEY);
+      if (saved) state.value.settings = settingsFor({ ...state.value.settings, sidebarDensity: sidebarDensityFor(saved) });
+    } catch { /* Keep the default sidebar density. */ }
     watch(() => state.value.newTab, (value) => {
       try { localStorage.setItem(NEW_TAB_STORAGE_KEY, JSON.stringify(newTabSettings(value))); } catch { /* Keep the current layout in memory. */ }
     }, { deep: true });
@@ -258,6 +262,9 @@ export const useBrowser = defineStore("browser", () => {
   if (!native && !popupWindow) {
     watch(language, (value) => {
       try { localStorage.setItem(LANGUAGE_STORAGE_KEY, value); } catch { /* Keep the preference in memory. */ }
+    });
+    watch(() => settings.value.sidebarDensity, (value) => {
+      try { localStorage.setItem(SIDEBAR_DENSITY_STORAGE_KEY, value); } catch { /* Keep the preference in memory. */ }
     });
   }
   const updatePhases = ["idle", "checking", "current", "ahead", "available", "downloading", "extracting", "installing", "error"] as const;

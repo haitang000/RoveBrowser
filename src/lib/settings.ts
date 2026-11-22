@@ -7,7 +7,13 @@ export const SETTINGS_PANES = [
     id: "general",
     title: "通用",
     icon: "settings",
-    keywords: "general 搜索 外观 窗口 下载",
+    keywords: "general 搜索 窗口 下载",
+  },
+  {
+    id: "appearance",
+    title: "外观",
+    icon: "sun",
+    keywords: "appearance",
   },
   {
     id: "spaces",
@@ -135,6 +141,17 @@ export const SHORTCUTS = [
   },
 ] as const;
 export const READ_ALOUD_RATES = [[-3, "较慢"], [-1, "稍慢"], [0, "标准语速"], [1, "稍快"], [3, "较快"]] as const;
+export const SIDEBAR_DENSITIES = [
+  ["compact", "紧凑"],
+  ["standard", "标准"],
+  ["comfortable", "宽松"],
+] as const;
+export type SidebarDensity = (typeof SIDEBAR_DENSITIES)[number][0];
+export const SIDEBAR_DENSITY_STORAGE_KEY = "rove.sidebarDensity";
+
+export function sidebarDensityFor(value: unknown): SidebarDensity {
+  return value === "compact" || value === "comfortable" ? value : "standard";
+}
 // Matches the page zoom steps used by the native host.
 export const PAGE_ZOOM_STEPS: readonly number[] = [
   0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3,
@@ -145,6 +162,7 @@ export interface Settings {
   searchEngine: string;
   customSearchTemplate: string;
   searchSuggestions: boolean;
+  sidebarDensity: SidebarDensity;
   largeSpaceNames: boolean;
   favoritesPerRow: number;
   defaultPageZoom: number;
@@ -169,6 +187,7 @@ export const defaultSettings = (): Settings => ({
   searchEngine: "google",
   customSearchTemplate: "",
   searchSuggestions: true,
+  sidebarDensity: "standard",
   largeSpaceNames: true,
   favoritesPerRow: 4,
   defaultPageZoom: 1,
@@ -199,6 +218,7 @@ export function updateChannelDetail(channel: UpdateChannel): string {
 export function settingsFor(value?: Partial<Settings>): Settings {
   const settings = { ...defaultSettings(), ...value };
   settings.language = interfaceLanguage(settings.language);
+  settings.sidebarDensity = sidebarDensityFor(settings.sidebarDensity);
   if (!PAGE_ZOOM_STEPS.includes(settings.defaultPageZoom)) settings.defaultPageZoom = 1;
   settings.readAloudEnabled = settings.readAloudEnabled === true;
   if (!READ_ALOUD_RATES.some(([rate]) => rate === settings.readAloudRate)) settings.readAloudRate = 0;

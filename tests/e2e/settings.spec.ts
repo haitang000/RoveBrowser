@@ -100,6 +100,7 @@ test("settings are a reusable tab with searchable sections and live preferences"
   await page
     .getByRole("combobox", { name: "搜索引擎", exact: true })
     .selectOption("baidu");
+  await page.getByRole("button", { name: "外观", exact: true }).click();
   await page
     .getByRole("switch", { name: "大号工作区名称", exact: true })
     .click();
@@ -122,7 +123,7 @@ test("settings are a reusable tab with searchable sections and live preferences"
     "data-reduce-motion",
     "true",
   );
-  await page.getByRole("button", { name: "通用", exact: true }).click();
+  await page.getByRole("button", { name: "外观", exact: true }).click();
   await page
     .getByRole("combobox", { name: "外观", exact: true })
     .selectOption("dark");
@@ -157,10 +158,45 @@ test("settings are a reusable tab with searchable sections and live preferences"
   );
 });
 
+test("sidebar density updates row and tile spacing and survives a reload", async ({ page }) => {
+  const density = page.getByRole("combobox", { name: "侧边栏紧凑程度", exact: true });
+  const space = page.locator('.space-list[data-space-id="personal"]');
+  const tab = space.locator(".tab-row").first();
+  const newTab = space.locator(".new-tab");
+  const favorites = page.locator(".sidebar .favorites");
+  await expect(density).toHaveCount(0);
+  await page.getByRole("button", { name: "外观", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "设置", exact: true })).toHaveAttribute("title", "rove://settings/appearance");
+  await expect(density).toHaveValue("standard");
+  await expect(tab).toHaveCSS("height", "30px");
+  await expect(favorites).toHaveCSS("gap", "6px");
+
+  await density.selectOption("compact");
+  await expect(tab).toHaveCSS("height", "26px");
+  await expect(tab).toHaveCSS("margin-bottom", "1px");
+  await expect(newTab).toHaveCSS("padding", "2px 3px");
+  await expect(favorites).toHaveCSS("gap", "3px");
+
+  const search = page.getByRole("searchbox", { name: "查找设置" });
+  await search.fill("sidebar density");
+  await expect(page.getByRole("region", { name: "侧边栏设置", exact: true }).locator("h3")).toHaveText(/外观\s*›\s*侧边栏设置/);
+  await density.selectOption("comfortable");
+  await expect(tab).toHaveCSS("height", "34px");
+  await expect(tab).toHaveCSS("margin-bottom", "4px");
+  await expect(newTab).toHaveCSS("padding", "6px 8px");
+  await expect(favorites).toHaveCSS("gap", "9px");
+
+  await page.reload();
+  await expect(newTab).toHaveCSS("padding", "6px 8px");
+  await chooseBrowserMenuItem(page, "设置");
+  await page.getByRole("button", { name: "外观", exact: true }).click();
+  await expect(density).toHaveValue("comfortable");
+});
+
 test("the action toast follows the selected appearance and fades with reduced motion", async ({ page }) => {
   await page.getByRole("button", { name: "无障碍", exact: true }).click();
   await page.getByRole("switch", { name: "减少动态效果", exact: true }).click();
-  await page.getByRole("button", { name: "通用", exact: true }).click();
+  await page.getByRole("button", { name: "外观", exact: true }).click();
   await page.evaluate(() => {
     document.addEventListener("transitionrun", (event) => {
       const target = event.target;
@@ -176,9 +212,9 @@ test("the action toast follows the selected appearance and fades with reduced mo
   const surface = toast.locator(".toast-surface");
   await expect(surface).toHaveCSS("background-image", /linear-gradient.*rgb\(255, 255, 255\)/);
   await expect(surface.locator("svg")).toBeVisible();
+  await expect(toast).toHaveAttribute("data-motion", "opacity 0.08s");
   await page.getByRole("combobox", { name: "外观", exact: true }).selectOption("dark");
   await expect(surface).toHaveCSS("background-image", /linear-gradient.*rgb\(52, 54, 60\)/);
-  await expect(toast).toHaveAttribute("data-motion", "opacity 0.08s");
 });
 
 test("custom engine validates its address and shortcut recording changes actual keys", async ({
@@ -294,6 +330,7 @@ test("workspace search preserves Unicode and renders user text safely", async ({
 
 test("search highlights adapt to light, dark and narrow settings panes", async ({ page }) => {
   const search = page.getByRole("searchbox", { name: "查找设置" });
+  await page.getByRole("button", { name: "外观", exact: true }).click();
   for (const theme of ["light", "dark"]) {
     await search.fill("");
     await page.getByRole("combobox", { name: "外观", exact: true }).selectOption(theme);

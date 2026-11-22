@@ -426,6 +426,22 @@ kbd {
   user-select: none;
   transition: transform var(--motion-slide) var(--ease-out), opacity var(--motion-slide) var(--ease-out);
 }
+[data-sidebar-density="compact"] {
+  --row-height: 26px;
+  --row-gap: 1px;
+  --row-padding-block: 2px;
+  --row-padding-inline: 3px;
+  --favorite-gap: 3px;
+  --sidebar-list-inset: 8px;
+}
+[data-sidebar-density="comfortable"] {
+  --row-height: 34px;
+  --row-gap: 4px;
+  --row-padding-block: 6px;
+  --row-padding-inline: 8px;
+  --favorite-gap: 9px;
+  --sidebar-list-inset: 16px;
+}
 .collapsed .sidebar {
   transform: translateX(-16px);
   opacity: 0;
@@ -479,7 +495,7 @@ kbd {
 .favorites {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  gap: var(--favorite-gap);
   flex-shrink: 0;
   max-height: 120px;
   overflow-y: auto;
@@ -518,7 +534,7 @@ kbd {
   flex: 1;
   overflow: auto;
   min-height: 0;
-  padding-top: 12px;
+  padding-top: var(--sidebar-list-inset);
 }
 /* Chromium's stock scrollbar is replaced by an ambient pill that only appears
  * while the list moves. The heavy top inset lowers the pill's visual centre so
@@ -594,14 +610,14 @@ kbd {
 }
 .tab-row,
 .new-tab {
-  height: 30px;
+  height: var(--row-height);
   display: flex;
   align-items: center;
   gap: 8px;
   border: 1px solid transparent;
   border-radius: 6px;
-  padding: 0 5px;
-  margin-bottom: 2px;
+  padding: var(--row-padding-block) var(--row-padding-inline);
+  margin-bottom: var(--row-gap);
   position: relative;
   font-size: 13px;
   user-select: none;
