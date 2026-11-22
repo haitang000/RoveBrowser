@@ -41,7 +41,8 @@ watch(() => frameOf(b.space, b.state.theme, false), (frame) => {
     root.style.removeProperty("--frame-h");
   }
 }, { immediate: true });
-let observer: MutationObserver, resize: ResizeObserver, frame = 0, last = "", focusKey = "";
+let observer: MutationObserver, resize: ResizeObserver, last = "", focusKey = "";
+let observedPreview: HTMLElement | null = null;
 const key = (event: KeyboardEvent) => browserKey(b, event);
 const keyUp = (event: KeyboardEvent) => browserKeyUp(b, event);
 function dismissPreview() {
@@ -50,6 +51,12 @@ function dismissPreview() {
 function report() {
   const modals = ".quit-scrim, .extension-install-scrim, .extension-menu-layer, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer, .tab-switcher-layer";
   const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .permission-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer, .split-controls, .split-controls-dismiss`);
+  const preview = document.getElementById("tab-hover-preview");
+  if (preview !== observedPreview) {
+    if (observedPreview) resize.unobserve(observedPreview);
+    if (preview) resize.observe(preview, { box: "border-box" });
+    observedPreview = preview;
+  }
   const rect = (element: HTMLElement) => {
     const r = element.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
@@ -81,7 +88,6 @@ function report() {
     document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: active === "pageMenu" || active === "menu" });
   }
 }
-function schedule() { cancelAnimationFrame(frame); frame = requestAnimationFrame(report); }
 onMounted(async () => {
   document.documentElement.dataset.native = "true";
   document.documentElement.dataset.popup = "true";
@@ -89,16 +95,16 @@ onMounted(async () => {
   window.addEventListener("keyup", keyUp);
   document.addEventListener("pointerdown", dismissPreview, true);
   document.addEventListener("wheel", dismissPreview, { capture: true, passive: true });
+  resize = new ResizeObserver(report);
+  resize.observe(document.documentElement);
   observer = new MutationObserver(report);
   observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-  resize = new ResizeObserver(schedule);
-  resize.observe(document.documentElement);
   await document.fonts.ready;
   await nextTick();
   report();
 });
 onBeforeUnmount(() => {
-  observer?.disconnect(); resize?.disconnect(); cancelAnimationFrame(frame);
+  observer?.disconnect(); resize?.disconnect();
   window.removeEventListener("keydown", key);
   window.removeEventListener("keyup", keyUp);
   document.removeEventListener("pointerdown", dismissPreview, true);

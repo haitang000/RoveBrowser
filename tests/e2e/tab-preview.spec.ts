@@ -8,6 +8,9 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 });
 const preview = "#tab-hover-preview";
+const picture = `${preview} .tab-preview-picture`;
+const snapshot = `${preview} .tab-preview-snapshot`;
+const pane = `${preview} .tab-preview-pane`;
 
 test("short hovers cancel; after opening, another row updates immediately; leaving dismisses", async ({ page }) => {
   const wiki = page.locator('[data-bookmark-id="pin-wiki"]');
@@ -50,7 +53,7 @@ test("unloaded favorites remain unloaded; snapshots update while a split is prev
   const before = await page.getByRole("tab").count();
   await figma.hover();
   await expect(page.locator(preview)).toContainText("Figma");
-  await expect(page.locator(preview)).toContainText("界面预览");
+  await expect(page.locator(picture)).toHaveCSS("height", "0px");
   await expect(figma.locator('.favorite-close')).toHaveCount(0);
   expect(await page.getByRole("tab").count()).toBe(before);
   await page.mouse.move(900, 600);
@@ -66,14 +69,14 @@ test("unloaded favorites remain unloaded; snapshots update while a split is prev
   await page.locator('[data-tab-id="start"]').click();
   await page.locator(`[data-tab-id="${ids[1]}"]`).hover();
   await expect(page.locator(`${preview} .tab-preview-caption`)).toHaveCount(2);
-  await expect(page.locator(`${preview} .tab-preview-empty`)).toHaveCount(2);
+  await expect(page.locator(picture)).toHaveCSS("height", "0px");
   await page.evaluate((ids) => {
     const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="teal"/></svg>');
     window.__ERA_RECEIVE__!({ type: 'thumbnails', images: Object.fromEntries(ids.map(id => [id, image])) });
   }, ids);
   await expect(page.locator(`${preview} img`)).toHaveCount(2);
-  await expect(page.locator(`${preview} img`).first()).toHaveCSS("opacity", "1");
-  await expect(page.locator(`${preview} img`).nth(1)).toHaveCSS("opacity", "1");
+  await expect(page.locator(pane).first()).toHaveCSS("opacity", "1");
+  await expect(page.locator(pane).nth(1)).toHaveCSS("opacity", "1");
   await page.keyboard.press("Escape");
 });
 
@@ -94,7 +97,7 @@ test("preview stays inside a narrow viewport and works with reduced motion and d
 });
 
 test("native preview uses the popup renderer and ignores old close acknowledgments", async ({ page, context }) => {
-  const messages: { type: string; rect?: unknown; ticket?: number; popup?: Record<string, unknown> }[] = [];
+  const messages: { type: string; rect?: unknown; ticket?: number; regions?: { x: number; height: number }[] }[] = [];
   const popup = await context.newPage();
   for (const [target, isPopup] of [[page, false], [popup, true]] as const) {
     await target.exposeFunction("popupTestSend", async (text: string) => {
@@ -118,11 +121,17 @@ test("native preview uses the popup renderer and ignores old close acknowledgmen
   await expect(popup.locator(preview)).toHaveAttribute("data-phase", "open");
   await expect(popup.locator(".tab-preview-background")).toHaveCount(0);
   await expect(popup.locator(preview)).not.toContainText("正在生成预览");
-  await expect(popup.locator(`${preview} .tab-preview-empty`)).toHaveCount(0);
+  await expect(popup.locator(picture)).toHaveCSS("height", "0px");
   await expect(popup.locator(preview)).toContainText("Wikipedia");
+  const compact = (await popup.locator(preview).boundingBox())!;
   const image = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="320" height="200" fill="teal"/></svg>');
   await popup.evaluate(image => window.__ERA_RECEIVE__?.({ type: "thumbnail", id: "wiki", image, kept: ["wiki"] }), image);
-  await expect(popup.locator(`${preview} .tab-preview-snapshot`)).toHaveCSS("opacity", "1");
+  await expect(popup.locator(pane)).toHaveCSS("opacity", "1");
+  const expanded = (await popup.locator(preview).boundingBox())!;
+  const regionHeights = () => messages.flatMap(message => message.regions ?? []).filter(region => region.x === compact.x - 20).map(region => region.height - 40);
+  await expect.poll(regionHeights).toContain(expanded.height);
+  expect(regionHeights()).toContain(compact.height);
+  expect(regionHeights().some(height => height > compact.height && height < expanded.height)).toBe(true);
   await expect(popup.locator(preview)).not.toContainText("正在生成预览");
   await page.mouse.move(900, 600);
   await expect.poll(() => messages.some(m => m.type === "tabPreview" && !m.rect)).toBe(true);
@@ -215,12 +224,9 @@ test("saved preview cache survives state broadcasts and expires when its URL cha
   }, { state, image });
   const row = page.locator('.favorite-tile[data-bookmark-id="favorite-figma"]');
   await row.hover();
-  const ready = page.locator(`${preview} .tab-preview-snapshot`);
+  const ready = page.locator(snapshot);
   await expect(ready).toHaveCount(1);
-  await expect(ready).toHaveClass(/is-shown/);
-  await expect(page.locator(`${preview} .tab-preview-pane`)).toHaveClass(/is-instant/);
-  await expect(ready).toHaveCSS("opacity", "1");
-  expect(await ready.evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
+  await expect(page.locator(pane)).toHaveCSS("opacity", "1");
   await page.keyboard.press('Escape');
   await expect(page.locator(preview)).toHaveCount(0);
   state.favorites.find(f => f.id === 'favorite-figma')!.url = 'https://figma.com/updated';
@@ -230,7 +236,7 @@ test("saved preview cache survives state broadcasts and expires when its URL cha
   await expect(page.locator(`${preview} .tab-preview-pane > img`)).toHaveCount(0);
 });
 
-test("a snapshot that is not ready stays hidden, then fades in once it loads", async ({ page }) => {
+test("a slow snapshot stays out of the layout until it can smoothly expand the card", async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/slow-snapshot.svg", async (route) => {
@@ -241,41 +247,38 @@ test("a snapshot that is not ready stays hidden, then fades in once it loads", a
     });
   });
   try {
-    const row = page.locator('.pinned-tabs [data-bookmark-id="pin-wiki"]');
-    await row.hover();
-    await expect(page.locator(preview)).toContainText("界面预览");
-    await expect(page.locator(`${preview} img`)).toHaveCount(0);
+    // The URL is already in the thumbnail cache when hover starts, but the image is still pending.
     await page.evaluate(() => {
       window.__ERA_RECEIVE__!({ type: "thumbnail", id: "wiki", image: "/slow-snapshot.svg", kept: ["wiki"] });
     });
-    const img = page.locator(`${preview} .tab-preview-snapshot`);
-    await expect(img).toHaveCount(1);
-    await expect(img).not.toHaveClass(/is-shown/);
-    expect(await img.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
-    await page.evaluate(() => {
-      const image = document.querySelector<HTMLImageElement>(".tab-preview-snapshot")!;
+    const row = page.locator('.pinned-tabs [data-bookmark-id="pin-wiki"]');
+    const card = page.locator(preview);
+    await row.hover();
+    await expect(card).toHaveAttribute("data-phase", "open");
+    await expect(card).toContainText("Wikipedia");
+    await expect(card).toContainText("wikipedia.org");
+    await expect(page.locator(snapshot)).toHaveCount(0);
+    await expect(page.locator(picture)).toHaveCSS("height", "0px");
+    const compact = (await card.boundingBox())!;
+    await card.evaluate((el) => {
       (window as unknown as { __snapshotWatch?: Promise<unknown> }).__snapshotWatch = new Promise((resolve) => {
-        const observer = new MutationObserver(() => {
-          observer.disconnect();
-          getComputedStyle(image).opacity;
-          requestAnimationFrame(() => {
-            const transition = image.getAnimations().find((animation) => animation instanceof CSSTransition);
-            resolve({
-              opacity: Number(getComputedStyle(image).opacity),
-              duration: transition ? Number(transition.effect!.getTiming().duration) : 0,
-            });
-          });
+        el.addEventListener("transitionrun", (event) => {
+          if (event.target !== el || event.propertyName !== "height") return;
+          const imagePane = el.querySelector<HTMLElement>(".tab-preview-pane")!;
+          const resize = el.getAnimations().find(animation => animation instanceof CSSTransition && animation.transitionProperty === "height")!;
+          const fade = imagePane.getAnimations().find(animation => animation instanceof CSSTransition)!;
+          resize.currentTime = fade.currentTime = 80;
+          resolve({ height: el.getBoundingClientRect().height, opacity: Number(getComputedStyle(imagePane).opacity) });
         });
-        observer.observe(image, { attributes: true, attributeFilter: ["class"] });
       });
     });
     release();
-    const mid = await page.evaluate(() => (window as unknown as { __snapshotWatch: Promise<{ opacity: number; duration: number }> }).__snapshotWatch);
-    expect(mid.duration).toBe(200);
+    const mid = await page.evaluate(() => (window as unknown as { __snapshotWatch: Promise<{ height: number; opacity: number }> }).__snapshotWatch);
+    expect(mid.height).toBeGreaterThan(compact.height);
+    expect(mid.opacity).toBeGreaterThan(0);
     expect(mid.opacity).toBeLessThan(1);
-    await expect(img).toHaveClass(/is-shown/);
-    await expect(img).toHaveCSS("opacity", "1");
-    await expect(page.locator(`${preview} .tab-preview-empty`)).toHaveClass(/is-covered/);
+    await expect(page.locator(pane)).toHaveCSS("opacity", "1");
+    expect((await card.boundingBox())!.height).toBeGreaterThan(mid.height);
   } finally {
     release();
   }
