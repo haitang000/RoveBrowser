@@ -58,6 +58,7 @@ pub struct Settings {
     pub save_passwords: bool,
     pub autofill: bool,
     pub remember_history: bool,
+    pub web_rtc_address_protection: bool,
     /// Zigzag `TabSleep`: background pages nobody has seen for a while give
     /// their memory back. On unless the user turns it off.
     pub sleep_tabs: bool,
@@ -82,6 +83,7 @@ impl Default for Settings {
             save_passwords: true,
             autofill: true,
             remember_history: true,
+            web_rtc_address_protection: false,
             sleep_tabs: true,
             download_folder: String::new(),
             update_channel: "preview".into(),

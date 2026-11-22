@@ -99,6 +99,38 @@ async function stop() {
   await uiBrowser?.close();
   uiBrowser = undefined;
 }
+async function hasDirectWebRtcCandidates(page) {
+  return page.evaluate(async () => {
+    const connection = new RTCPeerConnection({ iceServers: [] });
+    let hasDirectUdp = false;
+    let timeout;
+    try {
+      const gathered = new Promise((resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("ICE gathering timed out")), 5000);
+        connection.onicecandidate = ({ candidate }) => {
+          if (candidate === null) resolve(hasDirectUdp);
+          else if (candidate.type === "host" && candidate.protocol === "udp") hasDirectUdp = true;
+        };
+      });
+      connection.createDataChannel("settings-fixture");
+      await connection.setLocalDescription(await connection.createOffer());
+      return await gathered;
+    } finally {
+      clearTimeout(timeout);
+      connection.close();
+    }
+  });
+}
+async function openWebRtcFixture() {
+  const url = base + "/webrtc";
+  await send({ type: "new", url });
+  webBrowser = await waitFor(
+    () => chromium.connectOverCDP(`http://127.0.0.1:${port + 1}`),
+    "page debugger",
+  );
+  return waitFor(() => webBrowser.contexts().flatMap((c) => c.pages())
+    .find((p) => p.url() === url), "WebRTC fixture");
+}
 try {
   await launch();
   await send({
@@ -137,6 +169,8 @@ try {
     (await state()).tabs.find((t) => t.id === id).url,
     "rove://settings/privacy",
   );
+  const webRtcToggle = (name) => ui.getByRole("switch", { name, exact: true });
+  assert.equal(await webRtcToggle("WebRTC 地址保护").getAttribute("aria-checked"), "false");
   checks.push("设置以内部标签页展示、复用，分类地址由 Rust 保存");
   await ui.screenshot({ path: join(output, "native-settings-privacy.png") });
   await ui.getByRole("button", { name: "关于 Rove", exact: true }).click();
@@ -172,6 +206,7 @@ try {
     "search fixture",
   );
   await page.locator("h1").waitFor();
+  assert.equal(await hasDirectWebRtcCandidates(page), true);
   // Playwright's CDP default denies downloads. Restore WebView2 behavior without
   // supplying a destination: the application must choose the saved folder.
   const downloadSession = await page.context().newCDPSession(page);
@@ -288,6 +323,8 @@ try {
   await popup.getByRole("menuitem", { name: "Settings", exact: true }).click();
   await ui.getByRole("button", { name: "Privacy", exact: true }).click();
   await waitFor(async () => (await state()).tabs.find((t) => t.id === id)?.url === "rove://settings/privacy", "restore Privacy pane");
+  await webRtcToggle("WebRTC address protection").click();
+  await waitFor(async () => (await state()).settings.webRtcAddressProtection, "enable WebRTC address protection");
   await stop();
   await launch();
   const restored = await state();
@@ -304,8 +341,18 @@ try {
   );
   await ui.locator(".settings-page").waitFor();
   await ui.getByRole("heading", { name: "Privacy", exact: true }).waitFor();
+  assert.equal(await webRtcToggle("WebRTC address protection").getAttribute("aria-checked"), "true");
   await ui.screenshot({ path: join(output, "native-settings-restored.png") });
   checks.push("设置和浏览器菜单即时切换英语；重启后恢复界面语言、引擎、外观、动态效果、快捷键、下载路径及设置分类");
+  assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), false);
+  await send({ type: "settingsOpen", pane: "privacy" });
+  await webRtcToggle("WebRTC address protection").click();
+  await waitFor(async () => (await state()).settings.webRtcAddressProtection === false, "disable WebRTC address protection");
+  await stop();
+  await launch();
+  assert.equal((await state()).settings.webRtcAddressProtection, false);
+  assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), true);
+  checks.push("WebRTC 地址保护默认关闭，重启后阻止直连 UDP 候选，关闭后再次重启恢复直连 UDP");
   await writeFile(
     join(output, "native-settings.json"),
     JSON.stringify({ profile, checks }, null, 2),

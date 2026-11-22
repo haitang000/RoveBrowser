@@ -1,5 +1,12 @@
 //! WebView2 equivalents of Zigzag's WebKit preferences and browsing-data actions.
 use crate::settings::Settings;
+use serde_json::{Map, Value};
+use std::{
+    fs,
+    io::{self, Write},
+    path::Path,
+    time::{Duration, Instant},
+};
 use webview2_com::{
     ClearBrowsingDataCompletedHandler,
     Microsoft::Web::WebView2::Win32::{
@@ -10,6 +17,65 @@ use webview2_com::{
 };
 use windows::core::{Interface, HSTRING};
 use wry::{WebView, WebViewExtWindows};
+
+/// WebView2 reads Chromium's IP handling preference when it opens the profile.
+/// Run before creating a WebView and wait out a previous session's final writes.
+pub fn sync_webrtc_address_protection(data: &Path, enabled: bool) -> io::Result<()> {
+    const POLICY: &str = "disable_non_proxied_udp";
+    let browser_data = data.join("EBWebView");
+    let lock = browser_data.join("lockfile");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lock.try_exists()? {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "WebView2 profile is still open",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let profile = browser_data.join("Default");
+    let path = profile.join("Preferences");
+    let mut prefs: Map<String, Value> = match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Map::new(),
+        Err(error) => return Err(error),
+    };
+    let protected = prefs
+        .get("webrtc")
+        .and_then(|rtc| rtc.get("ip_handling_policy"))
+        .and_then(Value::as_str) == Some(POLICY);
+    if protected == enabled {
+        return Ok(());
+    }
+    let rtc = prefs
+        .entry("webrtc")
+        .or_insert_with(|| Value::Object(Map::new()));
+    let rtc = rtc.as_object_mut().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "Invalid WebView2 WebRTC preferences")
+    })?;
+    if enabled {
+        rtc.insert("ip_handling_policy".into(), Value::String(POLICY.into()));
+    } else {
+        rtc.remove("ip_handling_policy");
+    }
+
+    fs::create_dir_all(profile)?;
+    let json = serde_json::to_vec(&prefs).map_err(io::Error::other)?;
+    let temporary = path.with_file_name(format!("Preferences.rove-{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut file = fs::File::create_new(&temporary)?;
+        file.write_all(&json)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, &path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
 
 pub fn apply(view: &WebView, settings: &Settings) -> windows::core::Result<()> {
     unsafe {

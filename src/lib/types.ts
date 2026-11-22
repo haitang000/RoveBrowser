@@ -146,6 +146,7 @@ declare global {
     __ERA_NATIVE__?: boolean;
     __ERA_POPUP__?: boolean;
     __ERA_INITIAL_STATE__?: BrowserState;
+    __ERA_WEB_RTC_PREFERENCE_FAILED__?: boolean;
     __ERA_RECEIVE__?: (event: {
       type: string;
       visible?: boolean;

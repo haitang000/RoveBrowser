@@ -15,6 +15,7 @@ test("default page zoom is selectable and searchable in accessibility settings",
   await expect(zoom).toHaveValue("1");
   await zoom.selectOption({ label: "125%" });
   await page.getByRole("button", { name: "通用", exact: true }).click();
+  await expect(zoom).toHaveCount(0);
   await page.getByRole("searchbox", { name: "查找设置" }).fill("默认页面缩放");
   await expect(zoom).toHaveValue("1.25");
 });
@@ -208,7 +209,13 @@ test("settings search highlights titles, descriptions and result paths without c
   await expect(group.locator("label mark")).toHaveText("表单");
   await expect(group.locator(".setting-description p mark")).toHaveText(["表单", "登录"]);
   await search.fill("隐私");
-  await expect(page.locator(".settings-result-pane mark")).toHaveText("隐私");
+  await expect(page.locator(".settings-result-pane mark")).toHaveText(["隐私", "隐私"]);
+  await search.fill("WebRTC");
+  const protection = page.getByRole("switch", { name: "WebRTC 地址保护", exact: true });
+  await expect(protection).toHaveAccessibleDescription(/重启 Rove 生效/);
+  await expect(protection).toHaveAttribute("aria-checked", "false");
+  await protection.press("Space");
+  await expect(protection).toHaveAttribute("aria-checked", "true");
   await search.press("Escape");
   await expect(search).toHaveValue("");
   await expect(page.locator(".settings-page mark")).toHaveCount(0);

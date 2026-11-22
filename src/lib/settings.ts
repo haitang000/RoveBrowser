@@ -145,6 +145,7 @@ export interface Settings {
   savePasswords: boolean;
   autofill: boolean;
   rememberHistory: boolean;
+  webRtcAddressProtection: boolean;
   /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
   sleepTabs: boolean;
   downloadFolder: string;
@@ -165,6 +166,7 @@ export const defaultSettings = (): Settings => ({
   savePasswords: true,
   autofill: true,
   rememberHistory: true,
+  webRtcAddressProtection: false,
   sleepTabs: true,
   downloadFolder: "",
   updateChannel: "preview",

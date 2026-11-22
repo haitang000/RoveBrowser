@@ -331,6 +331,23 @@ const groups = computed<Group[]>(() => [
   },
   {
     pane: "privacy",
+    title: b.t("网络连接"),
+    rows: [
+      {
+        id: "webRtcAddressProtection",
+        title: b.t("WebRTC 地址保护"),
+        detail: b.t("限制 WebRTC 使用未经过代理的 UDP 连接，减少 IP 地址暴露。部分音视频通话可能受影响。") + " " +
+          b.t(window.__ERA_WEB_RTC_PREFERENCE_FAILED__
+            ? "无法应用 WebRTC 地址保护设置，请重启 Rove 后重试。"
+            : "更改后重启 Rove 生效。"),
+        kind: "toggle",
+        setting: "webRtcAddressProtection",
+        keywords: "webrtc ip address protection proxy vpn udp 代理",
+      },
+    ],
+  },
+  {
+    pane: "privacy",
     title: b.t("浏览数据"),
     rows: [
       {
@@ -698,6 +715,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   role="switch"
                   :aria-checked="!!value(row)"
                   :aria-label="row.title"
+                  :aria-describedby="row.detail ? `setting-${row.id}-${tabId}-detail` : undefined"
                   @click="update(row.setting!, !value(row))"
                 >
                   <span />
