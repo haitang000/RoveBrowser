@@ -1,5 +1,84 @@
 //! Resolve hover targets without changing the selected tab or saved library.
 use crate::model::{State, Tab};
+use std::{cell::Cell, rc::Rc};
+use webview2_com::{
+    take_pwstr, DOMContentLoadedEventHandler, Microsoft::Web::WebView2::Win32::ICoreWebView2_2,
+    NavigationCompletedEventHandler, NavigationStartingEventHandler,
+};
+use windows::core::{Interface, BOOL, PWSTR};
+use wry::{WebView, WebViewExtWindows};
+
+#[derive(Debug)]
+pub enum Navigation {
+    Started,
+    DomReady,
+    Completed,
+}
+
+pub fn observe_navigation(
+    view: &WebView,
+    notify: impl Fn(Navigation) + 'static,
+) -> windows::core::Result<()> {
+    let current = Rc::new(Cell::new(None));
+    let notify = Rc::new(notify);
+    let starting = NavigationStartingEventHandler::create(Box::new({
+        let (current, notify) = (current.clone(), notify.clone());
+        move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            unsafe {
+                let mut cancelled = BOOL::default();
+                args.Cancel(&mut cancelled)?;
+                if cancelled.as_bool() {
+                    return Ok(());
+                }
+                let mut uri = PWSTR::null();
+                args.Uri(&mut uri)?;
+                if !crate::model::is_web(&take_pwstr(uri)) {
+                    return Ok(());
+                }
+                let mut id = 0;
+                args.NavigationId(&mut id)?;
+                current.set(Some(id));
+            }
+            notify(Navigation::Started);
+            Ok(())
+        }
+    }));
+    let ready = DOMContentLoadedEventHandler::create(Box::new({
+        let (current, notify) = (current.clone(), notify.clone());
+        move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut id = 0;
+            unsafe {
+                args.NavigationId(&mut id)?;
+            }
+            if current.get() == Some(id) {
+                notify(Navigation::DomReady);
+            }
+            Ok(())
+        }
+    }));
+    let completed = NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let mut id = 0;
+        unsafe {
+            args.NavigationId(&mut id)?;
+        }
+        if current.get() == Some(id) {
+            current.set(None);
+            notify(Navigation::Completed);
+        }
+        Ok(())
+    }));
+    unsafe {
+        let web = view.webview();
+        web.add_NavigationStarting(&starting, &mut 0)?;
+        web.cast::<ICoreWebView2_2>()?
+            .add_DOMContentLoaded(&ready, &mut 0)?;
+        web.add_NavigationCompleted(&completed, &mut 0)?;
+    }
+    Ok(())
+}
 
 pub fn targets(state: &State, id: &str) -> Option<Vec<Tab>> {
     let mut tabs = if let Some(mark) = state.bookmark(id) {

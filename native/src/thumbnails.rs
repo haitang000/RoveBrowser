@@ -6,6 +6,8 @@ use std::{
 };
 
 pub const SETTLE: Duration = Duration::from_millis(140);
+// Give the visible preview time to paint after DOMContentLoaded or load.
+pub const PREVIEW_SETTLE: Duration = Duration::from_millis(50);
 pub const PREVIEW_LOAD_TIMEOUT: Duration = Duration::from_secs(12);
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -90,56 +92,88 @@ impl Captures {
 
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_ENTRIES: usize = 64;
+struct Entry {
+    url: String,
+    image: String,
+    sequence: u64,
+    fully_loaded: bool,
+}
+
 #[derive(Default)]
 pub struct Cache {
-    entries: HashMap<String, (String, String, u64)>,
+    entries: HashMap<String, Entry>,
     clock: u64,
     bytes: usize,
 }
 impl Cache {
-    pub fn insert(&mut self, id: String, url: String, image: String) {
-        self.remove(&id);
+    /// Returns whether the displayed image changed.
+    pub fn insert(&mut self, id: String, url: String, image: String, fully_loaded: bool) -> bool {
         if image.len() > 220 * 1024 {
-            return;
+            return false;
         }
         self.clock += 1;
+        if let Some(entry) = self
+            .entries
+            .get_mut(&id)
+            .filter(|e| e.url == url && e.image == image)
+        {
+            entry.sequence = self.clock;
+            entry.fully_loaded |= fully_loaded;
+            return false;
+        }
+        self.remove(&id);
         self.bytes += image.len();
-        self.entries.insert(id, (url, image, self.clock));
+        self.entries.insert(
+            id,
+            Entry {
+                url,
+                image,
+                sequence: self.clock,
+                fully_loaded,
+            },
+        );
         while self.entries.len() > MAX_ENTRIES || self.bytes > MAX_BYTES {
             let Some(id) = self
                 .entries
                 .iter()
-                .min_by_key(|(_, e)| e.2)
+                .min_by_key(|(_, entry)| entry.sequence)
                 .map(|(id, _)| id.clone())
             else {
                 break;
             };
             self.remove(&id);
         }
+        true
     }
     pub fn remove(&mut self, id: &str) {
-        if let Some((_, image, _)) = self.entries.remove(id) {
-            self.bytes -= image.len()
+        if let Some(entry) = self.entries.remove(id) {
+            self.bytes -= entry.image.len()
         }
     }
     pub fn retain_sources(&mut self, mut keep: impl FnMut(&str, &str) -> bool) {
-        self.entries.retain(|id, (url, image, _)| {
-            let yes = keep(id, url);
+        self.entries.retain(|id, entry| {
+            let yes = keep(id, &entry.url);
             if !yes {
-                self.bytes -= image.len()
+                self.bytes -= entry.image.len()
             }
             yes
         });
     }
-    pub fn has(&self, id: &str, url: &str) -> bool {
+    pub fn has_complete(&self, id: &str, url: &str) -> bool {
         self.entries
             .get(id)
-            .is_some_and(|(source, _, _)| source == url)
+            .is_some_and(|entry| entry.url == url && entry.fully_loaded)
+    }
+    pub fn image(&self, id: &str) -> Option<&str> {
+        self.entries.get(id).map(|entry| entry.image.as_str())
+    }
+    pub fn ids(&self) -> Vec<&str> {
+        self.entries.keys().map(String::as_str).collect()
     }
     pub fn images(&self) -> HashMap<&str, &str> {
         self.entries
             .iter()
-            .map(|(id, (_, image, _))| (id.as_str(), image.as_str()))
+            .map(|(id, entry)| (id.as_str(), entry.image.as_str()))
             .collect()
     }
 }
@@ -179,6 +213,7 @@ mod tests {
                 i.to_string(),
                 "https://example.com".into(),
                 "x".repeat(200 * 1024),
+                true,
             );
         }
         assert!(c.bytes <= MAX_BYTES && c.entries.len() <= MAX_ENTRIES);
@@ -195,10 +230,22 @@ mod tests {
             "saved".into(),
             "https://example.com/one".into(),
             "image".into(),
+            true,
         );
-        assert!(c.has("saved", "https://example.com/one"));
-        assert!(!c.has("saved", "https://example.com/two"));
+        assert!(c.has_complete("saved", "https://example.com/one"));
+        assert!(!c.has_complete("saved", "https://example.com/two"));
         c.retain_sources(|_, url| url == "https://example.com/two");
         assert!(c.images().is_empty());
+    }
+
+    #[test]
+    fn unchanged_image_can_complete_a_provisional_preview_without_a_new_message() {
+        let mut cache = Cache::default();
+        let url = "https://example.com";
+        assert!(cache.insert("saved".into(), url.into(), "image".into(), false));
+        assert_eq!(cache.image("saved"), Some("image"));
+        assert!(!cache.has_complete("saved", url));
+        assert!(!cache.insert("saved".into(), url.into(), "image".into(), true));
+        assert!(cache.has_complete("saved", url));
     }
 }

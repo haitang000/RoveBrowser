@@ -14,11 +14,20 @@ const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-tab-
 const port = Number(process.env.ERA_SMOKE_PORT || 19746);
 await mkdir(output, { recursive: true });
 let unopened = 0;
+let releaseUnopenedImage;
 const server = createServer((req, res) => {
+  if (req.url === '/unopened-image') {
+    releaseUnopenedImage = () => {
+      releaseUnopenedImage = undefined;
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml' })
+        .end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>');
+    };
+    return;
+  }
   if (req.url === '/unopened') unopened++;
   const name = req.url === '/first' ? 'First' : req.url === '/second' ? 'Second' : 'Third';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end(`<!doctype html><title>${name} hover fixture</title><style>html{background:${name === 'First' ? '#164e63' : name === 'Second' ? '#385743' : '#7c2d12'};color:white;font:24px system-ui}body{margin:32px}button{font:inherit;padding:16px}</style><h1>${name} hover fixture</h1><button onclick="this.textContent='Clicked live page'">Live page button</button><div style="height:1600px"></div>`);
+  res.end(`<!doctype html><title>${name} hover fixture</title><style>html{background:${name === 'First' ? '#164e63' : name === 'Second' ? '#385743' : '#7c2d12'};color:white;font:24px system-ui}body{margin:32px}button{font:inherit;padding:16px}</style><h1>${name} hover fixture</h1><button onclick="this.textContent='Clicked live page'">Live page button</button><div style="height:1600px"></div>${req.url === '/unopened' ? '<img src="/unopened-image" onload="document.documentElement.style.background = `#14532d`">' : ''}`);
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -104,8 +113,20 @@ try {
   await send({ type: 'favoriteSave', title: 'Unopened preview', url: base + '/unopened', previousUrl: 'https://linear.app' });
   const unloaded = ui.locator('.favorite-tile').filter({ has: ui.getByRole('button', { name: 'Unopened preview', exact: true }) });
   await unloaded.hover(); await tooltip().waitFor();
-  await waitFor(async () => await tooltip().locator('.tab-preview-pane > img').count() === 1, 'unloaded item renders on demand');
-  await tooltip().locator('.tab-preview-pane > img').evaluate(img => img.decode());
+  await waitFor(() => releaseUnopenedImage, 'pending image resource requested');
+  const snapshot = tooltip().locator('.tab-preview-pane > img');
+  await snapshot.waitFor({ timeout: 5000 });
+  const firstImage = await snapshot.evaluate(async img => {
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    context.drawImage(img, 0, 0);
+    const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+    return { src: img.src, pixel: [r, g, b] };
+  });
+  assert(firstImage.pixel.every((color, i) => Math.abs(color - [124, 45, 18][i]) < 12), 'early snapshot contains the painted page');
+  releaseUnopenedImage();
+  await waitFor(async () => (await snapshot.getAttribute('src')) !== firstImage.src, 'snapshot refreshed after the image loads');
   assert.equal(unopened, 1);
   assert.equal(await ui.getByRole('tab').count(), tabCount);
   assert.equal(await unloaded.locator('.favorite-close').count(), 0);
@@ -119,7 +140,7 @@ try {
   await waitFor(async () => await tooltip().getAttribute('data-phase') === 'open', 'cached preview opens');
   assert.equal(unopened, 1);
   await ui.keyboard.press('Escape'); await tooltip().waitFor({ state: 'detached' });
-  checks.push('无缓存常用网站现场加载并生成真实预览，不增加标签、不写历史；收起释放控制器，下次命中缓存');
+  checks.push('无缓存常用网站在慢图片加载前显示真实预览，加载后刷新，不增加标签或写入历史；收起释放控制器，下次命中缓存');
 
   // Slow entry/exit down with the browser animation timeline, without altering app durations.
   await popup.evaluate(() => {
@@ -208,5 +229,6 @@ try {
 } finally {
   await pageBrowser?.close(); await uiBrowser?.close();
   if (child && !child.killed) child.kill();
+  releaseUnopenedImage?.();
   server.close();
 }
