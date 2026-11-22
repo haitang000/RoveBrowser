@@ -339,7 +339,6 @@
   margin: 2px 0 0;
   overflow-wrap: anywhere;
 }
-.setting-row select,
 .setting-button,
 .setting-input-form input {
   min-height: 32px;
@@ -351,58 +350,122 @@
   font: inherit;
   font-size: 13px;
 }
-.setting-row select {
-  max-width: min(180px, 100%);
-  min-width: min(112px, 100%);
-}
 .setting-select {
-  position: relative;
-  flex: 0 0 auto;
-  max-width: 100%;
-}
-.setting-select select {
-  width: 100%;
-  max-width: 100%;
-  padding-inline-end: 30px;
-  appearance: none;
-}
-.setting-select select:hover {
-  background: var(--settings-fill-hover);
-}
-.setting-select select option {
-  background: var(--panel);
+  --select-fill: color-mix(in srgb, var(--settings-group-bg) 94%, var(--ink));
+  --select-highlight: color-mix(in srgb, var(--settings-group-bg) 89%, var(--ink));
+  flex: none;
+  inline-size: min(156px, 100%);
+  min-inline-size: 0;
+  min-block-size: 34px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-field);
+  background: var(--select-fill);
   color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
 }
-.setting-select-chevron,
-.setting-select-leading {
-  position: absolute;
-  top: 50%;
-  translate: 0 -50%;
-  pointer-events: none;
+.setting-select:enabled:hover {
+  background: var(--select-highlight);
 }
-.setting-select-chevron {
-  inset-inline-end: 10px;
-  color: var(--ink);
-}
-.setting-select-leading {
-  display: flex;
-  inset-inline-start: 11px;
-}
-.setting-select-leading img {
-  object-fit: contain;
+.setting-select:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .setting-engine-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 11px;
 }
 .setting-engine-select {
-  width: min(230px, 100%);
+  inline-size: min(225px, 100%);
+  min-block-size: 36px;
+  padding-inline: 15px 17px;
+  font-size: 16px;
 }
-.setting-engine-select select {
-  min-width: 0;
-  min-height: 36px;
-  padding-inline-start: 35px;
-  font-size: 14px;
+@supports (appearance: base-select) {
+  .setting-select,
+  .setting-select::picker(select) {
+    appearance: base-select;
+  }
+  .setting-select {
+    align-items: center;
+    gap: 8px;
+  }
+  .setting-select:enabled:open {
+    background: var(--select-fill);
+  }
+  .setting-select::picker-icon {
+    content: "";
+    flex: none;
+    inline-size: 9px;
+    block-size: 9px;
+    margin: -4px 3px 0 auto;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    rotate: 45deg;
+  }
+  .setting-select::picker(select) {
+    inline-size: anchor-size(width);
+    min-inline-size: 0;
+    margin: 0;
+    padding-block: 4px;
+    border: 1px solid color-mix(in srgb, var(--settings-group-bg) 75%, var(--ink));
+    border-radius: var(--radius-field);
+    background: var(--settings-group-bg);
+    color: var(--ink);
+    box-shadow: 0 2px 4px var(--shadow), 0 8px 18px var(--panel-shadow);
+  }
+  .setting-select option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-block-size: 24px;
+    padding: 2px 8px;
+    font-size: 13px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  .setting-select option::checkmark {
+    display: none;
+  }
+  .setting-select option:checked {
+    background: var(--select-highlight);
+  }
+  .setting-select option:hover:not(:checked) {
+    background: var(--select-fill);
+  }
+  .setting-select option:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .setting-engine-select selectedcontent {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-inline-size: 0;
+  }
+  .setting-engine-select selectedcontent .setting-option-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .setting-option-icon {
+    display: inline-flex;
+    flex: none;
+  }
+  .setting-option-icon img {
+    object-fit: contain;
+  }
+  @media (forced-colors: active) {
+    .setting-select option:checked {
+      forced-color-adjust: none;
+      background: Highlight;
+      color: HighlightText;
+    }
+  }
 }
 .setting-input-form input {
   border-color: var(--edge);
@@ -770,15 +833,11 @@
 }
 @container settings (width < 200px) {
   .settings-search > svg,
-  .setting-select-leading {
+  .setting-engine-select selectedcontent .setting-option-icon {
     display: none;
   }
-  .setting-engine-select select {
-    padding-inline-start: 8px;
-    padding-inline-end: 24px;
-  }
-  .setting-select-chevron {
-    inset-inline-end: 6px;
+  .setting-engine-select {
+    padding-inline: 8px;
   }
   .setting-input-form {
     flex-wrap: wrap;

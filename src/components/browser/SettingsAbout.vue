@@ -64,6 +64,7 @@ function changeChannel(event: Event) {
         </div>
         <select
           :id="channelId"
+          class="setting-select"
           :aria-describedby="`${channelId}-detail`"
           :disabled="b.updating"
           :value="b.settings.updateChannel"

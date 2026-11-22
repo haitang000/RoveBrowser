@@ -8,6 +8,35 @@ test.beforeEach(async ({ page }) => {
   await chooseBrowserMenuItem(page, "设置");
 });
 
+test("search engine dropdown opens in the page and updates its label and icon", async ({ page }) => {
+  const engine = page.getByRole("combobox", { name: "搜索引擎", exact: true });
+  const openEngine = engine.and(page.locator("select:open"));
+  const selectedContent = engine.locator("selectedcontent");
+
+  await engine.click();
+  await expect(openEngine).toBeVisible();
+  await expect(openEngine.locator("option:checked")).toHaveText("Google");
+  const bing = openEngine.locator('option[value="bing"]');
+  const bingIcon = await bing.locator("img").getAttribute("src");
+  await bing.click();
+  await expect(openEngine).toHaveCount(0);
+  await expect(engine).toHaveValue("bing");
+  await expect(selectedContent).toHaveText("Bing");
+  await expect(selectedContent.locator("img")).toHaveAttribute("src", bingIcon!);
+
+  await engine.press("Space");
+  await expect(openEngine).toBeVisible();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Escape");
+  await expect(openEngine).toHaveCount(0);
+  await expect(engine).toBeFocused();
+  await expect(engine).toHaveValue("bing");
+
+  await engine.click();
+  await openEngine.locator('option[value="custom"]').click();
+  await expect(page.getByRole("textbox", { name: "搜索地址", exact: true })).toBeFocused();
+});
+
 test("default page zoom is selectable and searchable in accessibility settings", async ({ page }) => {
   const zoom = page.getByRole("combobox", { name: "默认页面缩放", exact: true });
   await expect(zoom).toHaveCount(0);

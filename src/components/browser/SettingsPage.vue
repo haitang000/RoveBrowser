@@ -47,6 +47,7 @@ const b = useBrowser(),
 const notice = ref(""),
   custom = ref(b.settings.customSearchTemplate),
   folder = ref(b.settings.downloadFolder);
+let focusCustomSearch = false;
 const editing = ref<string>(),
   spaceName = ref(""),
   spaceIcon = ref<string>(),
@@ -105,7 +106,6 @@ const engineIcons: Partial<Record<Settings["searchEngine"], string>> = {
   bing: bingIcon,
   duckDuckGo: duckDuckGoIcon,
 };
-const engineIcon = computed(() => engineIcons[b.settings.searchEngine]);
 const pane = computed(() => settingsPane(props.url));
 const paneMeta = computed(() => SETTINGS_PANES.find((item) => item.id === pane.value)!);
 const paneDir = ref<0 | 1 | -1>(0);
@@ -583,9 +583,8 @@ function select(row: Row, event: Event) {
     update("permissionDefaults", { ...b.settings.permissionDefaults, [row.permission]: selected });
   } else if (row.setting) {
     const option = row.options?.find(([value]) => String(value) === selected);
+    if (row.id === "engine") focusCustomSearch = selected === "custom" && !custom.value;
     if (option) update(row.setting, option[0]);
-    if (selected === "custom" && !custom.value)
-      nextTick(() => document.getElementById(`custom-${props.tabId}`)?.focus());
   }
 }
 function saveInput(id: string) {
@@ -710,6 +709,14 @@ watch(
 watch(query, () => {
   if (scroll.value) scroll.value.scrollTop = 0;
 });
+watch(() => b.settings.searchEngine, (engine) => {
+  if (!focusCustomSearch) return;
+  focusCustomSearch = false;
+  if (engine === "custom") {
+    // Wait for the picker to finish restoring focus to the select.
+    requestAnimationFrame(() => document.getElementById(`custom-${props.tabId}`)?.focus());
+  }
+});
 watch(
   () => b.settings.customSearchTemplate,
   (v) => (custom.value = v),
@@ -822,24 +829,31 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 >
                   <span />
                 </button>
-                <div v-else-if="row.kind === 'select'" class="setting-select" :class="{ 'setting-engine-select': row.id === 'engine' }">
-                  <span v-if="row.id === 'engine'" class="setting-select-leading" aria-hidden="true">
-                    <img v-if="engineIcon" :src="engineIcon" alt="" width="16" height="16" />
-                    <Icon v-else name="search" :size="16" />
-                  </span>
-                  <select
-                    :id="`setting-${row.id}-${tabId}`"
-                    :aria-label="row.title"
-                    :aria-describedby="row.detail ? `setting-${row.id}-${tabId}-detail` : undefined"
-                    :value="value(row)"
-                    @change="select(row, $event)"
-                  >
-                    <option v-for="option in row.options" :key="option[0]" :value="option[0]">
-                      {{ option[1] }}
-                    </option>
-                  </select>
-                  <Icon class="setting-select-chevron" name="chevronDown" :size="13" />
-                </div>
+                <select
+                  v-else-if="row.kind === 'select'"
+                  :id="`setting-${row.id}-${tabId}`"
+                  class="setting-select"
+                  :class="{ 'setting-engine-select': row.id === 'engine' }"
+                  :aria-label="row.title"
+                  :aria-describedby="row.detail ? `setting-${row.id}-${tabId}-detail` : undefined"
+                  :value="value(row)"
+                  @change="select(row, $event)"
+                >
+                  <button v-if="row.id === 'engine'" type="button">
+                    <!-- Vue's HTML tag list does not include selectedcontent yet. -->
+                    <component :is="'selectedcontent'" />
+                  </button>
+                  <option v-for="[id, label] in row.options" :key="id" :value="id">
+                    <template v-if="row.id === 'engine'">
+                      <span class="setting-option-icon" aria-hidden="true">
+                        <img v-if="engineIcons[id]" :src="engineIcons[id]" alt="" width="16" height="16" />
+                        <Icon v-else name="search" :size="16" />
+                      </span>
+                      <span class="setting-option-label">{{ label }}</span>
+                    </template>
+                    <template v-else>{{ label }}</template>
+                  </option>
+                </select>
                 <form
                   v-else-if="row.kind === 'input'"
                   class="setting-input-form"
@@ -896,7 +910,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                   <label :for="`permission-rule-${tabId}-${index}`">{{ b.t(permissions[scope.kind].name) }} · <bdi>{{ scope.requester }}</bdi></label>
                   <p v-if="scope.page !== scope.requester">{{ b.t('嵌入在') }} <bdi>{{ scope.page }}</bdi></p>
                 </div>
-                <select :id="`permission-rule-${tabId}-${index}`" :value="allowed ? 'allow' : 'block'"
+                <select :id="`permission-rule-${tabId}-${index}`" class="setting-select" :value="allowed ? 'allow' : 'block'"
                   @change="setPermission(scope, $event)">
                   <option value="default">{{ b.t('使用默认设置') }}</option>
                   <option value="allow">{{ b.t('允许') }}</option>
