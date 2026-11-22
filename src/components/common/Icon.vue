@@ -61,7 +61,21 @@ const paths: Record<string, string> = {
   pause: "M5 3v10M11 3v10",
   play: "M5 3v10l8-5z",
   more: "M4 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0M9 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0M14 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0",
+  mediaPictureInPicture: "M8 13H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v4M4 5l3 3M5 8h2V6",
+  mediaVolume: "M11 5.5a3.5 3.5 0 0 1 0 5M13 4a5.5 5.5 0 0 1 0 8",
+  mediaMuted: "m11 6 4 4m0-4-4 4",
 };
+const fills: Record<string, string> = {
+  mediaPrevious: "M2 3a.7.7 0 1 1 1.4 0v10a.7.7 0 0 1-1.4 0zM14 3.9v8.2a1 1 0 0 1-1.5.86L4.8 8.86a1 1 0 0 1 0-1.72l7.7-4.1a1 1 0 0 1 1.5.86z",
+  mediaNext: "M14 3a.7.7 0 1 0-1.4 0v10a.7.7 0 1 0 1.4 0zM2 3.9v8.2a1 1 0 0 0 1.5.86l7.7-4.1a1 1 0 0 0 0-1.72L3.5 3.04A1 1 0 0 0 2 3.9z",
+  mediaPlay: "M4 2.9v10.2a1.2 1.2 0 0 0 1.8 1L14 9a1.2 1.2 0 0 0 0-2L5.8 1.9A1.2 1.2 0 0 0 4 2.9z",
+  mediaPause: "M2 3.8a1.8 1.8 0 0 1 1.8-1.8h.8a1.8 1.8 0 0 1 1.8 1.8v8.4A1.8 1.8 0 0 1 4.6 14h-.8A1.8 1.8 0 0 1 2 12.2zM9.6 3.8A1.8 1.8 0 0 1 11.4 2h.8A1.8 1.8 0 0 1 14 3.8v8.4a1.8 1.8 0 0 1-1.8 1.8h-.8a1.8 1.8 0 0 1-1.8-1.8z",
+  mediaVolume: "M2.2 5h2L8 2.5a1 1 0 0 1 1.6.8v9.4a1 1 0 0 1-1.6.8L4.2 11h-2A1.7 1.7 0 0 1 .5 9.3V6.7A1.7 1.7 0 0 1 2.2 5z",
+  mediaPictureInPicture: "M10 9h5a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z",
+  musicNote: "M7 2h1c.5 1.7 2 2.9 4 3.2v1.5a6 6 0 0 1-3.5-1.5v6.3c0 1.4-1.2 2.5-2.8 2.5S3 13.2 3 12c0-1.4 1.2-2.4 2.8-2.4.4 0 .8 0 1.2.2z",
+  musicNotes: "M5 3.5 14 2v8.7c0 1.3-1.1 2.3-2.6 2.3S9 12.3 9 11.2c0-1.3 1.1-2.2 2.6-2.2.3 0 .6 0 .9.1V5L6.5 6v6.1c0 1.3-1.1 2.4-2.6 2.4S1.5 13.7 1.5 12.6c0-1.3 1.1-2.2 2.6-2.2.3 0 .6 0 .9.1z",
+};
+fills.mediaMuted = fills.mediaVolume;
 </script>
 <template>
   <svg
@@ -75,6 +89,7 @@ const paths: Record<string, string> = {
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path :d="paths[name] || paths.globe" />
+    <path v-if="fills[name]" :d="fills[name]" fill="currentColor" stroke="none" />
+    <path v-if="paths[name] || !fills[name]" :d="paths[name] || paths.globe" />
   </svg>
 </template>

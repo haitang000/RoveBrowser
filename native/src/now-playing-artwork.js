@@ -3,8 +3,30 @@
     const metadata = session?.metadata;
     const media = Array.from(document.querySelectorAll("audio, video"))
         .filter((item) => !item.paused && !item.ended);
+    const page = location.href.split("#", 1)[0];
+    const remembered = window[Symbol.for("rove.nowPlaying.paused")];
+    const paused = remembered?.page === page && remembered.paused.find(({ element, source, stream }) => {
+        const item = element.deref();
+        return item?.isConnected && item.paused && !item.ended && item.currentSrc === source && item.srcObject === stream;
+    })?.element.deref();
+    const player = media.find((item) => !item.muted && item.volume > 0) ?? media[0] ?? (paused || null);
     const playing = session?.playbackState === "playing" || media.length > 0;
-    if (!playing && !metadata) return null;
+    if (!playing && !metadata && !player) return null;
+
+    const targetKey = Symbol.for("rove.nowPlaying.target");
+    const target = window[targetKey] ??= { token: Math.random().toString(36).slice(2) };
+    target.player = player && new WeakRef(player);
+    const actions = window[Symbol.for("rove.nowPlaying.actions")];
+    const duration = player && Number.isFinite(player.duration) && player.duration > 0 ? player.duration : null;
+    const playback = {
+        duration,
+        position: duration === null ? null : Math.min(duration, Math.max(0, player.currentTime)),
+        seekable: duration !== null && player.seekable.length > 0,
+        previous: actions?.has("previoustrack") ?? false,
+        next: actions?.has("nexttrack") ?? false,
+        pictureInPicture: Boolean(document.pictureInPictureEnabled && player instanceof HTMLVideoElement
+            && !player.disablePictureInPicture && player.videoWidth),
+    };
 
     const sizeDistance = ({ sizes }) => {
         const size = Number.parseInt(sizes, 10);
@@ -26,7 +48,6 @@
         } catch {}
     }
     const title = metadata?.title?.trim().slice(0, 320) || null;
-    if (!title && !sources.length) return null;
 
     const key = Symbol.for("rove.nowPlaying.artwork");
     const signature = sources.join("\n");
@@ -37,8 +58,8 @@
         if (sources.length) loadArtwork(sources, sample);
     }
     return {
-        priority: (artwork.length ? 4 : 0) + (playing ? 2 : 0) + (title ? 1 : 0),
-        title, colors: sample.colors, sampling: sample.sampling,
+        priority: (player ? 8 : 0) + (artwork.length ? 4 : 0) + (playing ? 2 : 0) + (title ? 1 : 0),
+        title, colors: sample.colors, sampling: sample.sampling, playback, token: target.token,
     };
 
     async function loadArtwork(urls, sample) {

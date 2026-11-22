@@ -201,11 +201,15 @@ pub enum PeekPhase {
     Open,
     Closing,
 }
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum MediaAction {
     Play,
     Pause,
+    Previous,
+    Next,
+    Seek { position: f64 },
+    PictureInPicture,
 }
 
 impl Rect {

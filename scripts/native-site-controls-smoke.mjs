@@ -73,6 +73,8 @@ function setTrack(title, cover) {
   });
 }
 setTrack(${JSON.stringify(mediaTitle)}, 'sunset');
+navigator.mediaSession.setActionHandler('previoustrack', () => setTrack(${JSON.stringify(mediaTitle)}, 'sunset'));
+navigator.mediaSession.setActionHandler('nexttrack', () => setTrack(${JSON.stringify(nextMediaTitle)}, 'ocean'));
 </script>` : ''}`);
 }
 const server = createServer(fixture);
@@ -392,13 +394,21 @@ try {
     return style.boxShadow;
   });
   await waitFor(() => palette().then((value) => value.includes('239 70 85')), 'the card samples the cover supplied by a cross-origin iframe');
+  await ui.mouse.move(0, 0);
+  const expansion = card.locator('.now-playing-expansion');
+  await waitFor(() => expansion.isVisible().then((visible) => !visible), 'the card starts with compact controls');
+  assert.equal(await card.locator('.now-playing-notes svg').count(), 3, 'playing shows music notes over the site icon');
+  const compact = await card.boundingBox();
+  await card.hover();
+  await waitFor(async () => {
+    const expanded = await card.boundingBox();
+    return expanded.height > compact.height + 50 && Math.abs(expanded.y + expanded.height - compact.y - compact.height) < 1;
+  }, 'hover expands the card upward');
+  const progress = card.getByRole('slider', { name: /^(播放进度|Playback position)$/ });
+  await waitFor(() => progress.isEnabled(), 'the expanded timeline can seek the embedded player');
   const sunsetShadow = await artworkShadow();
   assert.notEqual(sunsetShadow, 'none', 'the cover adds a shadow');
   assert.equal(await titleLine.innerText(), mediaTitle);
-  assert.deepEqual(await card.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return [style.height, style.borderRadius];
-  }), ['40px', '10px']);
   await waitFor(() => titleLine.evaluate((element) => element.getAnimations().length === 1), 'the overflowing title scrolls');
   assert.ok(await titleLine.evaluate((element) => {
     const [animation] = element.getAnimations();
@@ -413,15 +423,25 @@ try {
   await waitFor(() => titleLine.evaluate((element) => element.getAnimations().length === 0), 'reduce motion stops the title');
   assert.equal(await glow.evaluate((element) => getComputedStyle(element, '::before').animationName), 'none');
   await send({ type: 'settingsUpdate', settings: beforeMotion });
-  await embeddedFrame.locator('body').evaluate((_, title) => window.setTrack(title, 'ocean'), nextMediaTitle);
+  const nextTrack = card.getByRole('button', { name: /^(下一首|Next track)$/ });
+  const previousTrack = card.getByRole('button', { name: /^(上一首|Previous track)$/ });
+  await nextTrack.click();
   await waitFor(() => palette().then((value) => value.includes('16 163 139')), 'cover colors refresh when the track changes');
   assert.notEqual(await artworkShadow(), sunsetShadow, 'the shadow follows the new cover colors');
   assert.equal(await titleLine.innerText(), nextMediaTitle);
   assert.equal(await titleLine.evaluate((element) => element.getAnimations().length), 0, 'a short title stays still');
+  await previousTrack.click();
+  await waitFor(async () => await titleLine.innerText() === mediaTitle, 'previous track calls the embedded media session');
   checks.push('跨源内嵌播放器的封面渐变、彩色阴影和曲目名称随换曲更新，长标题滚动并遵循减少动态效果设置');
   await toggle.click();
   await waitFor(() => paused(embeddedFrame), 'the card pauses cross-origin iframe audio');
   await waitFor(async () => /继续播放|Resume playback/.test(await toggle.getAttribute('aria-label')), 'the paused card offers resume');
+  assert.equal(await card.locator('.now-playing-notes').count(), 0, 'pause removes the playing indicator');
+  const player = embeddedFrame.locator('#music');
+  await player.evaluate((media) => { media.currentTime = 0.7; });
+  await waitFor(async () => Number(await progress.inputValue()) >= 0.69, 'the paused card shows the new position');
+  await progress.press('Home');
+  await waitFor(() => player.evaluate((media) => media.currentTime < 0.1), 'the timeline seeks the embedded player');
   await toggle.click();
   await waitFor(() => paused(embeddedFrame).then((value) => !value), 'the card resumes cross-origin iframe audio');
   assert.equal(await embeddedFrame.locator('#idle').evaluate((media) => media.paused), true, 'unrelated player stays paused');
@@ -431,9 +451,10 @@ try {
   await card.getByRole('button', { name: /^(取消静音标签页|Unmute tab)$/ }).click();
   await waitFor(async () => (await lastState()).tabs.find((tab) => tab.id === embeddedId)?.muted === false, 'unmute from the card');
   await ui.screenshot({ path: join(output, 'now-playing.png') });
-  await card.locator('.now-playing-title').click();
+  await card.locator('.now-playing-source').click();
   await expectCount('.now-playing-card', 0, 'the foreground tab has no card');
   await send({ type: 'activate', id: activeId });
+  await card.locator('.now-playing-source').hover();
   await card.getByRole('button', { name: /^(隐藏播放卡片|Hide Now Playing card)$/ }).press('Enter');
   await expectCount('.now-playing-card', 0, 'hidden card is removed');
   assert.equal(await paused(embeddedFrame), false, 'hiding leaves audio playing');

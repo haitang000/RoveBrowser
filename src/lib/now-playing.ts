@@ -4,10 +4,19 @@ import type { Command, Tab } from "./types";
 
 export type MediaOutcome = "applied" | "blocked" | "unavailable" | "cancelled";
 type RGB = [number, number, number];
+export type NowPlayingAction = "previous" | "next" | "pictureInPicture" | { seek: { position: number } };
 export interface NowPlayingDetails {
   title: string | null;
   colors: [RGB, RGB, RGB] | null;
   sampling: boolean;
+  playback?: {
+    duration: number | null;
+    position: number | null;
+    seekable: boolean;
+    previous: boolean;
+    next: boolean;
+    pictureInPicture: boolean;
+  };
 }
 type Paused = { phase: "paused"; heardQuiet: boolean };
 type Playback = Paused
@@ -127,7 +136,7 @@ export function useNowPlaying(
   }
 
   function requestDetails(tab: Tab) {
-    if (!audible(tab.id)) return;
+    if (!sounding.value.has(tab.id)) return;
     const now = Date.now();
     const page = pageOf(tab.url);
     const pending = detailRequests.get(tab.id);
@@ -146,13 +155,20 @@ export function useNowPlaying(
     const previous = details.get(id);
     const title = incoming?.title || null;
     const colors = incoming?.sampling ? previous?.colors ?? null : incoming?.colors ?? null;
-    if (title === (previous?.title ?? null) && String(colors) === String(previous?.colors ?? null)) return;
-    if (title || colors) details.set(id, { title, colors });
+    const playback = incoming?.playback;
+    if (title === (previous?.title ?? null) && String(colors) === String(previous?.colors ?? null)
+        && JSON.stringify(playback) === JSON.stringify(previous?.playback)) return;
+    if (title || colors || playback) details.set(id, { title, colors, ...(playback && { playback }) });
     else details.delete(id);
   }
 
   return {
     cards, toggle, complete, details, requestDetails, receiveDetails,
+    control: (tab: Tab, action: NowPlayingAction) => {
+      if (cards.value.some(({ id }) => id === tab.id)) {
+        send({ type: "mediaControl", id: tab.id, url: pageOf(tab.url), action, ticket: ++serial });
+      }
+    },
     hide: (tab: Tab) => hidden.set(tab.id, pageOf(tab.url)),
     paused: (id: string) => {
       const action = actions.get(id);

@@ -64,13 +64,43 @@ pub enum MediaOutcome {
     Cancelled,
 }
 
+impl MediaOutcome {
+    fn from_script(value: &str) -> Self {
+        match value {
+            "\"applied\"" => Self::Applied,
+            "\"blocked\"" => Self::Blocked,
+            "\"cancelled\"" => Self::Cancelled,
+            _ => Self::Unavailable,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaybackDetails {
+    duration: Option<f64>,
+    position: Option<f64>,
+    seekable: bool,
+    previous: bool,
+    next: bool,
+    picture_in_picture: bool,
+}
+
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct NowPlayingDetails {
     #[serde(skip_serializing)]
     priority: u8,
+    #[serde(skip_serializing)]
+    token: String,
     title: Option<String>,
     colors: Option<[[u8; 3]; 3]>,
     sampling: bool,
+    playback: PlaybackDetails,
+}
+
+struct MediaTarget {
+    frame: Option<ICoreWebView2Frame2>,
+    token: String,
 }
 
 /// WebView2 executes in each frame directly, including cross-origin players.
@@ -79,6 +109,7 @@ pub struct NowPlayingDetails {
 pub struct MediaPlayback {
     frames: RefCell<Vec<ICoreWebView2Frame>>,
     document: Cell<u64>,
+    target: RefCell<Option<MediaTarget>>,
 }
 
 impl MediaPlayback {
@@ -87,6 +118,7 @@ impl MediaPlayback {
         let playback = Rc::downgrade(self);
         let loading = ContentLoadingEventHandler::create(Box::new(move |_, _| {
             if let Some(playback) = playback.upgrade() {
+                playback.target.borrow_mut().take();
                 playback
                     .document
                     .set(playback.document.get().wrapping_add(1));
@@ -154,11 +186,12 @@ impl MediaPlayback {
         let script = HSTRING::from(include_str!("now-playing-artwork.js"));
         // At most three cards ask for this data. Bound the periodic work on
         // pages with many embedded documents while still checking players in frames.
-        let frames = self.script_frames(16);
+        let frames = Rc::new(self.script_frames(16));
         let remaining = Cell::new(frames.len() + 1);
         let best = RefCell::new(None::<(usize, NowPlayingDetails)>);
         let document = self.document.get();
         let playback = Rc::downgrade(self);
+        let sampled_frames = frames.clone();
         let finish = Rc::new(move |index, candidate: Option<NowPlayingDetails>| {
             if let Some(candidate) = candidate {
                 let mut best = best.borrow_mut();
@@ -178,11 +211,15 @@ impl MediaPlayback {
             }
             remaining.set(remaining.get() - 1);
             if remaining.get() == 0 {
-                if playback
-                    .upgrade()
-                    .is_some_and(|p| p.document.get() == document)
+                if let Some(playback) = playback.upgrade().filter(|p| p.document.get() == document)
                 {
-                    report(best.borrow_mut().take().map(|(_, details)| details));
+                    let best = best.borrow_mut().take();
+                    *playback.target.borrow_mut() =
+                        best.as_ref().map(|(index, details)| MediaTarget {
+                            frame: index.checked_sub(1).map(|i| sampled_frames[i].clone()),
+                            token: details.token.clone(),
+                        });
+                    report(best.map(|(_, details)| details));
                 }
             }
         });
@@ -197,7 +234,8 @@ impl MediaPlayback {
                 finish(
                     index,
                     candidate.filter(|item| {
-                        item.priority <= 7
+                        item.priority <= 15
+                            && item.token.len() <= 32
                             && item
                                 .title
                                 .as_ref()
@@ -210,7 +248,7 @@ impl MediaPlayback {
         if unsafe { view.webview().ExecuteScript(&script, &handler(0)) }.is_err() {
             finish(0, None);
         }
-        for (index, frame) in (1..).zip(frames) {
+        for (index, frame) in (1..).zip(frames.iter()) {
             if unsafe { frame.ExecuteScript(&script, &handler(index)) }.is_err() {
                 finish(index, None);
             }
@@ -224,6 +262,10 @@ impl MediaPlayback {
         url: &str,
         report: impl Fn(MediaOutcome) + 'static,
     ) {
+        if !matches!(action, MediaAction::Play | MediaAction::Pause) {
+            self.control_target(view, action, url, report);
+            return;
+        }
         // The top document also checks the address at execution time. Each child
         // is scoped by WebView2 to its own frame and is removed on destruction.
         let script = include_str!("media-control.js");
@@ -256,12 +298,7 @@ impl MediaPlayback {
             let finish = finish.clone();
             ExecuteScriptCompletedHandler::create(Box::new(move |result, value| {
                 finish(if result.is_ok() {
-                    match value.to_string().as_str() {
-                        "\"applied\"" => MediaOutcome::Applied,
-                        "\"blocked\"" => MediaOutcome::Blocked,
-                        "\"cancelled\"" => MediaOutcome::Cancelled,
-                        _ => MediaOutcome::Unavailable,
-                    }
+                    MediaOutcome::from_script(&value.to_string())
                 } else {
                     MediaOutcome::Unavailable
                 });
@@ -275,6 +312,48 @@ impl MediaPlayback {
             if unsafe { frame.ExecuteScript(&child, &handler()) }.is_err() {
                 finish(MediaOutcome::Unavailable);
             }
+        }
+    }
+
+    fn control_target(
+        &self,
+        view: &WebView,
+        action: MediaAction,
+        url: &str,
+        report: impl Fn(MediaOutcome) + 'static,
+    ) {
+        let target = self.target.borrow();
+        let Some(target) = target.as_ref() else {
+            report(MediaOutcome::Unavailable);
+            return;
+        };
+        let script = include_str!("now-playing-action.js");
+        let action = serde_json::json!(action);
+        let token = serde_json::json!(target.token);
+        let page = if target.frame.is_none() {
+            serde_json::json!(url).to_string()
+        } else {
+            "undefined".into()
+        };
+        let script = HSTRING::from(format!("({script})({action}, {token}, {page})"));
+        let report = Rc::new(report);
+        let finished = report.clone();
+        let handler = ExecuteScriptCompletedHandler::create(Box::new(move |result, value| {
+            finished(if result.is_ok() {
+                MediaOutcome::from_script(&value.to_string())
+            } else {
+                MediaOutcome::Unavailable
+            });
+            Ok(())
+        }));
+        let result = unsafe {
+            match &target.frame {
+                Some(frame) => frame.ExecuteScript(&script, &handler),
+                None => view.webview().ExecuteScript(&script, &handler),
+            }
+        };
+        if result.is_err() {
+            report(MediaOutcome::Unavailable);
         }
     }
 }

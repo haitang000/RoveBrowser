@@ -1104,6 +1104,7 @@ export const useBrowser = defineStore("browser", () => {
     nowPlayingDetails: nowPlaying.details,
     requestNowPlayingDetails: nowPlaying.requestDetails,
     toggleMedia: nowPlaying.toggle,
+    controlMedia: nowPlaying.control,
     hideMedia: nowPlaying.hide,
     mediaPaused: nowPlaying.paused,
     mediaPending: nowPlaying.pending,

@@ -7,14 +7,16 @@ const line = ref<HTMLElement>();
 const scrolling = ref(false);
 const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let observer: ResizeObserver | undefined;
+let visibilityObserver: IntersectionObserver | undefined;
 let animation: Animation | undefined;
+let visible = false;
 let lastTitle = "";
 let lastDistance = 0;
 
 function measure() {
   if (!viewport.value || !line.value) return;
   const distance = Math.max(0, line.value.scrollWidth - viewport.value.clientWidth);
-  const enabled = viewport.value.clientWidth > 0 && distance > 2 && !props.reduced && !systemMotion.matches;
+  const enabled = visible && viewport.value.clientWidth > 0 && distance > 2 && !props.reduced && !systemMotion.matches;
   if (animation && enabled && distance === lastDistance && props.title === lastTitle) return;
   animation?.cancel();
   animation = undefined;
@@ -38,13 +40,21 @@ function measure() {
 watch(() => [props.title, props.reduced], measure, { flush: "post" });
 onMounted(() => {
   observer = new ResizeObserver(measure);
-  if (viewport.value) observer.observe(viewport.value);
+  visibilityObserver = new IntersectionObserver(([entry]) => {
+    visible = entry.intersectionRatio > 0;
+    measure();
+  }, { threshold: 0.1 });
+  if (viewport.value) {
+    observer.observe(viewport.value);
+    visibilityObserver.observe(viewport.value);
+  }
   systemMotion.addEventListener("change", measure);
   void document.fonts.ready.then(measure);
   measure();
 });
 onBeforeUnmount(() => {
   observer?.disconnect();
+  visibilityObserver?.disconnect();
   systemMotion.removeEventListener("change", measure);
   animation?.cancel();
 });

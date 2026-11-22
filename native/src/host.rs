@@ -1910,6 +1910,7 @@ impl App {
             })
             .with_initialization_script(include_str!("peek-links.js"))
             .with_initialization_script(include_str!("chrome-store-install.js"))
+            .with_initialization_script_for_main_only(include_str!("now-playing-session.js"), false)
             // Zigzag's SwipeNavigation: WebView2 performs the macOS-style
             // two-finger back/forward swipe itself, including its own animation.
             .with_back_forward_navigation_gestures(true)
@@ -4686,8 +4687,6 @@ impl App {
             Command::NowPlayingDetails { id, url, ticket } => {
                 if let Some(page) = self.pages.get(&id).filter(|page| {
                     page.navigation.current.borrow().split('#').next() == Some(url.as_str())
-                        && (self.playing.contains(&id)
-                            || crate::site::is_playing_audio(&page.view).unwrap_or(false))
                 }) {
                     let proxy = self.proxy.clone();
                     page.media.details(&page.view, move |details| {
