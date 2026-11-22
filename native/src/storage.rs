@@ -14,10 +14,12 @@ pub struct Storage {
 impl Storage {
     pub fn open(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         std::fs::create_dir_all(path)?;
-        let conn = Connection::open(path.join("era.sqlite"))?;
+        let mut conn = Connection::open(path.join("era.sqlite"))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS session(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS history(url TEXT PRIMARY KEY,title TEXT NOT NULL,visited INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY,started INTEGER NOT NULL,json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS imported_logins(id TEXT PRIMARY KEY, origin TEXT NOT NULL, secret BLOB NOT NULL); CREATE INDEX IF NOT EXISTS imported_logins_origin ON imported_logins(origin);")?;
         conn.execute("CREATE TABLE IF NOT EXISTS site_permissions(scope TEXT PRIMARY KEY, allowed INTEGER NOT NULL CHECK(allowed IN (0,1)))", [])?;
+        crate::history::migrate(&mut conn)?;
         conn.execute("CREATE INDEX IF NOT EXISTS history_recent ON history(visited DESC, url DESC)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS history_popular ON history(visit_count DESC, visited DESC, url DESC)", [])?;
         Ok(Self { conn })
     }
     pub fn load(&self) -> Result<State, Box<dyn std::error::Error>> {
@@ -37,7 +39,7 @@ impl Storage {
         Ok(())
     }
     pub fn visit(&self, title: &str, url: &str, visited: i64) -> rusqlite::Result<usize> {
-        self.conn.execute("INSERT INTO history(url,title,visited) VALUES(?1,?2,?3) ON CONFLICT(url) DO UPDATE SET title=CASE WHEN excluded.title='' THEN history.title ELSE excluded.title END,visited=MAX(history.visited,excluded.visited)",params![url,title,visited])
+        self.conn.execute("INSERT INTO history(url,title,visited) VALUES(?1,?2,?3) ON CONFLICT(url) DO UPDATE SET title=CASE WHEN excluded.title='' THEN history.title ELSE excluded.title END,visited=MAX(history.visited,excluded.visited),visit_count=history.visit_count+1",params![url,title,visited])
     }
     pub fn update_history_title(&self, title: &str, url: &str) -> rusqlite::Result<usize> {
         self.conn.execute("UPDATE history SET title=?1 WHERE url=?2 AND ?1<>'' AND title<>?1", params![title,url])

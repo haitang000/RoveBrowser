@@ -28,7 +28,7 @@ import { interfaceLanguage, LANGUAGE_STORAGE_KEY, translate } from "../lib/langu
 import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from "../lib/state-snapshot";
 import { useNowPlaying } from "../lib/now-playing";
 import { tabSwitcherIds, type TabSwitcherInput, type TabSwitcherState } from "../lib/tab-switcher";
-import type { HistoryCursor, HistoryEdit, HistoryReply, HistoryVisit } from "../lib/history";
+import { compareHistory, historyMatches, type HistoryEdit, type HistoryQuery, type HistoryReply, type HistoryVisit } from "../lib/history";
 import type { ContextMenuBackdrop, PageContextMenu } from "../lib/context-menu";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
@@ -68,23 +68,30 @@ export const useBrowser = defineStore("browser", () => {
     historyVersion.value++;
   }
 
-  function previewHistoryPage(requestId: string, query: string, before?: HistoryCursor) {
+  function previewHistoryPage(requestId: string, { query, sort = "date", before, since, until, urls }: HistoryQuery) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     const limit = words.length ? 300 : 200;
+    const allowed = urls && new Set(urls);
     const matching = Array.from(previewHistory.values()).filter((entry) =>
-      words.every((word) => entry.title.toLowerCase().includes(word) || entry.url.toLowerCase().includes(word))
-      && (!before || entry.visited < before.visited || (entry.visited === before.visited && entry.url < before.url)));
-    matching.sort((a, b) => b.visited - a.visited || Number(b.url > a.url) - Number(b.url < a.url));
+      historyMatches(entry, words)
+      && (!allowed || allowed.has(entry.url))
+      && (since === undefined || entry.visited >= since)
+      && (until === undefined || entry.visited < until)
+      && (!before || compareHistory(entry, before, sort) > 0));
+    matching.sort((a, b) => compareHistory(a, b, sort));
     const entries = matching.slice(0, limit);
     queueMicrotask(() => {
-      historyReply.value = { requestId, page: { entries, next: !words.length && matching.length > limit ? entries.at(-1)! : null } };
+      historyReply.value = { requestId, page: { entries, next: matching.length > limit ? entries.at(-1)! : null } };
     });
   }
 
   function previewHistoryEdit(requestId: string, change: HistoryEdit) {
     queueMicrotask(() => {
       if (change.action === "undo") {
-        for (const visit of previewHistoryUndo) if (!previewHistory.has(visit.url)) previewHistory.set(visit.url, visit);
+        for (const visit of previewHistoryUndo) {
+          const current = previewHistory.get(visit.url);
+          previewHistory.set(visit.url, current ? { ...current, visitCount: current.visitCount + visit.visitCount } : visit);
+        }
         previewHistoryUndo = [];
       } else {
         const urls = change.action === "remove" ? new Set(change.urls) : undefined;
@@ -444,7 +451,7 @@ export const useBrowser = defineStore("browser", () => {
         window.ipc!.postMessage(JSON.stringify(c));
       }
       else if (c.type === "historyPage") {
-        previewHistoryPage(String(c.ticket), String(c.query), c.before as HistoryCursor | undefined);
+        previewHistoryPage(String(c.ticket), c as Command & HistoryQuery);
       } else if (c.type === "historyEdit") {
         previewHistoryEdit(String(c.ticket), c.change as HistoryEdit);
       } else if (c.type === "clearBrowsingData" && c.kind === "history") {
@@ -534,7 +541,10 @@ export const useBrowser = defineStore("browser", () => {
         );
         if ((c.type === "new" || c.type === "navigate") && settings.value.rememberHistory) {
           const tab = c.id ? state.value.tabs.find((tab) => tab.id === c.id) : active.value;
-          if (tab && host(tab.url)) previewHistory.set(tab.url, { url: tab.url, title: tab.title, visited: Math.floor(nowSeconds()) });
+          if (tab && host(tab.url)) {
+            const visitCount = (previewHistory.get(tab.url)?.visitCount ?? 0) + 1;
+            previewHistory.set(tab.url, { url: tab.url, title: tab.title, visited: Math.floor(nowSeconds()), visitCount });
+          }
         }
         if (c.type === "historyOpen") historyVersion.value++;
         // The native host confirms batch closes with an action toast; the

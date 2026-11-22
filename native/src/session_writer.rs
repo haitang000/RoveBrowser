@@ -30,8 +30,7 @@ enum HistoryWrite {
     },
     Clear(Box<dyn FnOnce(bool) + Send>),
     Page {
-        query: String,
-        before: Option<history::Cursor>,
+        query: history::Query,
         reply: HistoryReply<history::Page>,
     },
     Edit {
@@ -57,12 +56,8 @@ impl HistoryWrite {
                 done(result.is_ok());
                 result
             }
-            Self::Page {
-                query,
-                before,
-                reply,
-            } => {
-                reply(history::page(&storage.conn, &query, before.as_ref()));
+            Self::Page { query, reply } => {
+                reply(history::page(&storage.conn, &query));
                 Ok(())
             }
             Self::Edit { change, reply } => {
@@ -164,13 +159,11 @@ impl SessionWriter {
 
     pub fn history_page(
         &self,
-        query: String,
-        before: Option<history::Cursor>,
+        query: history::Query,
         reply: impl FnOnce(rusqlite::Result<history::Page>) + Send + 'static,
     ) {
         self.history(HistoryWrite::Page {
             query,
-            before,
             reply: Box::new(reply),
         });
     }

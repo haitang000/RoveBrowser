@@ -10,6 +10,7 @@ const paths: Record<string, string> = {
   close: "m4 4 8 8M12 4l-8 8",
   sidebar: "M2 3h12v10H2zM6 3v10",
   search: "M10.5 10.5 14 14M11.5 6.5a5 5 0 1 1-10 0 5 5 0 0 1 10 0",
+  filter: "M14.5 8a6.5 6.5 0 1 1-13 0 6.5 6.5 0 1 1 13 0M4.6 5.8h6.8M5.8 8h4.4M7 10.2h2",
   grid: "M2 2h5v5H2zM10 2h4v5h-4zM2 10h5v4H2zM10 10h4v4h-4z",
   split: "M2 2h12v12H2zM8 2v12",
   moon: "M13 10a6 6 0 0 1-7-7 6 6 0 1 0 7 7",

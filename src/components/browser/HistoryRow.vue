@@ -5,7 +5,7 @@ import type { HistoryVisit } from "../../lib/history";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
 
-defineProps<{ visit: HistoryVisit; time: string; favicon?: string; indented?: boolean; disabled?: boolean }>();
+defineProps<{ visit: HistoryVisit; time: string; favicon?: string; indented?: boolean; disabled?: boolean; showCount?: boolean }>();
 defineEmits<{ open: [event: MouseEvent]; remove: [] }>();
 const b = useBrowser();
 </script>
@@ -19,7 +19,7 @@ const b = useBrowser();
         <Favicon v-if="favicon" :url="visit.url" :favicon="favicon" /><Icon v-else name="globe" :size="16" />
       </span>
       <span class="history-title">{{ visit.title.trim() || displayUrl(visit.url) }}</span>
-      <span class="history-address">{{ displayUrl(visit.url) }}</span>
+      <span class="history-address">{{ showCount ? b.t('访问 {count} 次', { count: visit.visitCount }) : displayUrl(visit.url) }}</span>
       <time class="history-time" :datetime="new Date(visit.visited * 1000).toISOString()">{{ time }}</time>
     </a>
     <button class="history-remove" :aria-label="b.t('移除 {title}', { title: visit.title.trim() || displayUrl(visit.url) })"

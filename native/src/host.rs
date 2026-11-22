@@ -4494,10 +4494,13 @@ impl App {
                 }
                 return;
             }
-            Command::HistoryPage { ticket, query, before } => {
+            Command::HistoryPage { ticket, mut query } => {
                 let proxy = self.proxy.clone();
-                let query = query.chars().take(500).collect();
-                self.session_writer.history_page(query, before, move |result| {
+                query.query = query.query.chars().take(500).collect();
+                if let Some(urls) = &mut query.urls {
+                    urls.truncate(30);
+                }
+                self.session_writer.history_page(query, move |result| {
                     let _ = proxy.send_event(Event::HistoryPage(ticket, result));
                 });
                 return;

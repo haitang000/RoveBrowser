@@ -166,7 +166,7 @@ mod tests {
             let mut state = State::first_run();
             db.conn
                 .execute(
-                    "INSERT INTO history VALUES('https://example.com/','Existing',200)",
+                    "INSERT INTO history(url,title,visited) VALUES('https://example.com/','Existing',200)",
                     [],
                 )
                 .unwrap();

@@ -3,8 +3,23 @@
 import type { HistoryEntry } from "./types";
 import { host } from "./address";
 
-export type HistoryVisit = HistoryEntry & { visited: number };
-export type HistoryCursor = Pick<HistoryVisit, "url" | "visited">;
+export type HistoryVisit = HistoryEntry & { visited: number; visitCount: number };
+export type HistoryCursor = Pick<HistoryVisit, "url" | "visited" | "visitCount">;
+export type HistorySort = "date" | "site" | "popular" | "last";
+export type HistoryPeriod = "today" | "week" | "month";
+export interface HistoryFilters {
+  period: HistoryPeriod | null;
+  sort: HistorySort;
+  source: "history" | "closed";
+}
+export interface HistoryQuery {
+  query: string;
+  before?: HistoryCursor;
+  since?: number;
+  until?: number;
+  sort?: HistorySort;
+  urls?: string[];
+}
 export interface HistoryPageData {
   entries: HistoryVisit[];
   next: HistoryCursor | null;
@@ -14,7 +29,6 @@ export type HistoryEdit =
   | { action: "remove"; urls: string[] }
   | { action: "clear"; since: number | null }
   | { action: "undo" };
-export type HistoryRange = "hour" | "today" | "yesterday" | "all";
 export interface HistoryCluster { host: string; items: HistoryVisit[] }
 export interface HistorySession { start: Date; clusters: HistoryCluster[]; count: number }
 
@@ -50,8 +64,37 @@ export function groupHistory(entries: HistoryVisit[]): HistorySession[] {
   return sessions;
 }
 
-export function historyRangeStart(range: HistoryRange, now = new Date()): number | null {
-  if (range === "all") return null;
-  if (range === "hour") return Math.floor(now.getTime() / 1000) - 3600;
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - Number(range === "yesterday")).getTime() / 1000;
+export function historyBounds(period: HistoryPeriod | null, now = new Date()): Pick<HistoryQuery, "since" | "until"> {
+  if (!period) return {};
+  const year = now.getFullYear(), month = now.getMonth(), day = now.getDate();
+  const monday = day - (now.getDay() + 6) % 7;
+  const start = new Date(year, month, period === "month" ? 1 : period === "week" ? monday : day);
+  const end = period === "month" ? new Date(year, month + 1, 1)
+    : new Date(year, month, period === "week" ? monday + 7 : day + 1);
+  return { since: start.getTime() / 1000, until: end.getTime() / 1000 };
+}
+
+export function historyMatches({ title, url }: HistoryEntry, words: string[]) {
+  const name = title.toLowerCase(), address = url.toLowerCase();
+  return words.every((word) => name.includes(word) || address.includes(word));
+}
+
+export function compareHistory(a: HistoryCursor, b: HistoryCursor, sort: HistorySort) {
+  if (sort === "site") {
+    const left = host(a.url), right = host(b.url);
+    if (left !== right) return left < right ? -1 : 1;
+  }
+  if (sort === "popular" && a.visitCount !== b.visitCount) return b.visitCount - a.visitCount;
+  return b.visited - a.visited || Number(b.url > a.url) - Number(b.url < a.url);
+}
+
+export function groupHistoryBySite(entries: HistoryVisit[]): HistoryCluster[] {
+  const groups: HistoryCluster[] = [];
+  for (const entry of entries) {
+    const site = host(entry.url);
+    const previous = groups.at(-1);
+    if (previous?.host === site) previous.items.push(entry);
+    else groups.push({ host: site, items: [entry] });
+  }
+  return groups;
 }

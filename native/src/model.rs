@@ -539,7 +539,7 @@ pub enum Command {
     #[serde(rename = "history")]
     History { query: String },
     #[serde(rename = "historyPage")]
-    HistoryPage { ticket: String, query: String, before: Option<crate::history::Cursor> },
+    HistoryPage { ticket: String, #[serde(flatten)] query: crate::history::Query },
     #[serde(rename = "historyEdit")]
     HistoryEdit { ticket: String, change: crate::history::Edit },
     #[serde(rename = "suggest")]
