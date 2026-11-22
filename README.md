@@ -67,6 +67,8 @@ npm run native:dev
 
 原生宿主提供默认关闭的 [Agent 标签接口](docs/AGENT_TABS.md)，支持隔离的后台标签页、普通标签页管理，以及网页正文读取、元素点击和文本框填写。
 
+也可以启用 [Chrome DevTools MCP](docs/CHROME_DEVTOOLS_MCP.md)，让 MCP 客户端连接 Rove 的网页标签，读取页面快照、截图、控制台和网络记录。
+
 ### 构建与打包
 
 ```powershell
@@ -86,6 +88,7 @@ npm run test:e2e                        # 界面测试，使用本机 Microsoft 
 cargo test --manifest-path native/Cargo.toml -- --test-threads=1
 cargo build --manifest-path native/Cargo.toml
 npm run test:native                     # Windows 原生宿主 / WebView2 冒烟测试
+npm run test:native:devtools-mcp        # 连接官方 MCP 服务并验证网页调试（需先构建 Debug）
 npm run test:native:browsing            # 普通链接跳转、SPA 路由和标签切换期间的宿主响应（需先构建 Debug）
 npm run test:native:reload              # 刷新、写锁期间窗口响应与历史清除专项（需先构建 Debug）
 npm run test:native:new-tab             # Widget 操作、GitHub 实际请求和 SQLite 重启恢复（需先构建 Debug）

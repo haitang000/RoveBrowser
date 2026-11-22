@@ -83,22 +83,24 @@ fn surface_color(dark: bool) -> wry::RGBA {
     }
 }
 fn browser_args(ui: bool) -> String {
-    #[allow(unused_mut)]
     let mut args = String::from("--autoplay-policy=user-gesture-required");
-    // Never compile a debugging endpoint into release builds.
+    // WebView2 writes the chosen port and browser endpoint to DevToolsActivePort.
+    // Expose only the browsing environment through the opt-in MCP integration.
+    let port = (!ui && std::env::var("ROVE_DEVTOOLS_MCP").as_deref() == Ok("1")).then_some(0u16);
+    // The fixed ports used by native smoke tests remain debug-build only.
     #[cfg(debug_assertions)]
-    if let Some(port) = std::env::var("ERA_DEBUG_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .filter(|p| *p >= 1024 && *p < 65535)
-    {
+    let port = port.or_else(|| {
+        std::env::var("ERA_DEBUG_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .filter(|p| *p >= 1024 && *p < 65535)
+            .map(|p| if ui { p } else { p + 1 })
+    });
+    if let Some(port) = port {
         args.push_str(&format!(
-            " --remote-debugging-address=127.0.0.1 --remote-debugging-port={}",
-            port + if ui { 0 } else { 1 }
+            " --remote-debugging-address=127.0.0.1 --remote-debugging-port={port}"
         ));
     }
-    #[cfg(not(debug_assertions))]
-    let _ = ui;
     args
 }
 fn browsing_webview(
