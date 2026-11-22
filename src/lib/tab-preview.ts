@@ -6,7 +6,7 @@ import { isSettingsUrl } from "./settings";
 import { isHistoryUrl } from "./address";
 import { tabDisplayTitle } from "./tab-meta";
 
-export const TAB_PREVIEW = { delay: 600, hideDelay: 120, refresh: 1000, width: 320, caption: 48, enter: 160, leave: 120, reduced: 80, ease: "cubic-bezier(0.23, 1, 0.32, 1)" };
+export const TAB_PREVIEW = { delay: 600, hideDelay: 120, refresh: 1000, width: 320, caption: 48, enter: 160, leave: 120, reveal: 200, reduced: 80, ease: "cubic-bezier(0.23, 1, 0.32, 1)" };
 export interface PreviewPage {
   key: string;
   tabId?: string;

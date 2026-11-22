@@ -72,6 +72,8 @@ test("unloaded favorites remain unloaded; snapshots update while a split is prev
     window.__ERA_RECEIVE__!({ type: 'thumbnails', images: Object.fromEntries(ids.map(id => [id, image])) });
   }, ids);
   await expect(page.locator(`${preview} img`)).toHaveCount(2);
+  await expect(page.locator(`${preview} img`).first()).toHaveCSS("opacity", "1");
+  await expect(page.locator(`${preview} img`).nth(1)).toHaveCSS("opacity", "1");
   await page.keyboard.press("Escape");
 });
 
@@ -206,7 +208,12 @@ test("saved preview cache survives state broadcasts and expires when its URL cha
   }, { state, image });
   const row = page.locator('.favorite-tile[data-bookmark-id="favorite-figma"]');
   await row.hover();
-  await expect(page.locator(`${preview} .tab-preview-pane > img`)).toHaveCount(1);
+  const ready = page.locator(`${preview} .tab-preview-snapshot`);
+  await expect(ready).toHaveCount(1);
+  await expect(ready).toHaveClass(/is-shown/);
+  await expect(page.locator(`${preview} .tab-preview-pane`)).toHaveClass(/is-instant/);
+  await expect(ready).toHaveCSS("opacity", "1");
+  expect(await ready.evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
   await page.keyboard.press('Escape');
   await expect(page.locator(preview)).toHaveCount(0);
   state.favorites.find(f => f.id === 'favorite-figma')!.url = 'https://figma.com/updated';
@@ -214,4 +221,55 @@ test("saved preview cache survives state broadcasts and expires when its URL cha
   await page.mouse.move(900, 600); await row.hover();
   await expect(page.locator(preview)).toContainText('figma.com/updated');
   await expect(page.locator(`${preview} .tab-preview-pane > img`)).toHaveCount(0);
+});
+
+test("a snapshot that is not ready stays hidden, then fades in once it loads", async ({ page }) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/slow-snapshot.svg", async (route) => {
+    await gate;
+    await route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="teal"/></svg>',
+    });
+  });
+  try {
+    const row = page.locator('.pinned-tabs [data-bookmark-id="pin-wiki"]');
+    await row.hover();
+    await expect(page.locator(preview)).toContainText("界面预览");
+    await expect(page.locator(`${preview} img`)).toHaveCount(0);
+    await page.evaluate(() => {
+      window.__ERA_RECEIVE__!({ type: "thumbnail", id: "wiki", image: "/slow-snapshot.svg", kept: ["wiki"] });
+    });
+    const img = page.locator(`${preview} .tab-preview-snapshot`);
+    await expect(img).toHaveCount(1);
+    await expect(img).not.toHaveClass(/is-shown/);
+    expect(await img.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
+    await page.evaluate(() => {
+      const image = document.querySelector<HTMLImageElement>(".tab-preview-snapshot")!;
+      (window as unknown as { __snapshotWatch?: Promise<unknown> }).__snapshotWatch = new Promise((resolve) => {
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          getComputedStyle(image).opacity;
+          requestAnimationFrame(() => {
+            const transition = image.getAnimations().find((animation) => animation instanceof CSSTransition);
+            resolve({
+              opacity: Number(getComputedStyle(image).opacity),
+              duration: transition ? Number(transition.effect!.getTiming().duration) : 0,
+            });
+          });
+        });
+        observer.observe(image, { attributes: true, attributeFilter: ["class"] });
+      });
+    });
+    release();
+    const mid = await page.evaluate(() => (window as unknown as { __snapshotWatch: Promise<{ opacity: number; duration: number }> }).__snapshotWatch);
+    expect(mid.duration).toBe(200);
+    expect(mid.opacity).toBeLessThan(1);
+    await expect(img).toHaveClass(/is-shown/);
+    await expect(img).toHaveCSS("opacity", "1");
+    await expect(page.locator(`${preview} .tab-preview-empty`)).toHaveClass(/is-covered/);
+  } finally {
+    release();
+  }
 });
