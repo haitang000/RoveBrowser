@@ -21,7 +21,7 @@ function open(f: Favorite, e: MouseEvent) {
   b.send({ type: "bookmarkOpen", id });
 }
 function showMenu(e: MouseEvent, favorite: Favorite) {
-  b.contextMenu = { favorite, x: Math.min(e.clientX, innerWidth - 220), y: Math.max(32, Math.min(e.clientY, innerHeight - 340)) };
+  b.contextMenu = { favorite, x: e.clientX, y: e.clientY };
 }
 </script>
 <template>

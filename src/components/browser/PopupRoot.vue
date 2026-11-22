@@ -6,6 +6,7 @@ import Desk from "./Desk.vue";
 import SettingsPanel from "./SettingsPanel.vue";
 import Peek from "./Peek.vue";
 import TabMenu from "./TabMenu.vue";
+import PageContextMenu from "./PageContextMenu.vue";
 import PinFolderMenu from "./PinFolderMenu.vue";
 import FavoriteMenu from "./FavoriteMenu.vue";
 import TabPreviewCard from "./TabPreviewCard.vue";
@@ -65,8 +66,9 @@ function report() {
     return surfaceRegion(bounds, element.classList.contains("reader-options-layer") ? 24 : shadowBleed(element.className));
   });
   const next = JSON.stringify({ regions, cutout, downloads });
-  const active = b.quitOpen ? "quit" : b.extensions.popup ? "extension" : b.extensionMenuAnchor ? "extensionsMenu" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.downloadsOpen ? "downloads" : b.permissionPrompt ? "permission" : b.tabSwitcher?.visible ? "tabSwitcher" : b.splitControls ? "splitControls" : b.findOpen ? "find" : "";
-  const nextFocus = active === "permission" ? b.permissionPrompt?.id ?? active : active;
+  const active = b.quitOpen ? "quit" : b.extensions.popup ? "extension" : b.extensionMenuAnchor ? "extensionsMenu" : b.commandOpen ? "command" : b.settingsOpen ? "settings" : b.deskOpen ? "desk" : b.contextMenu ? "menu" : b.browserMenuOpen ? "browserMenu" : b.pageContextMenu ? "pageMenu" : b.downloadsOpen ? "downloads" : b.permissionPrompt ? "permission" : b.tabSwitcher?.visible ? "tabSwitcher" : b.splitControls ? "splitControls" : b.findOpen ? "find" : "";
+  const nextFocus = active === "permission" ? b.permissionPrompt?.id ?? active
+    : active === "pageMenu" ? `pageMenu-${b.pageContextMenu?.ticket}` : active;
   const focus = Boolean(active && nextFocus !== focusKey);
   focusKey = nextFocus;
   if (next !== last || focus) {
@@ -74,8 +76,9 @@ function report() {
     b.send({ type: "popupLayer", regions, cutout, focus, downloads });
   }
   if (focus) {
-    const selector = active === "tabSwitcher" ? ".tab-switcher-panel" : active === "quit" ? ".quit-dialog" : active === "extension" ? ".extension-install-dialog [autofocus]" : active === "extensionsMenu" ? ".extension-menu-panel" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
-    document.querySelector<HTMLElement>(selector)?.focus();
+    const selector = active === "pageMenu" ? ".page-context-menu"
+      : active === "tabSwitcher" ? ".tab-switcher-panel" : active === "quit" ? ".quit-dialog" : active === "extension" ? ".extension-install-dialog [autofocus]" : active === "extensionsMenu" ? ".extension-menu-panel" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
+    document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: active === "pageMenu" || active === "menu" });
   }
 }
 function schedule() { cancelAnimationFrame(frame); frame = requestAnimationFrame(report); }
@@ -105,6 +108,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="popup-page-area" :style="area"><Peek /><CommandBar /><FindBar /><StatusToast /><ActionToast /></div>
   <Desk /><SettingsPanel /><TabMenu /><FavoriteMenu /><PinFolderMenu /><BrowserMenu /><TabPreviewCard /><ErrorToast /><DownloadsPanel />
+  <PageContextMenu v-if="b.pageContextMenu" :key="b.pageContextMenu.ticket" :menu="b.pageContextMenu" />
   <ReaderControls />
   <SplitControls />
   <TabSwitcher />

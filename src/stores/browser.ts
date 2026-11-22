@@ -29,12 +29,16 @@ import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from ".
 import { useNowPlaying } from "../lib/now-playing";
 import { tabSwitcherIds, type TabSwitcherInput, type TabSwitcherState } from "../lib/tab-switcher";
 import type { HistoryCursor, HistoryEdit, HistoryReply, HistoryVisit } from "../lib/history";
+import type { ContextMenuBackdrop, PageContextMenu } from "../lib/context-menu";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const popupWindow = Boolean(window.__ERA_POPUP__);
   const windowDeactivations = ref(0);
   const pendingNewTab: NewTabSettings[] = [];
   const contextMenu = ref<{ x: number; y: number; tab?: Tab; favorite?: Favorite; pinFolder?: { spaceId: string; id?: string } }>();
+  const pageContextMenu = ref<PageContextMenu>();
+  const contextMenuBackdrops = shallowRef<ContextMenuBackdrop[]>([]);
+  let contextMenuBackdropTicket = 0;
   const popupArea = ref<Rect>({ x: 240, y: 32, width: 1032, height: 780 });
   const permissionPrompt = ref<PermissionPrompt>();
   const permissionTabs = ref(new Set<string>());
@@ -424,6 +428,8 @@ export const useBrowser = defineStore("browser", () => {
         "popupState",
         "popupLayer",
         "popupReady",
+        "captureContextMenuBackdrop",
+        "pageContextMenuResult",
       ].includes(c.type)
     )
       error.value = "";
@@ -767,6 +773,12 @@ export const useBrowser = defineStore("browser", () => {
     if (native && !popupWindow) send({ type: "downloadsPanel", open });
   });
   window.__ERA_RECEIVE__ = (e) => {
+    if (e.type === "pageContextMenu" && popupWindow) {
+      if (e.pageMenu || pageContextMenu.value?.ticket === e.ticket) pageContextMenu.value = e.pageMenu ?? undefined;
+    }
+    if (e.type === "contextMenuBackdrop" && e.ticket === contextMenuBackdropTicket && e.rect && e.image && e.layer !== undefined) {
+      contextMenuBackdrops.value = [...contextMenuBackdrops.value, { layer: e.layer, rect: e.rect, image: e.image }];
+    }
     if (e.type === "windowDeactivated" && !popupWindow) windowDeactivations.value++;
     if (e.type === "permissionState") {
       permissionPrompt.value = e.permissionPrompt ?? undefined;
@@ -961,6 +973,13 @@ export const useBrowser = defineStore("browser", () => {
     if (surfaces.some(Boolean)) closeDownloads();
   });
   watch(() => peek.value?.id, (id) => { if (id) closeDownloads(); });
+  if (popupWindow) {
+    watch([contextMenu, pageContextMenu], ([sidebarMenu, pageMenu]) => {
+      const ticket = ++contextMenuBackdropTicket;
+      contextMenuBackdrops.value = [];
+      if (sidebarMenu || pageMenu) send({ type: "captureContextMenuBackdrop", ticket });
+    });
+  }
   const popupFields = { commandOpen, commandMode, commandTabId, deskOpen, settingsOpen, browserMenuOpen, browserMenuAnchor, spaceCreation, spaceEditor, contextMenu, popupArea, splitControls, hoverPreview, previewTarget, previewAnimationDone, error, downloadsOpen, extensionMenuAnchor };
   function receivePopup(patch: Record<string, unknown>) {
     receivingPopup = true;
@@ -1007,6 +1026,8 @@ export const useBrowser = defineStore("browser", () => {
     popupWindow,
     windowDeactivations,
     contextMenu,
+    pageContextMenu,
+    contextMenuBackdrops,
     popupArea,
     permissionPrompt,
     permissionTabs,

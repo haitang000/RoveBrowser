@@ -187,6 +187,8 @@ declare global {
       image?: string | null;
       kept?: string[];
       popup?: Record<string, unknown>;
+      pageMenu?: import("./context-menu").PageContextMenu | null;
+      layer?: number;
       count?: number;
       active?: number;
       /** Page zoom factor, and whether a page is playing sound. */

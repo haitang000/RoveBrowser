@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { PIN_FOLDER_COLORS, type PinFolderColor } from "../../lib/pin-folders";
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
+import ContextMenuSurface from "./ContextMenuSurface.vue";
 
 const b = useBrowser();
 const menu = computed(() => b.contextMenu?.pinFolder ? b.contextMenu : undefined);
@@ -14,7 +15,7 @@ const folder = computed(() => {
 const editing = ref(false);
 const name = ref("");
 const color = ref<PinFolderColor>("default");
-const panel = ref<HTMLElement>();
+const panel = ref<InstanceType<typeof ContextMenuSurface>>();
 const nameInput = ref<HTMLInputElement>();
 watch(target, async (value) => {
   editing.value = Boolean(value && !value.id);
@@ -23,7 +24,7 @@ watch(target, async (value) => {
   if (!value) return;
   await nextTick();
   if (editing.value) nameInput.value?.focus();
-  else panel.value?.querySelector("button")?.focus();
+  else panel.value?.panel?.querySelector("button")?.focus({ preventScroll: true });
 });
 
 function close() { b.contextMenu = undefined; }
@@ -69,12 +70,12 @@ function save() {
           <button type="submit" class="primary-button" :disabled="!name.trim()">{{ folder ? b.t('保存修改') : b.t('创建文件夹') }}</button>
         </div>
       </form>
-      <div v-else ref="panel" class="context-menu" role="menu" :aria-label="folder?.name"
-        :style="{ left: `clamp(8px, ${menu.x}px, calc(100dvw - 218px))`, top: `clamp(calc(var(--titlebar-block) + 4px), ${menu.y}px, calc(100dvh - 132px))` }">
+      <ContextMenuSurface v-else ref="panel" role="menu" :aria-label="folder?.name" :anchor="menu">
         <div class="menu-label menu-tab-title">{{ folder?.name }}</div>
         <button type="button" role="menuitem" @click="editFolder"><Icon name="edit" />{{ b.t('编辑文件夹') }}</button>
+        <hr />
         <button type="button" role="menuitem" @click="act('pinFolderRemove')"><Icon name="folder" />{{ b.t('解散文件夹') }}</button>
-      </div>
+      </ContextMenuSurface>
     </div>
   </Teleport>
 </template>

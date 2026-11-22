@@ -305,6 +305,7 @@ export const english: Readonly<Record<string, string>> = {
   "新建文件夹": "New folder",
   "包含当前网页": "Include current page",
   "文件夹操作": "Folder actions",
+  "网页右键菜单": "Page context menu",
   "编辑文件夹": "Edit folder",
   "文件夹名称": "Folder name",
   "输入名称": "Enter a name",

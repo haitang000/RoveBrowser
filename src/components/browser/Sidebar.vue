@@ -25,8 +25,8 @@ const tabDrag = provideTabDrag(sidebar);
 const spaceDeck = ref<InstanceType<typeof SpaceDeck>>();
 function showMenu(e: MouseEvent, tab: Tab) {
   b.contextMenu = {
-    x: Math.min(e.clientX, innerWidth - 220),
-    y: Math.max(32, Math.min(e.clientY, innerHeight - 420)),
+    x: e.clientX,
+    y: e.clientY,
     tab,
   };
 }

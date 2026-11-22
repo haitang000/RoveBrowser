@@ -2,13 +2,14 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { liveTab, samePinnedUrl } from "../../lib/bookmarks";
+import ContextMenuSurface from "./ContextMenuSurface.vue";
 const b = useBrowser();
 const menu = computed(() => b.contextMenu?.favorite ? { ...b.contextMenu, favorite: b.contextMenu.favorite } : undefined);
 const edit = ref(false), editTitle = ref(""), editUrl = ref("");
-const panel = ref<HTMLElement>();
+const panel = ref<InstanceType<typeof ContextMenuSurface>>();
 watch(menu, async (value) => {
   edit.value = false;
-  if (value) { await nextTick(); panel.value?.querySelector<HTMLButtonElement>("button")?.focus(); }
+  if (value) { await nextTick(); panel.value?.panel?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); }
 });
 const live = (f: import("../../lib/types").Favorite) => liveTab(b.state, f.id);
 function closeMenu() { b.contextMenu = undefined; edit.value = false; }
@@ -27,7 +28,7 @@ function act(type: string) {
 <template>
 <Teleport to="body">
     <div v-if="menu" class="menu-scrim" @pointerdown.self="closeMenu" @keydown.esc="closeMenu">
-      <div ref="panel" class="context-menu favorite-menu" role="menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
+      <ContextMenuSurface ref="panel" class="favorite-menu" role="menu" :anchor="menu">
         <form v-if="edit" class="bookmark-menu-form" @submit.prevent="b.send({ type: 'bookmarkUpdate', id: menu.favorite.id, title: editTitle, url: editUrl }); closeMenu()">
           <label>{{ b.t('名称') }}<input v-model="editTitle" :aria-label="b.t('置顶网站名称')" maxlength="80" required /></label>
           <label>{{ b.t('起始网址') }}<input v-model="editUrl" :aria-label="b.t('置顶网站网址')" maxlength="2048" required /></label>
@@ -45,7 +46,7 @@ function act(type: string) {
         <hr />
         <button role="menuitem" @click="act('favoriteRemove')">{{ b.t('移除常用网站') }}</button>
         </template>
-      </div>
+      </ContextMenuSurface>
     </div>
   </Teleport>
 </template>

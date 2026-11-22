@@ -123,6 +123,8 @@ enum Event {
     ExtensionPrepared(uuid::Uuid, Result<extensions::Prepared, String>),
     ExtensionBackground(uuid::Uuid, Rect, String),
     ExtensionView(uuid::Uuid, crate::extension_view::Event),
+    PageMenuRequested,
+    ContextMenuBackdrop(u64, usize, Rect, String),
     RestoreKeyboardFocus,
     Layout,
     SplitResize,
@@ -400,6 +402,10 @@ struct App {
     split_entry_pending: bool,
     split_exit: Option<SplitExit>,
     split_exit_ticket: u64,
+    page_menu_inbox: crate::page_menu::Inbox,
+    page_menu: Option<crate::page_menu::Request>,
+    page_menu_ticket: u64,
+    page_menu_focus: Option<HWND>,
     pages: HashMap<String, Page>,
     fullscreen_page: Option<(String, isize)>,
     reader: Option<ReaderSession>,
@@ -437,6 +443,7 @@ struct App {
     download_popup_visible: bool,
     pending_download_review: Option<String>,
     popup: Option<WebView>,
+    popup_ready: bool,
     popup_has_regions: bool,
     page_save: Option<crate::page_output::SaveRequest>,
     popup_state: serde_json::Map<String, serde_json::Value>,
@@ -588,6 +595,10 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         split_exit_ticket: 0,
         live_settings: Rc::new(RefCell::new(state.settings.clone())),
         data_clear_view: None,
+        page_menu_inbox: Rc::default(),
+        page_menu: None,
+        page_menu_ticket: 0,
+        page_menu_focus: None,
         pages: HashMap::new(),
         fullscreen_page: None,
         reader: None,
@@ -621,6 +632,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         download_popup_visible: false,
         pending_download_review: None,
         popup: None,
+        popup_ready: false,
         popup_has_regions: false,
         popup_state: serde_json::Map::new(),
         permissions: permissions::Requests::load(&storage)?,
@@ -755,6 +767,7 @@ impl App {
     }
     fn confirm_quit(&mut self) -> bool {
         if self.quit_pending { return false; }
+        self.close_page_menu();
         if !self.state.settings.ask_before_quit { return true; }
         self.close_extension_menu();
         if self.fullscreen_page.is_some() {
@@ -1141,6 +1154,7 @@ impl App {
         self.reader_request = None;
         self.reader_epoch += 1;
         if let Some(mut reader) = self.reader.take() {
+            self.close_page_menu();
             self.close_find(true);
             self.finish_split_resize();
             if let Some(handle) = &self.split_handle { let _ = handle.configure(None); }
@@ -1214,6 +1228,7 @@ impl App {
         }));
         unsafe { view.webview().cast::<ICoreWebView2_2>()?.add_DOMContentLoaded(&handler, &mut 0)?; }
         self.track_webview_focus(&view)?;
+        self.register_page_menu(&view);
         register_accelerators(&view, self.proxy.clone(), self.find_open.clone(), self.peek_visible.clone(), self.downloads_open.clone(), self.tab_switching.clone(), self.live_settings.clone(), None)?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
         let page = Page {
@@ -1409,6 +1424,98 @@ impl App {
             let _ = page.focus();
         } else if let Some(ui) = &self.ui {
             let _ = ui.focus();
+        }
+    }
+    fn register_page_menu(&self, view: &WebView) {
+        let proxy = self.proxy.clone();
+        // Older runtimes can continue to present their built-in menu.
+        let _ = crate::page_menu::register(view, self.page_menu_inbox.clone(), move || {
+            proxy.send_event(Event::PageMenuRequested).is_ok()
+        });
+    }
+    fn page_menu_source(&self, source: HWND) -> Option<&WebView> {
+        if let Some(peek) = &self.peek {
+            return (peek.shown.get() && peek.page.view.hwnd() == source).then_some(&peek.page.view);
+        }
+        self.pages.iter().find_map(|(id, page)| {
+            (page.view.hwnd() == source && page.visible.get() && self.state.visible_tab(id))
+                .then_some(&page.view)
+        })
+    }
+    fn show_page_menu(&mut self) {
+        let Some(request) = self.page_menu_inbox.take() else { return };
+        if self.quit_pending || self.overlay || self.tab_switching.get() || self.extension_popup.is_some()
+            || self.page_menu_source(request.source).is_none()
+        {
+            return;
+        }
+        if !self.popup_ready || self.raise_fullscreen_surface(true).is_err() {
+            request.use_default();
+            return;
+        }
+        let (Some(popup), Some(window)) = (&self.popup, &self.window) else { return };
+        self.page_menu_ticket += 1;
+        let anchor = request.anchor(popup.hwnd(), window.scale_factor());
+        self.emit(json!({"type":"pageContextMenu", "pageMenu": {
+            "ticket":self.page_menu_ticket, "anchor":anchor, "items":request.items,
+            "fullscreen":self.fullscreen_page.is_some(),
+        }}));
+        self.page_menu = Some(request);
+    }
+    fn close_page_menu(&mut self) {
+        if self.page_menu.take().is_some() {
+            let _ = self.raise_fullscreen_surface(false);
+            self.emit(json!({"type":"pageContextMenu", "pageMenu":null, "ticket":self.page_menu_ticket}));
+        }
+    }
+    fn raise_fullscreen_surface(&self, menu_open: bool) -> windows::core::Result<()> {
+        let Some((id, hwnd)) = &self.fullscreen_page else { return Ok(()) };
+        let view = if menu_open { self.popup.as_ref() } else { self.page_with_handle(id, *hwnd).map(|page| &page.view) };
+        if let Some(view) = view {
+            unsafe { SetWindowPos(view.hwnd(), Some(HWND_TOP), 0, 0, 0, 0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
+        }
+        Ok(())
+    }
+    fn complete_page_menu(&mut self, ticket: u64, command: Option<i32>) {
+        if ticket != self.page_menu_ticket { return; }
+        let Some(request) = self.page_menu.take() else { return };
+        let _ = self.raise_fullscreen_surface(false);
+        if let Some(view) = self.page_menu_source(request.source) {
+            let _ = view.focus();
+            self.page_menu_focus = Some(request.source);
+            if let Some(id) = command { request.select(id); }
+        }
+        drop(request);
+        self.emit(json!({"type":"pageContextMenu", "pageMenu":null, "ticket":ticket}));
+    }
+    fn capture_context_menu_backdrop(&self, ticket: u64) {
+        let Some(window) = &self.window else { return };
+        let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+        let full = Rect { width: size.width, height: size.height, ..Rect::default() };
+        let capture = |view: &WebView, layer, rect| {
+            let proxy = self.proxy.clone();
+            let _ = self.thumbnail_encoder.capture(view, None, move |image| {
+                if let Some(image) = image {
+                    let _ = proxy.send_event(Event::ContextMenuBackdrop(ticket, layer, rect, image));
+                }
+            });
+        };
+        if let Some((id, hwnd)) = &self.fullscreen_page {
+            if let Some(page) = self.page_with_handle(id, *hwnd) { capture(&page.view, 0, full); }
+            return;
+        }
+        if let Some(ui) = &self.ui { capture(ui, 0, full); }
+        if let Some(tab) = self.state.active() {
+            let panes = std::iter::once((&tab.id, self.primary)).chain(tab.split_with.as_ref().zip(self.secondary));
+            for (index, (id, rect)) in panes.enumerate() {
+                if let Some(page) = self.pages.get(id).filter(|page| page.visible.get()) {
+                    capture(&page.view, index + 1, rect);
+                }
+            }
+        }
+        if let Some(peek) = &self.peek {
+            if let Some(rect) = peek.rect.filter(|_| peek.shown.get()) { capture(&peek.page.view, 3, rect); }
         }
     }
     fn track_webview_focus(&self, view: &WebView) -> windows::core::Result<()> {
@@ -1798,6 +1905,7 @@ impl App {
             .build_as_child(self.window.as_ref().unwrap())?;
         self.remember_web_environment(&view);
         self.track_webview_focus(&view)?;
+        self.register_page_menu(&view);
         // Wry's zoom option also enables pinch, which is handled separately by WebView2.
         unsafe { view.webview().Settings()?.SetIsZoomControlEnabled(true)?; }
         crate::web_settings::apply(&view, &self.state.settings)?;
@@ -2417,6 +2525,7 @@ impl App {
         None
     }
     fn close_peek(&mut self) {
+        self.close_page_menu();
         if self.peek.take().is_none() {
             return;
         }
@@ -2480,6 +2589,7 @@ impl App {
         if self.window.is_none() {
             return Ok(());
         }
+        self.close_page_menu();
         self.reconcile_page_fullscreen()?;
         if !self.state.onboarding.completed { return self.sync_layout(); }
         if self.reader.as_ref().is_some_and(|r| !self.state.visible_tab(&r.id) || !self.state.tabs.iter().any(|t| t.id == r.id && t.url == r.url)) {
@@ -3007,11 +3117,8 @@ impl App {
         self.reconcile_page_fullscreen()?;
         if self.reader.is_some() { self.publish_reader(); }
         self.sync_page_bounds()?;
-        if let Some((id, hwnd)) = &self.fullscreen_page {
-            if let Some(page) = self.page_with_handle(id, *hwnd) {
-                unsafe { SetWindowPos(page.view.hwnd(), Some(HWND_TOP), 0, 0, 0, 0,
-                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)?; }
-            }
+        if self.fullscreen_page.is_some() {
+            self.raise_fullscreen_surface(self.page_menu.is_some())?;
             return Ok(());
         }
         // Stacking changes on page/overlay transitions, not on every drag frame.
@@ -4202,6 +4309,7 @@ impl App {
             }
             Command::Overlay { visible, command } => {
                 if visible {
+                    self.close_page_menu();
                     self.close_extension_menu();
                     self.finish_split_resize();
                     self.dismiss_tab_preview();
@@ -4234,6 +4342,8 @@ impl App {
                 return;
             }
             Command::PopupReady => {
+                self.popup_ready = true;
+                self.close_page_menu();
                 self.publish_reader();
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
@@ -4249,6 +4359,14 @@ impl App {
                 self.sync_permissions();
                 self.emit(self.permission_state.clone());
                 self.publish_permission_rules();
+                return;
+            }
+            Command::PageContextMenuResult { ticket, command } => {
+                self.complete_page_menu(ticket, command);
+                return;
+            }
+            Command::CaptureContextMenuBackdrop { ticket } => {
+                self.capture_context_menu_backdrop(ticket);
                 return;
             }
             Command::PermissionAnswer { id, allowed, remember } => {
@@ -4305,14 +4423,16 @@ impl App {
                     let result = WindowClip::popup(popup.hwnd(), &regions, cutout, window.scale_factor());
                     if result.is_ok() {
                         self.popup_has_regions = !regions.is_empty();
-                        if focus && self.fullscreen_page.is_none() { let _ = popup.focus(); }
+                        if focus && (self.fullscreen_page.is_none() || self.page_menu.is_some()) { let _ = popup.focus(); }
                     }
                     if let Err(e) = result { self.error(e); }
                 }
+                let page_menu_focus = self.page_menu_focus.take();
                 if regions.is_empty() {
                     if self.space_form_open() {
                         if let Some(ui) = &self.ui { let _ = ui.focus(); }
                     }
+                    else if let Some(view) = page_menu_focus.and_then(|source| self.page_menu_source(source)) { let _ = view.focus(); }
                     else if let Some(page) = self.page() { let _ = page.focus(); }
                     else if let Some(ui) = &self.ui { let _ = ui.focus(); }
                 }
@@ -4894,6 +5014,14 @@ impl ApplicationHandler<Event> for App {
                 let _ = request.reply.send(response);
             }
             Event::RestoreKeyboardFocus => self.restore_keyboard_focus(),
+            Event::PageMenuRequested => self.show_page_menu(),
+            Event::ContextMenuBackdrop(ticket, layer, rect, image) => {
+                if let Some(popup) = &self.popup {
+                    let value = json!({"type":"contextMenuBackdrop", "ticket":ticket, "layer":layer,
+                        "rect":{"x":rect.x,"y":rect.y,"width":rect.width,"height":rect.height,"corners":rect.corners}, "image":image});
+                    let _ = unsafe { popup.webview().PostWebMessageAsJson(&HSTRING::from(value.to_string())) };
+                }
+            }
             Event::ExtensionPrepared(request, result) => {
                 if self.extension_preparation != Some(request) { return; }
                 self.extension_preparation = None;
@@ -5319,6 +5447,11 @@ impl ApplicationHandler<Event> for App {
             }
             Event::Load(id, url, loading) => {
                 if loading {
+                    if self.page_menu.as_ref().is_some_and(|request| {
+                        self.page_with_handle(&id, request.source.0 as isize).is_some()
+                    }) {
+                        self.close_page_menu();
+                    }
                     if let Some((pending_id, pending_url, _)) = self.reader_request.as_mut() {
                         if pending_id == &id { *pending_url = url.clone(); }
                     }
@@ -5516,6 +5649,7 @@ impl ApplicationHandler<Event> for App {
                 self.publish_default_browser();
             }
             WindowEvent::Focused(false) => {
+                self.close_page_menu();
                 self.end_tab_switcher();
                 self.close_extension_menu();
                 self.emit(json!({"type":"windowDeactivated"}));
@@ -5527,6 +5661,7 @@ impl ApplicationHandler<Event> for App {
                 event_loop.exit()
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.close_page_menu();
                 self.finish_split_resize();
                 self.sidebar_expected_width = None;
                 self.dismiss_tab_preview();

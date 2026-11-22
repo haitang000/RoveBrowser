@@ -8,17 +8,18 @@ import { tabsToDismiss } from "../../lib/command";
 import { tabDisplayTitle } from "../../lib/tab-meta";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
+import ContextMenuSurface from "./ContextMenuSurface.vue";
 const b = useBrowser();
 const menu = computed(() => b.contextMenu?.tab ? { ...b.contextMenu, tab: b.contextMenu.tab } : undefined);
 const edit = ref(false), editTitle = ref(""), editUrl = ref("");
 const rename = ref(false), renameTitle = ref("");
 const movingToFolder = ref(false);
-const panel = ref<HTMLElement>();
+const panel = ref<InstanceType<typeof ContextMenuSurface>>();
 watch(menu, async (value) => {
   edit.value = false;
   rename.value = false;
   movingToFolder.value = false;
-  if (value) { await nextTick(); panel.value?.querySelector<HTMLButtonElement>("button")?.focus(); }
+  if (value) { await nextTick(); panel.value?.panel?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); }
 });
 function bookmark() { return menu.value?.tab.bookmarkId ? savedPage(b.state, menu.value.tab.bookmarkId) : undefined; }
 /** The live controller record, so mute/zoom/rename labels follow host state. */
@@ -44,6 +45,7 @@ const title = computed(() =>
       : "",
 );
 const canRename = computed(() => Boolean(liveTab.value && !liveTab.value.bookmarkId));
+const otherSpaces = computed(() => b.state.spaces.filter((space) => space.id !== menu.value?.tab.spaceId));
 const folders = computed(() => b.state.pinLayouts?.[menu.value?.tab.spaceId ?? ""]?.folders ?? []);
 const currentFolder = computed(() => folders.value.find((folder) => folder.pins.includes(menu.value?.tab.bookmarkId ?? "")));
 const otherFolders = computed(() => folders.value.filter((folder) => folder !== currentFolder.value));
@@ -76,7 +78,7 @@ function resetRename() {
 async function chooseFolder() {
   movingToFolder.value = true;
   await nextTick();
-  panel.value?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+  panel.value?.panel?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
 }
 function moveToFolder(folderId?: string) {
   if (menu.value) act("pinPlace", { spaceId: menu.value.tab.spaceId, folderId });
@@ -111,11 +113,10 @@ function act(type: string, extra = {}) {
         @pointerdown.self="closeMenu"
         @keydown.esc="closeMenu"
       >
-        <div
+        <ContextMenuSurface
           ref="panel"
-          class="context-menu"
           role="menu"
-          :style="{ left: menu.x + 'px', top: menu.y + 'px', maxHeight: `calc(100dvh - ${menu.y + 12}px)` }"
+          :anchor="menu"
         >
           <form v-if="edit" class="bookmark-menu-form" @submit.prevent="b.send({ type: 'bookmarkUpdate', id: bookmark()?.id, title: editTitle, url: editUrl }); closeMenu()">
             <label>{{ b.t('名称') }}<input v-model="editTitle" :aria-label="b.t('固定标签名称')" maxlength="80" required /></label>
@@ -176,6 +177,7 @@ function act(type: string, extra = {}) {
               {{ b.t('恢复网页标题') }}
             </button>
           </template>
+          <hr />
           <button role="menuitem" :disabled="!canRename" @click="duplicate">
             <Icon name="duplicate" />{{ b.t('复制标签页') }}
           </button>
@@ -231,6 +233,7 @@ function act(type: string, extra = {}) {
           >
             <Icon name="globe" />{{ b.t('在 Peek 中预览') }}
           </button>
+          <hr />
           <div class="menu-label">{{ b.t('关闭') }}</div>
           <button role="menuitem" :disabled="othersCount === 0" @click="act('closeOthers')">
             <Icon name="close" />{{ b.t('关闭其他标签页') }}<small v-if="othersCount">{{ othersCount }}</small>
@@ -238,22 +241,18 @@ function act(type: string, extra = {}) {
           <button role="menuitem" :disabled="belowCount === 0" @click="act('closeBelow')">
             <Icon name="close" />{{ b.t('关闭下方标签页') }}<small v-if="belowCount">{{ belowCount }}</small>
           </button>
-          <div class="menu-label">{{ b.t('移至工作区') }}</div>
-          <button
-            v-for="s in b.state.spaces.filter(
-              (x) => x.id !== menu!.tab.spaceId,
-            )"
-            :key="s.id"
-            role="menuitem"
-            @click="act('move', { spaceId: s.id })"
-          >
-            <SpaceGlyph v-if="s.icon" :icon="s.icon" :size="14" />{{ s.name }}
-          </button>
+          <template v-if="otherSpaces.length">
+            <hr />
+            <div class="menu-label">{{ b.t('移至工作区') }}</div>
+            <button v-for="s in otherSpaces" :key="s.id" role="menuitem" @click="act('move', { spaceId: s.id })">
+              <SpaceGlyph v-if="s.icon" :icon="s.icon" :size="14" />{{ s.name }}
+            </button>
+          </template>
           <hr />
           <button role="menuitem" @click="menu.tab.bookmarkId ? (b.send({ type: 'bookmarkUnload', id: menu.tab.bookmarkId }), closeMenu()) : act('close')">
             <Icon name="close" />{{ menu.tab.pinned ? b.t('卸载网页') : b.t('关闭标签页') }}
           </button>
           </template>
-        </div>
+        </ContextMenuSurface>
       </div></Teleport>
 </template>

@@ -511,7 +511,6 @@ kbd {
 .favorites .favorite-close { position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; opacity: 0; background: var(--selected); }
 .favorite-tile:hover .favorite-close, .favorite-tile:focus-within .favorite-close { opacity: 1; }
 .tab-label.unloaded .tab-picture { opacity: 0.55; }
-.context-menu { max-height: calc(100dvh - 48px); overflow-y: auto; }
 .bookmark-menu-form { display: grid; gap: 10px; padding: 6px; }
 .bookmark-menu-form label { display: grid; gap: 5px; font-size: 12px; }
 .bookmark-menu-form input { width: 100%; height: 30px; padding: 0 6px; border: 1px solid var(--edge); border-radius: 6px; background: var(--surface); }
@@ -1277,31 +1276,72 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
   z-index: 110;
 }
 .context-menu {
+  --context-menu-base: color-mix(in srgb, var(--panel) 93%, var(--ink));
   position: fixed;
-  width: 210px;
-  padding: 5px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 10px;
-  background: var(--panel);
-  box-shadow: 0 3px 16px var(--panel-shadow);
+  width: min(var(--context-menu-width, 268px), calc(100dvw - 16px));
+  overflow: clip;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  border-radius: 12px;
+  backdrop-filter: blur(12px) saturate(115%);
+  color: var(--ink);
+  box-shadow: 0 8px 24px var(--panel-shadow), 0 2px 5px var(--shadow);
+  animation: context-menu-appear 150ms var(--ease-out);
 }
-.context-menu button {
-  height: 28px;
+.context-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  filter: blur(12px) saturate(115%);
+  pointer-events: none;
+}
+.context-menu-backdrop img { position: absolute; display: block; }
+.context-menu-scroll {
+  position: relative;
+  max-height: max(0px, calc(100dvh - var(--titlebar-block) - 18px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  background: color-mix(in srgb, var(--context-menu-base) 90%, transparent);
+}
+.context-menu button[role^="menuitem"] {
+  min-height: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 8px;
+  padding: 6px 12px;
   width: 100%;
   text-align: left;
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
   border-radius: 6px;
 }
-.context-menu button:hover {
+.context-menu button[role^="menuitem"]:hover:not(:disabled),
+.context-menu button[role^="menuitem"][aria-expanded="true"],
+.context-menu button[role^="menuitem"]:focus-visible {
   background: var(--chosen);
+}
+.context-menu button[role^="menuitem"]:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.context-menu button[role^="menuitem"]:disabled { opacity: .44; cursor: default; }
+.context-menu button > svg { flex-shrink: 0; }
+.context-menu hr { margin: 5px 0; border: 0; border-top: 1px solid var(--edge); }
+.page-context-fullscreen { --titlebar-block: 0px; }
+.page-context-menu { --context-menu-width: 300px; }
+.page-context-menu:focus { outline: none; }
+.page-menu-label { flex: 1; min-width: 0; }
+.page-context-menu kbd { color: var(--quiet); font: inherit; font-size: 11px; white-space: nowrap; }
+.page-menu-chevron { rotate: -90deg; }
+@keyframes context-menu-appear { from { opacity: 0; } }
+html[data-reduce-motion="true"] .context-menu { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .context-menu { animation: none; }
 }
 .menu-label {
   font-size: 11px;
   color: var(--tertiary);
-  padding: 8px 8px 4px;
+  padding: 6px 12px 4px;
 }
 /* Zigzag site panel's zoom row: three quiet buttons under one label. */
 .menu-zoom {
@@ -1309,16 +1349,13 @@ html[data-reduce-motion="true"] .find-leave-active .find-bar-surface { animation
   gap: 2px;
   padding: 0 4px;
 }
-.menu-zoom button {
+.menu-zoom button[role="menuitem"] {
   width: auto;
   flex: 1;
   justify-content: center;
   gap: 4px;
   padding: 0 4px;
   font-size: 12px;
-}
-.menu-zoom button:disabled {
-  opacity: 0.4;
 }
 .context-menu button small {
   margin-left: auto;

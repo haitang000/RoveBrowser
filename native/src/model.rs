@@ -516,6 +516,10 @@ pub enum Command {
     TabDropTarget { rect: Option<Rect>, preview: Option<Rect> },
     #[serde(rename = "popupReady")]
     PopupReady,
+    #[serde(rename = "pageContextMenuResult")]
+    PageContextMenuResult { ticket: u64, command: Option<i32> },
+    #[serde(rename = "captureContextMenuBackdrop")]
+    CaptureContextMenuBackdrop { ticket: u64 },
     #[serde(rename = "permissionAnswer")]
     PermissionAnswer { id: String, allowed: Option<bool>, remember: bool },
     #[serde(rename = "permissionRule")]
