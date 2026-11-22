@@ -117,6 +117,13 @@ test("native preview uses the popup renderer and ignores old close acknowledgmen
   await expect(page.locator(preview)).toHaveCount(0);
   await expect(popup.locator(preview)).toHaveAttribute("data-phase", "open");
   await expect(popup.locator(".tab-preview-background")).toHaveCount(0);
+  await expect(popup.locator(preview)).not.toContainText("正在生成预览");
+  await expect(popup.locator(`${preview} .tab-preview-empty`)).toHaveCount(0);
+  await expect(popup.locator(preview)).toContainText("Wikipedia");
+  const image = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="320" height="200" fill="teal"/></svg>');
+  await popup.evaluate(image => window.__ERA_RECEIVE__?.({ type: "thumbnail", id: "wiki", image, kept: ["wiki"] }), image);
+  await expect(popup.locator(`${preview} .tab-preview-snapshot`)).toHaveCSS("opacity", "1");
+  await expect(popup.locator(preview)).not.toContainText("正在生成预览");
   await page.mouse.move(900, 600);
   await expect.poll(() => messages.some(m => m.type === "tabPreview" && !m.rect)).toBe(true);
   const ticket = messages.filter(m => m.type === "tabPreview" && !m.rect).at(-1)!.ticket!;

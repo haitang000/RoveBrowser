@@ -45,6 +45,11 @@ function reveal(el: HTMLImageElement, key: string) {
 function prime(el: unknown, key: string) {
   if (el instanceof HTMLImageElement) reveal(el, key);
 }
+function snapshotStatus(page: { key: string; tabId?: string }) {
+  if (!b.native) return b.t("界面预览");
+  if (b.previewFailures[pageKey(page)]) return b.t("暂时无法生成预览");
+  return "";
+}
 watch(() => pages.value.map((page) => `${pageKey(page)}:${b.thumbnails[pageKey(page)] ? 1 : 0}`).join("|"), () => {
   const next = { ...revealed.value };
   let changed = false;
@@ -86,7 +91,7 @@ onBeforeUnmount(() => { alive = false; revealGeneration += 1; epoch++; freeze();
       <div class="tab-preview-picture" :class="{ 'is-split': pages.length === 2 }">
         <div v-for="page in pages" :key="page.key" class="tab-preview-pane" :class="{ 'is-instant': revealed[pageKey(page)] === 'instant' }">
           <div v-if="page.url === 'era://newtab'" class="tab-preview-empty tab-preview-newtab" :class="{ 'is-covered': revealed[pageKey(page)] }" :aria-hidden="revealed[pageKey(page)] ? true : undefined"><span>Rove</span><small>A little room to explore.</small></div>
-          <div v-else class="tab-preview-empty" :class="{ 'is-covered': revealed[pageKey(page)] }" :aria-hidden="revealed[pageKey(page)] ? true : undefined"><Favicon :url="page.url" :favicon="page.favicon" /><small>{{ !b.native ? b.t('界面预览') : b.previewFailures[page.tabId || page.key] ? b.t('暂时无法生成预览') : b.t('正在生成预览…') }}</small></div>
+          <div v-else-if="snapshotStatus(page)" class="tab-preview-empty" :class="{ 'is-covered': revealed[pageKey(page)] }" :aria-hidden="revealed[pageKey(page)] ? true : undefined"><Favicon :url="page.url" :favicon="page.favicon" /><small>{{ snapshotStatus(page) }}</small></div>
           <img v-if="b.thumbnails[pageKey(page)]" class="tab-preview-snapshot" :class="{ 'is-shown': revealed[pageKey(page)] }" :src="b.thumbnails[pageKey(page)]" :alt="`${page.title} 的网页缩略图`" :aria-hidden="revealed[pageKey(page)] ? undefined : true" draggable="false" :ref="(el) => prime(el, pageKey(page))" @load="prime($event.target, pageKey(page))" />
         </div>
       </div>
