@@ -157,7 +157,9 @@ try {
   await send({ type: 'new', url: base + '/third' });
   const third = await site('/third'); await third.waitForSelector('h1');
   const thirdId = await selected();
-  await hover(firstId);
+  // The combined row may use either pane as its stable sidebar ID.
+  const splitRow = ui.locator(`.tab-row-split:is([data-tab-id="${firstId}"], [data-tab-id="${secondId}"])`);
+  await hover(await splitRow.getAttribute('data-tab-id'));
   assert.equal(await tooltip().locator('.tab-preview-caption').count(), 2);
   await waitFor(async () => await tooltip().locator('.tab-preview-pane > img').count() === 2, 'two snapshots');
   await ui.screenshot({ path: join(output, 'split-ui.png') });
@@ -166,6 +168,10 @@ try {
   // A normal preview can span the two visible native panes; neither is hidden.
   await ui.keyboard.press('Escape'); await tooltip().waitFor({ state: 'detached' });
   await send({ type: 'activate', id: secondId });
+  await ui.locator('.split-divider').waitFor();
+  await waitFor(async () => await selected() === await splitRow.getAttribute('data-tab-id')
+    && await first.evaluate(() => document.visibilityState) === 'visible'
+    && await second.evaluate(() => document.visibilityState) === 'visible', 'split is active and both panes are visible');
   await hover(thirdId);
   assert.equal(await first.evaluate(() => document.visibilityState), 'visible');
   assert.equal(await second.evaluate(() => document.visibilityState), 'visible');

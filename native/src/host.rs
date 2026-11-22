@@ -147,11 +147,9 @@ enum Event {
     PeekRequest(String, String, Option<Point>),
     PeekSurface(String, u64, Option<String>),
     Suggestions(u64, Vec<String>),
-    CaptureTabs,
-    Thumbnail(String, String, u64, Option<String>),
+    Thumbnail { id: String, url: String, version: u64, ticket: u64, image: Option<String> },
     PreviewLoad(String, u64, String, bool),
-    PreviewThumbnail(String, u64, u64, Option<String>),
-    PreviewCapture,
+    PreviewThumbnail { id: String, epoch: u64, ticket: u64, image: Option<String> },
     FindMatches(i32, i32),
     ChoosePageSavePath,
     PageSaveFinished(Result<bool, String>),
@@ -197,7 +195,6 @@ struct Page {
     clip: Rc<WindowClip>,
     thumbnail_version: u64,
     thumbnail_attempt: Option<u64>,
-    thumbnail_pending: bool,
     visible: Cell<bool>,
     bounds: Rc<Cell<Option<[i32; 4]>>>,
     viewport: Rc<Cell<Option<[i32; 2]>>>,
@@ -401,6 +398,11 @@ struct App {
     caption: Option<crate::caption::Caption>,
     glass_backdrop: Option<crate::glass::Backdrop>,
     thumbnails: crate::thumbnails::Cache,
+    thumbnail_encoder: crate::capture::ThumbnailEncoder,
+    tab_captures: crate::thumbnails::Captures,
+    preview_captures: crate::thumbnails::Captures,
+    next_tab_capture: Option<Instant>,
+    next_preview_capture: Option<Instant>,
     tab_preview: Option<(String, Rect)>,
     preview_renders: HashMap<String, PreviewRender>,
     preview_epoch: u64,
@@ -486,8 +488,7 @@ struct PreviewRender {
     source: String,
     epoch: u64,
     loading: bool,
-    pending: bool,
-    version: u64,
+    load_deadline: Option<Instant>,
 }
 pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Keep the existing profile location so the rename preserves sessions and logins.
@@ -580,6 +581,11 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         caption: None,
         glass_backdrop: None,
         thumbnails: crate::thumbnails::Cache::default(),
+        thumbnail_encoder: crate::capture::ThumbnailEncoder::new()?,
+        tab_captures: crate::thumbnails::Captures::default(),
+        preview_captures: crate::thumbnails::Captures::default(),
+        next_tab_capture: None,
+        next_preview_capture: None,
         tab_preview: None,
         preview_renders: HashMap::new(),
         preview_epoch: 0,
@@ -1188,7 +1194,7 @@ impl App {
             media: Rc::default(),
             resize_surface: Rc::new(crate::resize_surface::Surface::new(view.hwnd(), Some(view.webview()), self.resize_appearance)),
             view, url: url.clone(), clip: Rc::new(WindowClip::default()), save_path: Default::default(),
-            thumbnail_version: 0, thumbnail_attempt: None, thumbnail_pending: false,
+            thumbnail_version: 0, thumbnail_attempt: None,
             visible: Cell::new(false), bounds: Rc::new(Cell::new(None)), viewport: Rc::new(Cell::new(None)),
             dark: Cell::new(self.state.theme == "dark"), transparent: true, zoom_default: Cell::new(1.0),
             navigation: Rc::new(NavigationPolicy { bookmarked: Cell::new(false), current: RefCell::new(url.clone()), host_navigation: Cell::new(false) }),
@@ -1805,7 +1811,6 @@ impl App {
             clip: Rc::new(WindowClip::default()),
             thumbnail_version: 0,
             thumbnail_attempt: None,
-            thumbnail_pending: false,
             visible: Cell::new(false),
             bounds: Rc::new(Cell::new(None)),
             viewport: Rc::new(Cell::new(None)),
@@ -1823,10 +1828,10 @@ impl App {
         Ok(page)
     }
     fn invalidate_thumbnail(&mut self, id: &str) {
+        if self.tab_captures.cancel(id) { self.schedule_tab_capture(); }
         if let Some(page) = self.pages.get_mut(id) {
             page.thumbnail_version += 1;
             page.thumbnail_attempt = None;
-            page.thumbnail_pending = false;
         }
         self.thumbnails.remove(id);
         self.emit(json!({"type":"thumbnail","id":id,"image":null,"kept":self.thumbnails.images().keys().collect::<Vec<_>>()}));
@@ -1837,11 +1842,9 @@ impl App {
             self.state.active().and_then(|t| t.split_with.clone()),
         ];
         for id in ids.into_iter().flatten() {
-            if let Some(page) = self.pages.get_mut(&id) {
-                if !page.thumbnail_pending {
-                    page.thumbnail_version += 1;
-                    page.thumbnail_attempt = None;
-                }
+            if let Some(page) = self.pages.get_mut(&id).filter(|_| !self.tab_captures.contains(&id)) {
+                page.thumbnail_version += 1;
+                page.thumbnail_attempt = None;
             }
         }
         self.pump_thumbnails();
@@ -1907,6 +1910,8 @@ impl App {
     fn ensure_preview_renders(&mut self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let targets = crate::preview::targets(&self.state, id).unwrap_or_default();
         self.preview_renders.retain(|key, p| targets.iter().any(|t| &t.id == key && t.url == p.source));
+        self.preview_captures.retain(|id| self.preview_renders.contains_key(id));
+        if self.preview_renders.is_empty() { self.next_preview_capture = None; }
         for tab in targets {
             if !model::is_web(&tab.url) || self.pages.contains_key(&tab.id) || self.preview_renders.contains_key(&tab.id) || self.thumbnails.has(&tab.id, &tab.url) { continue; }
             self.preview_epoch += 1;
@@ -1929,42 +1934,39 @@ impl App {
             let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
             view.set_bounds(self.bounds(self.primary))?;
             view.load_url(&tab.url)?;
-            let timed_key = tab.id.clone();
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(12));
-                let _ = proxy.send_event(Event::PreviewLoad(timed_key, epoch, String::new(), false));
+            self.preview_renders.insert(tab.id, PreviewRender {
+                view, error_page, source: tab.url, epoch, loading: true,
+                load_deadline: Some(Instant::now() + crate::thumbnails::PREVIEW_LOAD_TIMEOUT),
             });
-            self.preview_renders.insert(tab.id, PreviewRender { view, error_page, source: tab.url, epoch, loading: true, pending: false, version: 0 });
         }
         self.sync_layout()?;
         Ok(())
     }
     fn refresh_preview_renders(&mut self) {
-        for (key, page) in &mut self.preview_renders {
-            if page.loading || page.pending { continue; }
-            page.pending = true;
-            page.version += 1;
-            let version = page.version;
+        for (key, page) in &self.preview_renders {
+            if page.loading || self.preview_captures.contains(key) { continue; }
+            let capture = self.preview_captures.start(key.clone(), Instant::now());
+            let ticket = capture.ticket;
             let epoch = page.epoch;
             let id = key.clone();
             let proxy = self.proxy.clone();
-            if crate::capture::thumbnail(&page.view, move |image| {
-                let _ = proxy.send_event(Event::PreviewThumbnail(id, epoch, version, image));
+            if self.thumbnail_encoder.capture(&page.view, Some(&capture.cancellation), move |image| {
+                let _ = proxy.send_event(Event::PreviewThumbnail { id, epoch, ticket, image });
             }).is_err() {
-                let _ = self.proxy.send_event(Event::PreviewThumbnail(key.clone(), epoch, version, None));
+                let _ = self.proxy.send_event(Event::PreviewThumbnail {
+                    id: key.clone(), epoch, ticket, image: None,
+                });
             }
-            let id = key.clone();
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                let _ = proxy.send_event(Event::PreviewThumbnail(id, epoch, version, None));
-            });
         }
+    }
+    fn clear_preview_renders(&mut self) {
+        self.preview_captures.clear();
+        self.preview_renders.clear();
+        self.next_preview_capture = None;
     }
     fn dismiss_tab_preview(&mut self) {
         let existed = self.tab_preview.take().is_some();
-        self.preview_renders.clear();
+        self.clear_preview_renders();
         if existed {
             let _ = self.sync_layout();
             self.emit(json!({"type":"tabPreviewDismissed"}));
@@ -2166,42 +2168,66 @@ impl App {
         if self.peek.is_some() {
             return;
         }
-        let pending = self.pages.values().filter(|p| p.thumbnail_pending).count();
         let candidates: Vec<_> = self
             .pages
             .iter()
             .filter(|(id, p)| {
-                !p.thumbnail_pending
+                !self.tab_captures.contains(id)
                     && !p.sleeping.get()
                     && p.thumbnail_attempt != Some(p.thumbnail_version)
                     && self.state.tabs.iter().any(|t| &t.id == *id && !t.loading)
             })
-            .take(2usize.saturating_sub(pending))
+            .take(2usize.saturating_sub(self.tab_captures.len()))
             .map(|(id, _)| id.clone())
             .collect();
         for id in candidates {
             let page = self.pages.get_mut(&id).unwrap();
-            page.thumbnail_pending = true;
             page.thumbnail_attempt = Some(page.thumbnail_version);
             let url = page.url.clone();
             let version = page.thumbnail_version;
+            let capture = self.tab_captures.start(id.clone(), Instant::now());
+            let ticket = capture.ticket;
             let proxy = self.proxy.clone();
             let callback_id = id.clone();
             let callback_url = url.clone();
-            let result = crate::capture::thumbnail(&page.view, move |image| {
-                let _ =
-                    proxy.send_event(Event::Thumbnail(callback_id, callback_url, version, image));
+            let result = self.thumbnail_encoder.capture(&page.view, Some(&capture.cancellation), move |image| {
+                let _ = proxy.send_event(Event::Thumbnail {
+                    id: callback_id, url: callback_url, version, ticket, image,
+                });
             });
             if result.is_err() {
-                let _ =
-                    self.proxy
-                        .send_event(Event::Thumbnail(id.clone(), url.clone(), version, None));
+                let _ = self.proxy.send_event(Event::Thumbnail { id, url, version, ticket, image: None });
             }
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                let _ = proxy.send_event(Event::Thumbnail(id, url, version, None));
-            });
+        }
+    }
+    fn schedule_tab_capture(&mut self) {
+        self.next_tab_capture.get_or_insert(Instant::now() + crate::thumbnails::SETTLE);
+    }
+    fn discard_closed_tab_captures(&mut self) {
+        if self.tab_captures.retain(|id| self.pages.contains_key(id)) {
+            self.schedule_tab_capture();
+        }
+    }
+    fn advance_thumbnail_work(&mut self, now: Instant) {
+        let mut unavailable = self.preview_captures.expire(now);
+        for (id, render) in &mut self.preview_renders {
+            if render.load_deadline.is_some_and(|due| due <= now) {
+                render.load_deadline = None;
+                if render.loading { unavailable.push(id.clone()); }
+            }
+        }
+        for id in unavailable {
+            self.emit(json!({"type":"tabPreviewUnavailable","id":id}));
+        }
+
+        let timed_out = !self.tab_captures.expire(now).is_empty();
+        let tabs_ready = self.next_tab_capture.is_some_and(|due| due <= now);
+        if tabs_ready { self.next_tab_capture = None; }
+        if tabs_ready || timed_out { self.pump_thumbnails(); }
+
+        if self.next_preview_capture.is_some_and(|due| due <= now) {
+            self.next_preview_capture = None;
+            self.refresh_preview_renders();
         }
     }
     fn publish_peek(&self) {
@@ -2347,6 +2373,7 @@ impl App {
             self.error(e)
         }
         // Source pages keep rendering beneath the popup throughout Peek dismissal.
+        self.schedule_tab_capture();
         self.publish_peek();
         self.emit_active_zoom();
         if !self.overlay {
@@ -2374,6 +2401,7 @@ impl App {
         if let Err(e) = self.sync() {
             self.error(e)
         }
+        self.schedule_tab_capture();
         if let Some(p) = self.page() {
             let _ = p.focus();
         }
@@ -2433,6 +2461,7 @@ impl App {
                 .iter()
             .any(|t| &t.id == id && model::is_tab_page(&t.url))
         });
+        self.discard_closed_tab_captures();
         let sources: HashMap<_, _> = self.state.tabs.iter().map(|t| (t.id.as_str(), t.url.as_str()))
             .chain(self.state.pins.iter().chain(&self.state.favorites).map(|f| (f.id.as_str(), f.url.as_str()))).collect();
         self.thumbnails.retain_sources(|id, url| sources.get(id).copied() == Some(url));
@@ -2866,6 +2895,7 @@ impl App {
             }), Box::new(|| Ok(())), Box::new(|| Ok(())));
             self.presented_split = None;
             self.pages.retain(|id, _| self.state.tabs.iter().any(|tab| &tab.id == id));
+            self.discard_closed_tab_captures();
             self.sync_layout()?;
             Ok(())
         })();
@@ -3198,7 +3228,7 @@ impl App {
         {
             let Some(page) = self.pages.get(id).filter(|page| page.visible.get()) else { continue };
             let proxy = self.proxy.clone();
-            let _ = crate::capture::thumbnail(&page.view, move |image| {
+            let _ = self.thumbnail_encoder.capture(&page.view, None, move |image| {
                 if let Some(image) = image {
                     let _ = proxy.send_event(Event::ExtensionBackground(popup, rect, image));
                 }
@@ -3754,7 +3784,7 @@ impl App {
                     if let Err(e) = self.ensure_preview_renders(&id) { self.error(e); self.dismiss_tab_preview(); }
                 } else {
                     self.tab_preview = None;
-                    self.preview_renders.clear();
+                    self.clear_preview_renders();
                     if let Err(e) = self.sync_layout() { self.error(e); }
                     self.emit(json!({"type":"tabPreviewHidden","ticket":ticket}));
                 }
@@ -3768,8 +3798,8 @@ impl App {
                 {
                     if let Some(ids) = self.preview_tabs(&id) {
                         for id in ids {
-                            if let Some(page) =
-                                self.pages.get_mut(&id).filter(|p| !p.thumbnail_pending)
+                            if let Some(page) = self.pages.get_mut(&id)
+                                .filter(|_| !self.tab_captures.contains(&id))
                             {
                                 page.thumbnail_version += 1;
                                 page.thumbnail_attempt = None;
@@ -4833,41 +4863,36 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::PreviewLoad(key, epoch, url, loading) => {
-                if let Some(render) = self.preview_renders.get_mut(&key).filter(|p| p.epoch == epoch) {
-                    if url.is_empty() {
-                        if render.loading { self.emit(json!({"type":"tabPreviewUnavailable","id":key})); }
-                    } else if model::is_web(&url) {
-                        render.loading = loading;
-                        if !loading {
-                            let proxy = self.proxy.clone();
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(140));
-                                let _ = proxy.send_event(Event::PreviewCapture);
-                            });
-                        }
+                if let Some(render) = self.preview_renders.get_mut(&key)
+                    .filter(|p| p.epoch == epoch && model::is_web(&url))
+                {
+                    render.loading = loading;
+                    let now = Instant::now();
+                    if loading {
+                        self.preview_captures.cancel(&key);
+                        render.load_deadline.get_or_insert(now + crate::thumbnails::PREVIEW_LOAD_TIMEOUT);
+                    } else {
+                        render.load_deadline = None;
+                        self.next_preview_capture.get_or_insert(now + crate::thumbnails::SETTLE);
                     }
                 }
             }
-            Event::PreviewCapture => self.refresh_preview_renders(),
-            Event::PreviewThumbnail(key, epoch, version, image) => {
-                if let Some(render) = self.preview_renders.get_mut(&key).filter(|p| p.epoch == epoch && p.version == version && p.pending) {
-                    render.pending = false;
+            Event::PreviewThumbnail { id, epoch, ticket, image } => {
+                if !self.preview_captures.complete(&id, ticket) { return; }
+                if let Some(render) = self.preview_renders.get(&id).filter(|p| p.epoch == epoch) {
                     if let Some(image) = image {
-                        self.thumbnails.insert(key.clone(), render.source.clone(), image.clone());
-                        self.emit(json!({"type":"thumbnail","id":key,"image":image,"kept":self.thumbnails.images().keys().collect::<Vec<_>>()}));
-                    } else { self.emit(json!({"type":"tabPreviewUnavailable","id":key})); }
+                        self.thumbnails.insert(id.clone(), render.source.clone(), image.clone());
+                        self.emit(json!({"type":"thumbnail","id":id,"image":image,"kept":self.thumbnails.images().keys().collect::<Vec<_>>()}));
+                    } else { self.emit(json!({"type":"tabPreviewUnavailable","id":id})); }
                 }
             }
-            Event::CaptureTabs => self.pump_thumbnails(),
-            Event::Thumbnail(id, url, version, image) => {
+            Event::Thumbnail { id, url, version, ticket, image } => {
+                if !self.tab_captures.complete(&id, ticket) { return; }
                 let valid = self
                     .pages
                     .get(&id)
                     .is_some_and(|p| p.url == url && p.thumbnail_version == version);
                 if valid {
-                    if let Some(page) = self.pages.get_mut(&id) {
-                        page.thumbnail_pending = false;
-                    }
                     if let Some(image) = image {
                         self.thumbnails.insert(id.clone(), url, image.clone());
                         self.emit(json!({"type":"thumbnail","id":id,"image":image,"kept":self.thumbnails.images().keys().collect::<Vec<_>>()}));
@@ -5167,11 +5192,9 @@ impl ApplicationHandler<Event> for App {
                         if pending_id == id && pending_url == url { self.start_reader_extract(&id, &url, epoch); }
                     }
                     self.save();
-                    let proxy = self.proxy.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(140));
-                        let _ = proxy.send_event(Event::CaptureTabs);
-                    });
+                    if self.pages.contains_key(&id) {
+                        self.schedule_tab_capture();
+                    }
                 }
             }
             Event::Source(id, url) => {
@@ -5355,8 +5378,13 @@ impl ApplicationHandler<Event> for App {
         if self.extension_view.as_ref().and_then(|view| view.next_measure).is_some_and(|due| Instant::now() >= due) {
             self.measure_extension_view();
         }
+        self.advance_thumbnail_work(Instant::now());
         let due = self.next_download_poll.into_iter().chain(self.next_session_save)
-            .chain(self.extension_view.as_ref().and_then(|view| view.next_measure)).min();
+            .chain(self.extension_view.as_ref().and_then(|view| view.next_measure))
+            .chain(self.next_tab_capture).chain(self.next_preview_capture)
+            .chain(self.tab_captures.next_deadline()).chain(self.preview_captures.next_deadline())
+            .chain(self.preview_renders.values().filter_map(|render| render.load_deadline))
+            .min();
         event_loop.set_control_flow(due.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
     fn exiting(&mut self, _: &ActiveEventLoop) {
@@ -5364,6 +5392,8 @@ impl ApplicationHandler<Event> for App {
         self.permissions.inbox.take();
         self.permissions.waiting.clear();
         self.page_save.take();
+        self.tab_captures.clear();
+        self.preview_captures.clear();
         self.glass_backdrop = None;
         self.flush_session();
         self.save_downloads();

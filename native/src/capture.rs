@@ -1,6 +1,11 @@
 //! In-memory snapshots for native Peek's HWND airspace and Desk thumbnails.
 //! Never written to session/history/disk or exposed to site scripts.
 use base64::{engine::general_purpose::STANDARD, Engine};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, SyncSender, TrySendError},
+    Arc, Mutex,
+};
 use webview2_com::{
     CapturePreviewCompletedHandler,
     Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
@@ -64,28 +69,93 @@ pub fn background(
     Ok(())
 }
 
-/// Capture the actual renderer, then resize/encode off the window thread.
-/// The UI receives a bounded JPEG rather than full viewport PNGs for every tab.
-pub fn thumbnail(
-    view: &WebView,
-    done: impl FnOnce(Option<String>) + Send + 'static,
-) -> windows::core::Result<()> {
-    let stream = unsafe { CreateStreamOnHGlobal(HGLOBAL::default(), true)? };
-    let output = stream.clone();
-    let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
-        let captured = result.and_then(|_| bytes(&output));
-        std::thread::spawn(move || done(captured.ok().and_then(|png| small_jpeg(&png))));
-        Ok(())
-    }));
-    unsafe {
-        view.webview().CapturePreview(
-            COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
-            &stream,
-            &handler,
-        )?;
+#[derive(Default)]
+pub struct Cancellation(Arc<AtomicBool>);
+
+impl Drop for Cancellation {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
     }
-    Ok(())
 }
+
+struct EncodeJob {
+    png: Vec<u8>,
+    cancelled: Option<Arc<AtomicBool>>,
+    done: Box<dyn FnOnce(Option<String>) + Send>,
+}
+
+fn is_cancelled(flag: Option<&Arc<AtomicBool>>) -> bool {
+    flag.is_some_and(|flag| flag.load(Ordering::Relaxed))
+}
+
+pub struct ThumbnailEncoder(SyncSender<EncodeJob>);
+
+impl ThumbnailEncoder {
+    pub fn new() -> std::io::Result<Self> {
+        let (sender, receiver) = mpsc::sync_channel::<EncodeJob>(8);
+        let receiver = Arc::new(Mutex::new(receiver));
+        for index in 0..2 {
+            let receiver = receiver.clone();
+            std::thread::Builder::new()
+                .name(format!("rove-thumbnail-{index}"))
+                .spawn(move || loop {
+                    let job = receiver.lock().unwrap().recv();
+                    let Ok(job) = job else { break };
+                    if is_cancelled(job.cancelled.as_ref()) {
+                        continue;
+                    }
+                    let image = small_jpeg(&job.png);
+                    if !is_cancelled(job.cancelled.as_ref()) {
+                        (job.done)(image);
+                    }
+                })?;
+        }
+        Ok(Self(sender))
+    }
+
+    /// Keep the COM stream on the window thread and hand only PNG bytes to the encoder.
+    pub fn capture(
+        &self,
+        view: &WebView,
+        cancellation: Option<&Cancellation>,
+        done: impl FnOnce(Option<String>) + Send + 'static,
+    ) -> windows::core::Result<()> {
+        let stream = unsafe { CreateStreamOnHGlobal(HGLOBAL::default(), true)? };
+        let output = stream.clone();
+        let sender = self.0.clone();
+        let cancelled = cancellation.map(|token| token.0.clone());
+        let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+            if is_cancelled(cancelled.as_ref()) {
+                return Ok(());
+            }
+            let Ok(png) = result.and_then(|_| bytes(&output)) else {
+                done(None);
+                return Ok(());
+            };
+            let job = EncodeJob {
+                png,
+                cancelled,
+                done: Box::new(done),
+            };
+            // A burst must neither block the window thread nor queue unlimited full-size PNGs.
+            if let Err(TrySendError::Full(job) | TrySendError::Disconnected(job)) =
+                sender.try_send(job)
+            {
+                (job.done)(None);
+            }
+            Ok(())
+        }));
+        unsafe {
+            view.webview().CapturePreview(
+                COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                &stream,
+                &handler,
+            )?;
+        }
+        Ok(())
+    }
+}
+
 fn small_jpeg(png: &[u8]) -> Option<String> {
     let mut reader =
         image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
