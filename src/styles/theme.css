@@ -1459,6 +1459,18 @@ html[data-reduce-motion="true"] .context-menu { animation: none; }
   --toast-slide-ease: cubic-bezier(.22, 1.45, .38, 1);
   --toast-fade-ease: ease-out;
 }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .error-toast.toast-enter-active .toast-surface {
+    animation: error-toast-shake 240ms var(--ease-move);
+  }
+}
+@keyframes error-toast-shake {
+  from, to { translate: 0; }
+  18% { translate: -5px; }
+  38% { translate: 5px; }
+  58% { translate: -3px; }
+  78% { translate: 2px; }
+}
 .toast-leave-active {
   --toast-duration: 190ms;
   --toast-slide-ease: cubic-bezier(.32, -.7, .54, 1);
