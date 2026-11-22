@@ -162,6 +162,10 @@ declare global {
       resizing?: boolean;
       state?: BrowserState;
       entries?: HistoryEntry[];
+      requestId?: string;
+      historyPage?: import("./history").HistoryPageData;
+      canUndo?: boolean;
+      ok?: boolean;
       suggestions?: string[];
       message?: string;
       phase?: string | null;

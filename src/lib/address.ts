@@ -1,9 +1,14 @@
 import { isSettingsUrl, normalizeSettingsUrl, searchUrl, type Settings } from "./settings";
+export const HISTORY_URL = "rove://history";
+export function isHistoryUrl(input = ""): boolean {
+  return /^(?:rove|era):\/\/history\/?$/i.test(input);
+}
 export function address(input: string, settings?: Partial<Settings>): string {
   const value = input.trim();
   if (!value) return "era://newtab";
   if (value === "era://newtab") return value;
   if (isSettingsUrl(value)) return normalizeSettingsUrl(value);
+  if (isHistoryUrl(value)) return HISTORY_URL;
   if (/^https?:\/\//i.test(value)) {
     try {
       return new URL(value).href;

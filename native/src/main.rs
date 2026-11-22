@@ -17,6 +17,7 @@ mod favicon;
 mod find;
 mod frame;
 mod glass;
+mod history;
 mod host;
 mod https;
 mod model;

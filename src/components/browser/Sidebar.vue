@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useBrowser } from "../../stores/browser";
-import { host } from "../../lib/address";
+import { host, isHistoryUrl } from "../../lib/address";
 import { isSettingsUrl } from "../../lib/settings";
 import type { Tab } from "../../lib/types";
 import Icon from "../common/Icon.vue";
@@ -17,6 +17,7 @@ import SpaceEditor from "./SpaceEditor.vue";
 import { provideTabDrag } from "../../lib/tab-drag";
 const b = useBrowser();
 const splitAddress = computed(() => isSettingsUrl(b.active?.url) ? b.t("设置")
+  : isHistoryUrl(b.active?.url) ? b.t("历史记录")
   : b.active?.url.startsWith("chrome-extension:") ? b.active.title || b.t("扩展")
   : host(b.active?.url || "") || b.t("搜索或输入地址"));
 const sidebar = ref<HTMLElement>();

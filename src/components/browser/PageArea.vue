@@ -17,8 +17,10 @@ import NewTabPage from "./NewTabPage.vue";
 import PageToolbar from "./PageToolbar.vue";
 import SplitControls from "./SplitControls.vue";
 import { isSettingsUrl } from "../../lib/settings";
+import { isHistoryUrl } from "../../lib/address";
 import { pageDirection, type PageDirection } from "../../lib/page-motion";
 const SettingsPage = defineAsyncComponent(() => import("./SettingsPage.vue"));
+const HistoryPage = defineAsyncComponent(() => import("./HistoryPage.vue"));
 const b = useBrowser(),
   primary = ref<HTMLElement>(),
   secondary = ref<HTMLElement>(),
@@ -282,6 +284,7 @@ function resize(e: PointerEvent) {
       <div ref="primary" class="webview-slot" :data-page-dir="primaryDir">
         <Transition name="page" :css="!swapping">
         <SettingsPage v-if="b.active && isSettingsUrl(b.active.url)" :key="`settings:${b.active.id}`" :tab-id="b.active.id" :url="b.active.url" />
+        <HistoryPage v-else-if="b.active && isHistoryUrl(b.active.url)" :key="`history:${b.active.id}`" :tab-id="b.active.id" />
         <NewTabPage
           v-else-if="b.active?.url === 'era://newtab' || !b.active"
           :key="`newtab:${b.active?.id || 'empty'}`"
@@ -327,6 +330,7 @@ function resize(e: PointerEvent) {
         <div ref="secondary" class="webview-slot" :data-page-dir="secondaryDir">
           <Transition name="page" :css="!swapping">
           <SettingsPage v-if="isSettingsUrl(other.url)" :key="`settings:${other.id}`" :tab-id="other.id" :url="other.url" />
+          <HistoryPage v-else-if="isHistoryUrl(other.url)" :key="`history:${other.id}`" :tab-id="other.id" />
           <NewTabPage v-else-if="other.url === 'era://newtab'" :key="`newtab:${other.id}`" :tab-id="other.id" />
           <div
             v-else-if="!b.native"

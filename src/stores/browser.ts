@@ -27,6 +27,7 @@ import { NEW_TAB_STORAGE_KEY, newTabSettings, type NewTabSettings } from "../lib
 import { interfaceLanguage, LANGUAGE_STORAGE_KEY, translate } from "../lib/language";
 import { applySnapshot, expandSnapshot, shareSnapshot, type StatePatch } from "../lib/state-snapshot";
 import { useNowPlaying } from "../lib/now-playing";
+import type { HistoryCursor, HistoryEdit, HistoryReply, HistoryVisit } from "../lib/history";
 export const useBrowser = defineStore("browser", () => {
   const native = Boolean(window.__ERA_NATIVE__ && window.ipc);
   const popupWindow = Boolean(window.__ERA_POPUP__);
@@ -50,6 +51,48 @@ export const useBrowser = defineStore("browser", () => {
     suggestions = ref<string[]>([]),
     recent = ref<string[]>([]),
     error = ref("");
+  const historyReply = shallowRef<HistoryReply>();
+  const historyVersion = ref(0);
+  const canUndoHistory = ref(false);
+  const previewHistory = new Map<string, HistoryVisit>();
+  let previewHistoryUndo: HistoryVisit[] = [];
+
+  function historyChanged(canUndo?: boolean) {
+    if (canUndo !== undefined) canUndoHistory.value = canUndo;
+    history.value = [];
+    historyVersion.value++;
+  }
+
+  function previewHistoryPage(requestId: string, query: string, before?: HistoryCursor) {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const limit = words.length ? 300 : 200;
+    const matching = Array.from(previewHistory.values()).filter((entry) =>
+      words.every((word) => entry.title.toLowerCase().includes(word) || entry.url.toLowerCase().includes(word))
+      && (!before || entry.visited < before.visited || (entry.visited === before.visited && entry.url < before.url)));
+    matching.sort((a, b) => b.visited - a.visited || Number(b.url > a.url) - Number(b.url < a.url));
+    const entries = matching.slice(0, limit);
+    queueMicrotask(() => {
+      historyReply.value = { requestId, page: { entries, next: !words.length && matching.length > limit ? entries.at(-1)! : null } };
+    });
+  }
+
+  function previewHistoryEdit(requestId: string, change: HistoryEdit) {
+    queueMicrotask(() => {
+      if (change.action === "undo") {
+        for (const visit of previewHistoryUndo) if (!previewHistory.has(visit.url)) previewHistory.set(visit.url, visit);
+        previewHistoryUndo = [];
+      } else {
+        const urls = change.action === "remove" ? new Set(change.urls) : undefined;
+        const removed = [...previewHistory.values()].filter((visit) => change.action === "clear"
+          ? change.since === null || visit.visited >= change.since
+          : urls!.has(visit.url));
+        for (const visit of removed) previewHistory.delete(visit.url);
+        if (removed.length) previewHistoryUndo = removed;
+      }
+      historyReply.value = { requestId, ok: true };
+      historyChanged(previewHistoryUndo.length > 0);
+    });
+  }
   // Native preferences live in the session database. The standalone preview
   // remembers only the new-tab layout and language, not the demo session.
   if (!native && !popupWindow) {
@@ -130,10 +173,12 @@ export const useBrowser = defineStore("browser", () => {
       : active.value;
     return native && !!tab && /^https?:\/\//i.test(tab.url);
   }
-  function pageOutputShortcut(action: "printPage" | "savePageAs") {
-    const key = action === "printPage" ? 80 : 83;
+  function browserShortcutLabel(key: number) {
     const value = { key, ctrl: true, alt: false, shift: false };
     return SHORTCUTS.some(({ id }) => sameShortcut(shortcutFor(id, settings.value), value)) ? "" : shortcutText(value);
+  }
+  function pageOutputShortcut(action: "printPage" | "savePageAs") {
+    return browserShortcutLabel(action === "printPage" ? 80 : 83);
   }
   function outputPage(action: "printPage" | "savePageAs") {
     if (!canOutputPage(action) || commandOpen.value || deskOpen.value || settingsOpen.value || spaceFormOpen.value) return;
@@ -334,6 +379,15 @@ export const useBrowser = defineStore("browser", () => {
     closeSpaceCreation();
     send({ type: "settingsOpen", ...(pane ? { pane } : {}) });
   }
+  function openHistory() {
+    commandOpen.value = false; settingsOpen.value = false; deskOpen.value = false;
+    contextMenu.value = undefined;
+    closeSpaceEditor();
+    closeSpaceCreation();
+    closeDownloads();
+    closeFind();
+    send({ type: "historyOpen" });
+  }
   const spaceFormOpen = computed(() => Boolean(spaceCreation.value || spaceEditor.value));
   const overlay = computed(
     () =>
@@ -354,6 +408,7 @@ export const useBrowser = defineStore("browser", () => {
         "peekMotionStart",
         "peekMotionComplete",
         "history",
+        "historyPage",
         "suggest",
         "overlay",
         "tabDropTarget",
@@ -379,7 +434,16 @@ export const useBrowser = defineStore("browser", () => {
         }
         window.ipc!.postMessage(JSON.stringify(c));
       }
-      else if (c.type === "window" && c.action === "close") {
+      else if (c.type === "historyPage") {
+        previewHistoryPage(String(c.ticket), String(c.query), c.before as HistoryCursor | undefined);
+      } else if (c.type === "historyEdit") {
+        previewHistoryEdit(String(c.ticket), c.change as HistoryEdit);
+      } else if (c.type === "clearBrowsingData" && c.kind === "history") {
+        previewHistory.clear();
+        previewHistoryUndo = [];
+        state.value.closed = [];
+        historyChanged(false);
+      } else if (c.type === "window" && c.action === "close") {
         quitOpen.value = settings.value.askBeforeQuit;
       } else if (c.type === "quitResponse") {
         if (quitOpen.value && c.confirm && c.always) {
@@ -459,6 +523,11 @@ export const useBrowser = defineStore("browser", () => {
           structuredClone(JSON.parse(JSON.stringify(state.value))),
           c,
         );
+        if ((c.type === "new" || c.type === "navigate") && settings.value.rememberHistory) {
+          const tab = c.id ? state.value.tabs.find((tab) => tab.id === c.id) : active.value;
+          if (tab && host(tab.url)) previewHistory.set(tab.url, { url: tab.url, title: tab.title, visited: Math.floor(nowSeconds()) });
+        }
+        if (c.type === "historyOpen") historyVersion.value++;
         // The native host confirms batch closes with an action toast; the
         // standalone preview mirrors both the message and a real Undo batch.
         if (batchClose && beforeTabs.length) {
@@ -482,6 +551,7 @@ export const useBrowser = defineStore("browser", () => {
         if (
           [
             "new",
+            "historyOpen",
             "activate",
             "bookmarkOpen",
             "space",
@@ -777,6 +847,10 @@ export const useBrowser = defineStore("browser", () => {
       );
     }
     if (e.type === "history" && e.entries) history.value = e.entries;
+    if ((e.type === "historyPage" || e.type === "historyEdit") && e.requestId)
+      historyReply.value = { requestId: e.requestId, page: e.historyPage, ok: e.ok };
+    if (e.type === "historyChanged") historyChanged(e.canUndo);
+    if (e.type === "historyRefresh") historyVersion.value++;
     if (e.type === "suggestions" && e.ticket === suggestTicket && e.suggestions && settings.value.searchSuggestions) suggestions.value = e.suggestions;
     if (e.type === "dataCleared") { dataStatus.value = e.message || "已清除"; if (e.action === "history") history.value = []; }
     if (e.type === "error") error.value = e.message || "操作失败";
@@ -816,6 +890,7 @@ export const useBrowser = defineStore("browser", () => {
       if (e.action === "new") openCommand();
       if (e.action === "desk") deskOpen.value = !deskOpen.value;
       if (e.action === "settings") openSettings();
+      if (e.action === "historyOpen" && !popupWindow) openHistory();
       if (e.action === "downloads" && !popupWindow) toggleDownloads();
       if (e.action === "downloadsEscape" && !popupWindow) closeDownloads();
     }
@@ -930,7 +1005,12 @@ export const useBrowser = defineStore("browser", () => {
     shortcutTitle,
     dataStatus,
     openSettings,
+    openHistory,
+    browserShortcutLabel,
     history,
+    historyReply,
+    historyVersion,
+    canUndoHistory,
     suggestions,
     recent,
     error,

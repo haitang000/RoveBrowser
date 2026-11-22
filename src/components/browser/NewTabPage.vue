@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { useBrowser } from "../../stores/browser";
 import { greeting, MAX_WIDGETS, newTabSettings, newTabSuggestions, WIDGET_CATALOG, type NewTabWidget, type WidgetKind } from "../../lib/new-tab";
 import { useNewTabMotion } from "../../lib/new-tab-motion";
@@ -44,6 +44,7 @@ onMounted(() => {
   b.send({ type: "history", query: "" });
   clock = setInterval(() => { now.value = new Date(); }, 1000);
 });
+watch(() => b.historyVersion, () => b.send({ type: "history", query: "" }));
 onBeforeUnmount(() => clearInterval(clock));
 function save(widgets = settings.value.widgets) {
   b.send({ type: "newTabUpdate", settings: { ...settings.value, widgets } });

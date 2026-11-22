@@ -1,5 +1,5 @@
 //! A single writer keeps session and navigation writes off the window thread.
-use crate::{model::State, storage::Storage};
+use crate::{history, model::State, storage::Storage};
 use std::{
     path::Path,
     sync::{Arc, Condvar, Mutex},
@@ -16,27 +16,60 @@ struct Pending {
     stopping: bool,
 }
 
+type HistoryReply<T> = Box<dyn FnOnce(rusqlite::Result<T>) + Send>;
+
 enum HistoryWrite {
     Visit {
         title: String,
         url: String,
         visited: i64,
     },
+    Title {
+        title: String,
+        url: String,
+    },
     Clear(Box<dyn FnOnce(bool) + Send>),
+    Page {
+        query: String,
+        before: Option<history::Cursor>,
+        reply: HistoryReply<history::Page>,
+    },
+    Edit {
+        change: history::Edit,
+        reply: HistoryReply<(bool, bool)>,
+    },
 }
 
 impl HistoryWrite {
-    fn apply(self, storage: &Storage) -> rusqlite::Result<()> {
+    fn apply(self, storage: &mut Storage, undo: &mut Vec<history::Visit>) -> rusqlite::Result<()> {
         match self {
             Self::Visit {
                 title,
                 url,
                 visited,
             } => storage.visit(&title, &url, visited).map(|_| ()),
+            Self::Title { title, url } => storage.update_history_title(&title, &url).map(|_| ()),
             Self::Clear(done) => {
                 let result = storage.clear_history().map(|_| ());
+                if result.is_ok() {
+                    undo.clear();
+                }
                 done(result.is_ok());
                 result
+            }
+            Self::Page {
+                query,
+                before,
+                reply,
+            } => {
+                reply(history::page(&storage.conn, &query, before.as_ref()));
+                Ok(())
+            }
+            Self::Edit { change, reply } => {
+                let result = history::edit(&mut storage.conn, change, undo)
+                    .map(|changed| (changed, !undo.is_empty()));
+                reply(result);
+                Ok(())
             }
         }
     }
@@ -52,13 +85,15 @@ impl SessionWriter {
         path: &Path,
         on_error: impl Fn(String) + Send + 'static,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let storage = Storage::open(path)?;
+        let mut storage = Storage::open(path)?;
+        history::register_search(&storage.conn)?;
         let shared = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
         let work = shared.clone();
         let worker = thread::Builder::new()
             .name("rove-session-writer".into())
             .spawn(move || {
                 let (lock, ready) = &*work;
+                let mut undo = Vec::new();
                 loop {
                     let (state, history, generation) = {
                         let mut pending = lock.lock().unwrap();
@@ -84,7 +119,7 @@ impl SessionWriter {
                         .and_then(|state| storage.save(state).err())
                         .map(|error| error.to_string());
                     for write in history {
-                        if let Err(failure) = write.apply(&storage) {
+                        if let Err(failure) = write.apply(&mut storage, &mut undo) {
                             error.get_or_insert_with(|| failure.to_string());
                         }
                     }
@@ -117,6 +152,37 @@ impl SessionWriter {
             title: title.into(),
             url: url.into(),
             visited: crate::model::now_secs() as i64,
+        });
+    }
+
+    pub fn update_history_title(&self, title: &str, url: &str) {
+        self.history(HistoryWrite::Title {
+            title: title.into(),
+            url: url.into(),
+        });
+    }
+
+    pub fn history_page(
+        &self,
+        query: String,
+        before: Option<history::Cursor>,
+        reply: impl FnOnce(rusqlite::Result<history::Page>) + Send + 'static,
+    ) {
+        self.history(HistoryWrite::Page {
+            query,
+            before,
+            reply: Box::new(reply),
+        });
+    }
+
+    pub fn edit_history(
+        &self,
+        change: history::Edit,
+        reply: impl FnOnce(rusqlite::Result<(bool, bool)>) + Send + 'static,
+    ) {
+        self.history(HistoryWrite::Edit {
+            change,
+            reply: Box::new(reply),
         });
     }
 

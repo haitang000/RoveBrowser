@@ -5,6 +5,7 @@ import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 import { isSettingsUrl, searchUrl } from "../../lib/settings";
+import { isHistoryUrl } from "../../lib/address";
 import {
   commandContext,
   completionAllowed,
@@ -108,13 +109,14 @@ function step(delta: number) {
 function runAction(id: string) {
   const active = b.peek ?? b.active;
   if (id === "settings") { b.openSettings(); return; }
+  if (id === "history-open") { b.openHistory(); return; }
   if (id === "downloads") {
     b.commandOpen = false;
     b.toggleDownloads(true);
     return;
   }
   if (id === "find") {
-    if (!active || active.url === "era://newtab" || isSettingsUrl(active.url)) {
+    if (!active || active.url === "era://newtab" || isSettingsUrl(active.url) || isHistoryUrl(active.url)) {
       b.error = b.t("此页面不支持页内查找");
       b.commandOpen = false;
       return;
@@ -196,6 +198,7 @@ watch([typed, scope, () => b.history], () => {
   if (scope.value || !completion.value) return;
   completion.value = nextCompletion(completion.value, completionFor(typed.value, b.history, kept()), typed.value);
 });
+watch(() => b.historyVersion, () => { if (b.commandOpen) refreshRemote(); });
 watch(selected, async () => {
   await nextTick();
   panel.value?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
@@ -278,7 +281,7 @@ onBeforeUnmount(() => {
             @click="run(index)"
           >
             <SpaceGlyph v-if="item.glyph" :icon="item.glyph" :size="16" /><Favicon v-else-if="rowUrl(item)" :url="rowUrl(item)" /><Icon v-else :name="item.icon" :size="18" />
-            <span class="result-title">{{ item.title }}</span>
+            <span class="result-title">{{ item.kind.type === 'action' && item.kind.id === 'history-open' ? b.t(item.title) : item.title }}</span>
             <span class="result-detail">{{ item.detail }}</span>
             <span v-if="index === selected" class="result-action">{{ item.action }} <kbd>↵</kbd></span>
           </div>

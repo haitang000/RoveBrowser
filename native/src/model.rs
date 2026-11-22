@@ -241,6 +241,8 @@ pub enum Command {
     },
     #[serde(rename = "settingsOpen")]
     OpenSettings { pane: Option<String> },
+    #[serde(rename = "historyOpen")]
+    OpenHistory,
     #[serde(rename = "settingsUpdate")]
     UpdateSettings { settings: crate::settings::Settings },
     #[serde(rename = "extensionsList")]
@@ -344,7 +346,7 @@ pub enum Command {
     #[serde(rename = "close")]
     Close { id: Option<String> },
     #[serde(rename = "restore")]
-    Restore,
+    Restore { id: Option<String> },
     #[serde(rename = "pin")]
     Pin { id: Option<String> },
     #[serde(rename = "bookmarkOpen")]
@@ -519,6 +521,10 @@ pub enum Command {
     QuitResponse { confirm: bool, #[serde(default)] always: bool },
     #[serde(rename = "history")]
     History { query: String },
+    #[serde(rename = "historyPage")]
+    HistoryPage { ticket: String, query: String, before: Option<crate::history::Cursor> },
+    #[serde(rename = "historyEdit")]
+    HistoryEdit { ticket: String, change: crate::history::Edit },
     #[serde(rename = "suggest")]
     Suggest { query: String, ticket: u64 },
     #[serde(rename = "closeOthers")]
@@ -619,6 +625,7 @@ pub fn normalize_with(input: &str, settings: &crate::settings::Settings) -> Resu
         return Ok("era://newtab".into());
     }
     if let Some(url) = crate::settings::normalize_settings_url(text) { return Ok(url); }
+    if crate::history::is_history(text) { return Ok(crate::history::URL.into()); }
     let candidate = if text.starts_with("http://") || text.starts_with("https://") {
         text.to_string()
     } else if !text.contains(char::is_whitespace)
@@ -845,7 +852,7 @@ impl State {
         if self.tabs.len() >= MAX_TABS {
             return Err("已达到 256 个标签页上限".into());
         }
-        let title = if crate::settings::is_settings(&url) { "设置".into() } else { url::Url::parse(&url)
+        let title = if crate::history::is_history(&url) { "历史记录".into() } else if crate::settings::is_settings(&url) { "设置".into() } else { url::Url::parse(&url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_string))
             .filter(|_| url != "era://newtab")
@@ -876,6 +883,9 @@ impl State {
             tab.url = url;
             if crate::settings::is_settings(&tab.url) {
                 tab.title = "设置".into();
+            } else if crate::history::is_history(&tab.url) {
+                tab.title = "历史记录".into();
+                tab.loading = false;
             }
             tab.favicon = None;
         }
@@ -1125,7 +1135,9 @@ impl State {
             if !self.spaces.iter().any(|s| s.id == t.space_id) {
                 t.space_id = self.active_space.clone()
             }
-            if !is_tab_page(&t.url) && !crate::settings::is_settings(&t.url) {
+            if crate::history::is_history(&t.url) {
+                t.url = crate::history::URL.into();
+            } else if !is_tab_page(&t.url) && !crate::settings::is_settings(&t.url) {
                 t.url = "era://newtab".into()
             }
             if t.split_with
@@ -1162,6 +1174,13 @@ impl State {
                     }
                     self.activate(&id);
                 } else { self.new_tab(&crate::settings::settings_url(pane.as_deref()))?; }
+            }
+            Command::OpenHistory => {
+                if let Some(id) = self.tabs.iter().find(|t| t.space_id == self.active_space && crate::history::is_history(&t.url)).map(|t| t.id.clone()) {
+                    self.activate(&id);
+                } else {
+                    self.new_tab(crate::history::URL)?;
+                }
             }
             Command::SettingsPane { id, pane } => {
                 if let Some(tab) = self.tabs.iter_mut().find(|t| &t.id == id && crate::settings::is_settings(&t.url)) {
@@ -1266,8 +1285,15 @@ impl State {
                 self.active_space = space;
                 self.active_tab = duplicate.id;
             }
-            Command::Restore => {
-                if let Some(mut t) = self.closed.pop() {
+            Command::Restore { id } => {
+                if self.tabs.len() >= MAX_TABS {
+                    return Err("已达到 256 个标签页上限".into());
+                }
+                let closed = match id {
+                    Some(id) => self.closed.iter().rposition(|tab| &tab.id == id).map(|index| self.closed.remove(index)),
+                    None => self.closed.pop(),
+                };
+                if let Some(mut t) = closed {
                     t.split_with = None;
                     t.pinned = false;
                     t.bookmark_id = None;
@@ -1536,7 +1562,7 @@ mod tests {
             .unwrap()
             .split_with
             .is_none());
-        s.apply(&Command::Restore).unwrap();
+        s.apply(&Command::Restore { id: None }).unwrap();
         assert_eq!(s.active_tab, b);
     }
     #[test]

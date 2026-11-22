@@ -337,7 +337,7 @@ const groups = computed<Group[]>(() => [
         id: "remember",
         title: b.t("记录浏览历史"),
         detail:
-          b.t("将访问过的网页保存在本机，用于地址栏搜索。关闭后保留已有历史。"),
+          b.t("将访问过的网页保存在本机，用于查看历史记录和地址栏搜索。关闭后保留已有历史。"),
         kind: "toggle",
         setting: "rememberHistory",
         keywords: "remember browsing history",

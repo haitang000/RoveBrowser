@@ -12,6 +12,8 @@ Full upstream license: [Apache 2.0](licenses/zigzag-APACHE-2.0.txt). Original at
 
 ## Additional translated Zigzag behavior
 
+The internal History tab adapts the session grouping, inline site clusters, clear ranges, and recently closed tabs from Zigzag's `Web/HistoryPage.swift`, `Web/HistoryClusters.swift`, `Web/HistoryStore.swift`, and `App/HistoryMenu.swift`. Copyright 2026 Zigao Wang. Licensed under Apache-2.0. Rove renders the page in Vue and uses the existing SQLite history with a Rust background worker. [Upstream commit `3055d9d`](https://github.com/ZigaoWang/zigzag/tree/3055d9d06964721a8a91e5363c51b2314508f225/Zigzag)
+
 The Now Playing cards and their background-tab selection rules adapt [Zigzag's Sidebar/NowPlaying.swift](https://github.com/ZigaoWang/zigzag/blob/main/Zigzag/Sidebar/NowPlaying.swift). Copyright 2026 Zigao Wang. Licensed under Apache-2.0. Rove implements the controls with Vue and WebView2.
 
 The site permission prompt, document-scoped answers, and origin-bound settings adapt `Zigzag/Web/SitePermissions.swift` and `Zigzag/Web/PermissionPolicy.swift`. Copyright 2026 Zigao Wang. Licensed under Apache-2.0. Rove uses WebView2 events, a Vue prompt, and SQLite for stored decisions. [Upstream source](https://github.com/ZigaoWang/zigzag/tree/d00b5637b6ace3aa7f3c099081861ff54548f8ef/Zigzag/Web)

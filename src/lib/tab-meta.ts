@@ -4,6 +4,7 @@
 import type { Tab } from "./types";
 import { translate, type InterfaceLanguage } from "./language";
 import { isSettingsUrl } from "./settings";
+import { isHistoryUrl } from "./address";
 
 /** Tabs start fading after six hours without being looked at. */
 export const TAB_FADE_START = 6 * 60 * 60;
@@ -36,5 +37,6 @@ export function tabDisplayTitle(tab: Pick<Tab, "title" | "customTitle"> & { url?
   const custom = tab.customTitle?.trim();
   if (custom) return custom;
   if (language && isSettingsUrl(tab.url)) return translate(language, "设置");
+  if (language && isHistoryUrl(tab.url)) return translate(language, "历史记录");
   return tab.title;
 }

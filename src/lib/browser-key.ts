@@ -73,6 +73,11 @@ export function browserKey(b: ReturnType<typeof useBrowser>, e: KeyboardEvent) {
   }
   const value = shortcutFromEvent(e);
   const action = value && SHORTCUTS.find((item) => sameShortcut(value, shortcutFor(item.id, b.settings)))?.id;
+  if (!action && value?.ctrl && !value.alt && !value.shift && value.key === 72) {
+    e.preventDefault();
+    if (!e.repeat) b.openHistory();
+    return;
+  }
   if (!action && value?.ctrl && !value.alt && !value.shift && (value.key === 80 || value.key === 83)) {
     e.preventDefault();
     if (!e.repeat) b.outputPage(value.key === 80 ? "printPage" : "savePageAs");

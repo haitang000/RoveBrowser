@@ -5,6 +5,7 @@
 import type { BrowserState, HistoryEntry, Tab } from "./types";
 import { isSettingsUrl, normalizeSettingsUrl, searchName } from "./settings";
 import { tabDisplayTitle } from "./tab-meta";
+import { HISTORY_URL, isHistoryUrl } from "./address";
 
 export const COMMAND_LIMIT = 8;
 const LOCAL_TLDS = new Set(["local", "lan", "internal", "test", "localhost", "home", "arpa", "corp", "intranet"]);
@@ -101,6 +102,7 @@ export function matchSite(typed: string): SiteSearch | undefined {
 export function urlFrom(text: string): string | undefined {
   const trimmed = text.trim();
   if (isSettingsUrl(trimmed)) return normalizeSettingsUrl(trimmed);
+  if (isHistoryUrl(trimmed)) return HISTORY_URL;
   if (!trimmed || /\s/.test(trimmed)) return;
   const lower = trimmed.toLowerCase();
   if (lower.startsWith("http://") || lower.startsWith("https://")) {
@@ -140,6 +142,7 @@ export function parseSuggestions(data: string): string[] {
 
 const GLOBAL_ACTIONS: Action[] = [
   { id: "settings", title: "Settings", keywords: ["settings", "preferences", "options"], icon: "settings" },
+  { id: "history-open", title: "历史记录", keywords: ["history", "browsing", "历史", "歷史"], icon: "history" },
   { id: "find", title: "Find in Page", keywords: ["find", "search", "page", "text"], icon: "search" },
   { id: "downloads", title: "Downloads", keywords: ["download", "downloads", "files", "下载"], icon: "download" },
 ];

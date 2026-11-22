@@ -4,6 +4,7 @@ import { useBrowser } from "../../stores/browser";
 import type { Tab } from "../../lib/types";
 import { samePinnedUrl } from "../../lib/bookmarks";
 import { isSettingsUrl } from "../../lib/settings";
+import { isHistoryUrl } from "../../lib/address";
 import { tabDisplayTitle, tabFreshness } from "../../lib/tab-meta";
 import Favicon from "../common/Favicon.vue";
 import Icon from "../common/Icon.vue";
@@ -88,6 +89,7 @@ function activate() {
     >
       <span class="tab-picture">
         <Icon v-if="isSettingsUrl(label.tab.url)" name="settings" />
+        <Icon v-else-if="isHistoryUrl(label.tab.url)" name="history" />
         <Favicon v-else :url="label.tab.url" :favicon="label.tab.favicon" />
       </span>
       <span class="tab-title">{{ label.title }}</span>

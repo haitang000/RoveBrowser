@@ -119,6 +119,9 @@ onBeforeUnmount(() => {
               <button v-if="b.native && chromeStoreDetailId(b.active?.url)" role="menuitem" tabindex="-1" @click="installStoreExtension">
                 <Icon name="extension" :size="16" /><span>{{ b.t('安装此商店扩展…') }}</span>
               </button>
+              <button role="menuitem" tabindex="-1" :aria-keyshortcuts="b.browserShortcutLabel(72) ? 'Control+H' : undefined" @click="b.openHistory()">
+                <Icon name="history" :size="16" /><span>{{ b.t('历史记录') }}</span><kbd v-if="b.browserShortcutLabel(72)" aria-hidden="true">Ctrl+H</kbd>
+              </button>
               <button role="menuitem" tabindex="-1" :aria-label="b.t('下载')" aria-haspopup="dialog" aria-keyshortcuts="Control+J"
                 :aria-description="b.activeDownloads ? b.t('{count} 个进行中', { count: b.activeDownloads }) : undefined" @click="b.toggleDownloads(true)">
                 <Icon name="download" :size="16" /><span>{{ b.t('下载') }}</span>

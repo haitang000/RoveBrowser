@@ -130,10 +130,12 @@ enum Event {
     SplitExited(u64),
     DataCleared(String, bool),
     HistoryCleared(bool),
+    HistoryPage(String, rusqlite::Result<crate::history::Page>),
+    HistoryEdited(String, rusqlite::Result<(bool, bool)>),
     Command(Command),
     Title(String, String),
     Load(String, String, bool),
-    Source(String, String),
+    Source(String, String, bool),
     PageFullscreen(String, isize, bool),
     Favicon(String, String, String),
     /// Icon links the loaded page declares, for the sharper fetch that follows.
@@ -3034,7 +3036,7 @@ impl App {
             return;
         }
         match key.as_str() {
-            "address" | "new" | "desk" | "settings" | "downloads" | "downloadsEscape" => {
+            "address" | "new" | "desk" | "settings" | "historyOpen" | "downloads" | "downloadsEscape" => {
                 if let Some(ui) = &self.ui {
                     let _ = ui.focus();
                 }
@@ -3061,7 +3063,7 @@ impl App {
                 }
             }
             "close" => self.command(Command::Close { id: None }, None),
-            "restore" => self.command(Command::Restore, None),
+            "restore" => self.command(Command::Restore { id: None }, None),
             "sidebar" => self.command(Command::Sidebar, None),
             "sidebarFocus" => self.command(Command::SidebarFocus, None),
             "reload" => self.command(Command::Reload { id: None }, None),
@@ -3643,9 +3645,9 @@ impl App {
                         | Command::CloseBelow { .. }
                     | Command::SwitchSpace { .. }
                     | Command::CreateSpace { .. }
-                    | Command::Restore
+                    | Command::Restore { .. }
                     | Command::Move { .. }
-                    | Command::OpenSettings { .. }
+                    | Command::OpenSettings { .. } | Command::OpenHistory
                     | Command::Split { .. }
                     | Command::SwapSplit { .. }
                     | Command::Unsplit
@@ -3656,13 +3658,13 @@ impl App {
         {
             self.close_find(true);
         }
-        if matches!(c, Command::OpenSettings { .. }) { self.close_peek(); }
+        if matches!(c, Command::OpenSettings { .. } | Command::OpenHistory) { self.close_peek(); }
         if matches!(c,
             Command::New { .. } | Command::OpenAfter { .. } | Command::OpenExtensionTab { .. }
             | Command::Activate { .. } | Command::OpenBookmark { .. } | Command::Navigate { .. }
             | Command::Close { .. } | Command::CloseOthers { .. } | Command::CloseBelow { .. }
-            | Command::SwitchSpace { .. } | Command::CreateSpace { .. } | Command::Restore | Command::Move { .. }
-            | Command::OpenSettings { .. } | Command::Split { .. } | Command::SwapSplit { .. } | Command::Unsplit
+            | Command::SwitchSpace { .. } | Command::CreateSpace { .. } | Command::Restore { .. } | Command::Move { .. }
+            | Command::OpenSettings { .. } | Command::OpenHistory | Command::Split { .. } | Command::SwapSplit { .. } | Command::Unsplit
         ) {
             self.close_extension_menu();
         }
@@ -3676,7 +3678,8 @@ impl App {
                 | Command::OpenExtensionTab { .. }
                 | Command::Navigate { .. }
                 | Command::OpenBookmark { .. }
-                | Command::Restore
+                | Command::Restore { .. }
+                | Command::OpenHistory
                 | Command::SwitchSpace { .. }
                 | Command::Close { .. }
                         | Command::CloseOthers { .. }
@@ -3684,6 +3687,7 @@ impl App {
                 | Command::Split { .. }
                 | Command::Unsplit
         );
+        let reopen_history = matches!(c, Command::OpenHistory);
         let focus_after_transition = self.peek.is_some()
             && matches!(
                 c,
@@ -3697,7 +3701,7 @@ impl App {
                         | Command::CloseBelow { .. }
                     | Command::SwitchSpace { .. }
                     | Command::CreateSpace { .. }
-                    | Command::Restore
+                    | Command::Restore { .. }
                     | Command::Move { .. }
             );
         match c {
@@ -4220,6 +4224,21 @@ impl App {
                 }
                 return;
             }
+            Command::HistoryPage { ticket, query, before } => {
+                let proxy = self.proxy.clone();
+                let query = query.chars().take(500).collect();
+                self.session_writer.history_page(query, before, move |result| {
+                    let _ = proxy.send_event(Event::HistoryPage(ticket, result));
+                });
+                return;
+            }
+            Command::HistoryEdit { ticket, change } => {
+                let proxy = self.proxy.clone();
+                self.session_writer.edit_history(change, move |result| {
+                    let _ = proxy.send_event(Event::HistoryEdited(ticket, result));
+                });
+                return;
+            }
             Command::Reader { id } => { self.toggle_reader(id.as_deref()); return; }
             Command::ReaderClose => {
                 self.dismiss_reader(); return;
@@ -4474,6 +4493,7 @@ impl App {
                         | Command::New { .. }
                         | Command::OpenAfter { .. }
                         | Command::OpenExtensionTab { .. }
+                        | Command::OpenHistory
                 ) {
                     self.refresh_visible_thumbnails();
                 }
@@ -4489,7 +4509,7 @@ impl App {
                         | Command::CloseBelow { .. }
                         | Command::SwitchSpace { .. }
                         | Command::CreateSpace { .. }
-                        | Command::Restore
+                        | Command::Restore { .. }
                         | Command::Move { .. }
                 ) {
                     self.close_peek();
@@ -4532,6 +4552,9 @@ impl App {
         }
         if let Err(e) = self.sync() {
             self.error(e)
+        }
+        if reopen_history {
+            self.emit(json!({"type":"historyRefresh"}));
         }
         if focus_after_transition && !self.overlay {
             if let Some(p) = self.page() {
@@ -4782,12 +4805,16 @@ impl ApplicationHandler<Event> for App {
                 // Imports commit their own session in the same transaction.
                 // Complete older background snapshots before that transaction.
                 self.flush_session();
+                let has_history = batches.iter().any(|batch| !batch.history.is_empty());
                 for batch in batches {
                     if let Err(e) = self.storage.import_batch(&mut self.state, batch) { self.error(e); }
                 }
                 self.import_busy = false;
                 self.publish();
                 self.emit(json!({"type":"importState","importBusy":false}));
+                if has_history {
+                    self.emit(json!({"type":"historyChanged"}));
+                }
             }
             Event::SplitResize => {
                 self.receive_split_resize();
@@ -4860,8 +4887,28 @@ impl ApplicationHandler<Event> for App {
             Event::HistoryCleared(ok) => {
                 if ok {
                     self.emit(json!({"type":"dataCleared","action":"history","message":"已清除浏览历史"}));
+                    self.emit(json!({"type":"historyChanged","canUndo":false}));
                 }
             }
+            Event::HistoryPage(ticket, result) => match result {
+                Ok(page) => self.emit(json!({"type":"historyPage","requestId":ticket,"historyPage":page})),
+                Err(error) => {
+                    eprintln!("Rove history: {error}");
+                    self.emit(json!({"type":"historyPage","requestId":ticket}));
+                }
+            },
+            Event::HistoryEdited(ticket, result) => match result {
+                Ok((changed, can_undo)) => {
+                    self.emit(json!({"type":"historyEdit","requestId":ticket,"ok":true}));
+                    if changed {
+                        self.emit(json!({"type":"historyChanged","canUndo":can_undo}));
+                    }
+                }
+                Err(error) => {
+                    eprintln!("Rove history: {error}");
+                    self.emit(json!({"type":"historyEdit","requestId":ticket,"ok":false}));
+                }
+            },
             Event::PreviewLoad(key, epoch, url, loading) => {
                 if let Some(render) = self.preview_renders.get_mut(&key)
                     .filter(|p| p.epoch == epoch && model::is_web(&url))
@@ -5097,10 +5144,10 @@ impl ApplicationHandler<Event> for App {
                     self.publish_peek();
                     return;
                 }
-                if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
+                if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id && model::is_tab_page(&t.url)) {
                     t.title = title.chars().take(512).collect();
                     if !failed && self.state.settings.remember_history && model::is_web(&t.url) {
-                        self.session_writer.visit(&t.title, &t.url);
+                        self.session_writer.update_history_title(&t.title, &t.url);
                     }
                 }
                 self.publish();
@@ -5148,7 +5195,7 @@ impl ApplicationHandler<Event> for App {
                 if loading {
                     self.invalidate_thumbnail(&id);
                 }
-                if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
+                if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id && model::is_tab_page(&t.url)) {
                     t.loading = loading;
                     if model::is_tab_page(&url) {
                         // A page on another site must not keep the last site's icon.
@@ -5197,7 +5244,7 @@ impl ApplicationHandler<Event> for App {
                     }
                 }
             }
-            Event::Source(id, url) => {
+            Event::Source(id, url, new_document) => {
                 if self.reader.as_ref().is_some_and(|r| r.id == id && r.url != url) { self.close_reader(); }
                 let source_changed = self.pages.get(&id).is_some_and(|p| p.url != url);
                 if source_changed && self.extension_menu_tab() == Some(id.as_str()) {
@@ -5219,11 +5266,16 @@ impl ApplicationHandler<Event> for App {
                     if self.pages.get(&id).is_some_and(|p| p.url != url) {
                         self.invalidate_thumbnail(&id);
                     }
-                    if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id) {
+                    if let Some(t) = self.state.tabs.iter_mut().find(|t| t.id == id && model::is_tab_page(&t.url)) {
                         if !crate::favicon::same_origin(&t.url, &url) {
                             t.favicon = None;
                         }
                         t.url = url.clone();
+                        if source_changed && !new_document && !t.loading && self.state.settings.remember_history
+                            && model::is_web(&url) && self.pages.get(&id).is_some_and(|page| !page.error_page.is_failed())
+                        {
+                            self.session_writer.visit(&t.title, &url);
+                        }
                     }
                     if let Some(p) = self.pages.get_mut(&id) {
                         p.url = url.clone();
@@ -5569,15 +5621,17 @@ fn register_page_events(
     let id2 = id.clone();
     let p = proxy.clone();
     let nav = navigation.clone();
-    let source = SourceChangedEventHandler::create(Box::new(move |sender, _| {
+    let source = SourceChangedEventHandler::create(Box::new(move |sender, args| {
         if let Some(sender) = sender {
             let mut value = PWSTR::null();
+            let mut new_document = BOOL(1);
             unsafe {
                 sender.Source(&mut value)?;
+                if let Some(args) = args { let _ = args.IsNewDocument(&mut new_document); }
             }
             let url = take_pwstr(value);
             *nav.current.borrow_mut() = url.clone();
-            let _ = p.send_event(Event::Source(id2.clone(), url));
+            let _ = p.send_event(Event::Source(id2.clone(), url, new_document.as_bool()));
         }
         Ok(())
     }));
@@ -5905,6 +5959,7 @@ fn register_accelerators(
                     else {
                         shortcut_settings.borrow().action(&crate::settings::Shortcut {key, ctrl, alt, shift})
                             .or_else(|| match (ctrl, alt, shift, key) {
+                                (true, false, false, 72) => Some("historyOpen".into()),
                                 (true, false, false, 80) => Some("printPage".into()),
                                 (true, false, false, 83) => Some("savePageAs".into()),
                                 _ => None,
@@ -5912,7 +5967,7 @@ fn register_accelerators(
                     };
                 if let Some(action) = action {
                     args.SetHandled(true)?;
-                    if matches!(action.as_str(), "printPage" | "savePageAs") {
+                    if matches!(action.as_str(), "historyOpen" | "printPage" | "savePageAs") {
                         let mut status = Default::default();
                         args.PhysicalKeyStatus(&mut status)?;
                         if status.WasKeyDown.as_bool() { return Ok(()); }

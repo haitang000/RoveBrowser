@@ -1,6 +1,6 @@
 // Explicit standalone UI preview. Native builds use Rust as the sole state authority.
 import type { BrowserState, Command, Tab } from "./types";
-import { address, host } from "./address";
+import { address, HISTORY_URL, host, isHistoryUrl } from "./address";
 import { favorite, MAX_FAVORITES, sameFavoriteUrl } from "./favorites";
 import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, upgradeLibrary } from "./bookmarks";
 import { tabsToDismiss } from "./command";
@@ -131,6 +131,12 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       const t = tab(); if (t && isSettingsUrl(t.url)) t.url = settingsUrl(c.pane as SettingsPane);
       break;
     }
+    case "historyOpen": {
+      const existing = s.tabs.find((t) => t.spaceId === s.activeSpace && isHistoryUrl(t.url));
+      if (existing) activate(existing);
+      else return reduce(s, { type: "new", url: HISTORY_URL });
+      break;
+    }
     case "settingsUpdate": {
       const next = settingsFor(c.settings as Settings);
       if (next.customSearchTemplate && !validSearchTemplate(next.customSearchTemplate)) throw Error("搜索地址需要包含 %s，并使用有效的 HTTP 或 HTTPS 网址");
@@ -188,7 +194,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       const t: Tab = {
         id: crypto.randomUUID(),
         spaceId: s.activeSpace,
-        title: isSettingsUrl(url) ? "设置" : host(url) || "New Tab",
+        title: isHistoryUrl(url) ? "历史记录" : isSettingsUrl(url) ? "设置" : host(url) || "New Tab",
         url,
         pinned: false,
         lastActivated: nowSeconds(),
@@ -205,7 +211,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       const active = s.tabs.find((item) => item.id === s.activeTab);
       if (t && (t === active || t.id === active?.splitWith)) {
         t.url = address(String(c.url), s.settings);
-        t.title = isSettingsUrl(t.url) ? "设置" : host(t.url) || "New Tab";
+        t.title = isHistoryUrl(t.url) ? "历史记录" : isSettingsUrl(t.url) ? "设置" : host(t.url) || "New Tab";
       }
       break;
     }
@@ -228,7 +234,8 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
     case "restore": {
-      const t = s.closed.pop();
+      const index = c.id ? s.closed.findIndex((t) => t.id === c.id) : s.closed.length - 1;
+      const t = index < 0 ? undefined : s.closed.splice(index, 1)[0];
       if (t) {
         t.splitWith = undefined;
         t.bookmarkId = undefined;
