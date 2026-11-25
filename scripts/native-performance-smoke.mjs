@@ -16,7 +16,7 @@ const state = JSON.parse(db.prepare('SELECT json FROM session').get().json);
 const icon = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="skyblue"/><!--${'x'.repeat(2048)}--></svg>`)}`;
 state.libraryVersion = 1;
 state.iconVersion = 2;
-state.settings = { askBeforeQuit: false, searchSuggestions: false };
+state.settings = { ...state.settings, askBeforeQuit: false, searchSuggestions: false };
 state.favorites = [];
 state.tabs = Array.from({ length: 200 }, (_, i) => ({ id: `tab-${i}`, spaceId: 'personal', title: `Tab ${i}`, url: 'era://newtab', pinned: false, favicon: icon, lastActivated: Math.floor(Date.now() / 1000) }));
 state.pins = Array.from({ length: 200 }, (_, i) => ({ id: `pin-${i}`, spaceId: 'personal', title: `Saved ${i}`, url: `https://example.com/${i}`, favicon: icon }));

@@ -138,9 +138,9 @@ async function checkMcp(userDataDir, url) {
 }
 
 try {
-  for (const enabled of [false, true]) {
+  for (const enabled of [true, false]) {
     const profile = await mkdtemp(join(tmpdir(), 'rove-devtools-mcp-'));
-    createLegacyNativeProfile(profile);
+    createLegacyNativeProfile(profile, enabled ? {} : { devtoolsMcp: false });
     const db = new DatabaseSync(join(profile, 'era.sqlite'));
     try {
       const state = JSON.parse(db.prepare('SELECT json FROM session WHERE id=1').get().json);
@@ -156,7 +156,6 @@ try {
     delete env.ERA_DEBUG_PORT;
     delete env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS;
     delete env.ROVE_DEVTOOLS_MCP;
-    if (enabled) env.ROVE_DEVTOOLS_MCP = '1';
     const rove = spawn(exe, [url], {
       env, windowsHide: true, stdio: 'inherit',
     });
@@ -180,7 +179,7 @@ try {
       await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }
-  console.log('Rove DevTools MCP verified default-off, webpage isolation, snapshot, screenshot, navigation, console and network.');
+  console.log('Rove DevTools MCP verified default-on, saved opt-out, webpage isolation, snapshot, screenshot, navigation, console and network.');
 } finally {
   server.close();
 }

@@ -16,7 +16,7 @@ const db = new DatabaseSync(join(profile, 'era.sqlite'));
 const state = JSON.parse(db.prepare('SELECT json FROM session WHERE id=1').get().json);
 state.favorites = [];
 state.tabs = state.tabs.filter(tab => tab.id === 'start');
-state.settings = { askBeforeQuit: false, searchSuggestions: false };
+state.settings = { ...state.settings, askBeforeQuit: false, searchSuggestions: false };
 db.prepare('UPDATE session SET json=? WHERE id=1').run(JSON.stringify(state));
 db.close();
 const output = resolve(process.env.ERA_SMOKE_OUTPUT || 'test-results/native-browsing');

@@ -105,7 +105,7 @@ impl Default for Settings {
             tracking_protection: TrackingProtection::default(),
             permission_defaults: crate::permissions::Defaults::default(),
             web_rtc_address_protection: false,
-            devtools_mcp: false,
+            devtools_mcp: true,
             sleep_tabs: true,
             download_folder: String::new(),
             update_channel: "preview".into(),

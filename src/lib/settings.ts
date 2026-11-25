@@ -213,7 +213,7 @@ export const defaultSettings = (): Settings => ({
   trackingProtection: "balanced",
   permissionDefaults: { camera: "ask", microphone: "ask", location: "ask", notifications: "ask", screen: "ask" },
   webRtcAddressProtection: false,
-  devtoolsMcp: false,
+  devtoolsMcp: true,
   sleepTabs: true,
   downloadFolder: "",
   updateChannel: "preview",

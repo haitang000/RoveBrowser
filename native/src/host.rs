@@ -93,7 +93,7 @@ fn surface_color(dark: bool) -> wry::RGBA {
 fn browser_args(ui: bool, devtools_mcp: bool) -> String {
     let mut args = String::from("--autoplay-policy=user-gesture-required");
     // WebView2 writes the chosen port and browser endpoint to DevToolsActivePort.
-    // Expose only the browsing environment through the opt-in MCP integration.
+    // Expose only the browsing environment through the MCP integration.
     let port = (!ui && devtools_mcp).then_some(0u16);
     // The fixed ports used by native smoke tests remain debug-build only.
     #[cfg(debug_assertions)]

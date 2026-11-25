@@ -3,13 +3,15 @@
 import { DatabaseSync } from "node:sqlite";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-export function createLegacyNativeProfile(profile) {
+// Keep the fixed debugger ports used by native tests unless a test checks MCP.
+export function createLegacyNativeProfile(profile, settings = { devtoolsMcp: false }) {
   const db = new DatabaseSync(join(profile, "era.sqlite"));
   try {
     db.exec("CREATE TABLE IF NOT EXISTS session(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL)");
     const state = {
       spaces: [["personal", "Personal", "sky"], ["work", "Work", "sage"], ["studio", "Studio", "lavender"]].map(([id, name, color]) => ({ id, name, color })),
       activeSpace: "personal", activeTab: "start", theme: "light", sidebarCollapsed: false, closed: [],
+      settings,
       favorites: [["GitHub", "https://github.com"], ["Figma", "https://figma.com"], ["Notion", "https://notion.so"], ["Claude", "https://claude.ai"], ["Gmail", "https://mail.google.com"], ["YouTube", "https://youtube.com"], ["Spotify", "https://open.spotify.com"], ["Linear", "https://linear.app"]].map(([title, url]) => ({ title, url })),
       tabs: [["github", "GitHub", "https://github.com", true], ["wiki", "Wikipedia", "https://en.wikipedia.org", true], ["start", "New Tab", "era://newtab", false]].map(([id, title, url, pinned]) => ({ id, title, url, pinned, spaceId: "personal" })),
     };

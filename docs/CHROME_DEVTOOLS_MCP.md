@@ -1,10 +1,10 @@
 # Chrome DevTools MCP
 
-Rove 可以让官方 Chrome DevTools MCP 连接正在运行的 WebView2 网页。接口默认关闭。启用后，WebView2 为网页环境分配本机回环端口，MCP 服务通过该环境的 `DevToolsActivePort` 文件发现端口。Rove 界面和独立的 Agent 后台标签使用各自的 WebView2 环境。
+Rove 可以让官方 Chrome DevTools MCP 连接正在运行的 WebView2 网页。接口默认启用。WebView2 为网页环境分配本机回环端口，MCP 服务通过该环境的 `DevToolsActivePort` 文件发现端口。Rove 界面和独立的 Agent 后台标签使用各自的 WebView2 环境。
 
-## 启用接口
+## 接口开关
 
-在「设置 → 实验性」打开 **Chrome DevTools MCP**，退出并重新启动 Rove，再打开一个网页。WebView2 会在第一个网页环境启动时写入端口文件。使用完毕后在同一栏关闭开关，并重启 Rove。
+WebView2 会在第一个网页环境启动时写入端口文件。可以在「设置 → 实验性」关闭 **Chrome DevTools MCP**，重启后生效。Rove 会沿用已保存的开关值。
 
 调试端口无身份验证，启用期间本机进程可以访问该资料中的网页与站点会话。需要独立资料时，可以从仓库根目录运行以下 PowerShell 命令，再在该实例的设置中启用开关。
 
