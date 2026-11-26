@@ -97,17 +97,17 @@ test("DevTools MCP has a dedicated experimental setting and appears in search", 
   await expect(toggle).toHaveCount(0);
   await page.getByRole("button", { name: "实验性", exact: true }).click();
   await expect(page.getByRole("heading", { name: "实验性", exact: true })).toBeVisible();
-  await expect(toggle).toBeChecked();
+  await expect(toggle).not.toBeChecked();
   await expect(toggle).toHaveAccessibleDescription(/更改后重启 Rove 生效/);
   await toggle.click();
-  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toBeChecked();
 
   await page.getByRole("button", { name: "通用", exact: true }).click();
   await expect(toggle).toHaveCount(0);
   await page.getByRole("searchbox", { name: "查找设置" }).fill("DevTools MCP");
-  await expect(toggle).not.toBeChecked();
-  await toggle.click();
   await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
 });
 
 test("read aloud starts off and the accessibility switch follows the interface language", async ({ page }) => {

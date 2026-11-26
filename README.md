@@ -67,7 +67,7 @@ npm run native:dev
 
 原生宿主提供默认关闭的 [Agent 标签接口](docs/AGENT_TABS.md)，支持隔离的后台标签页、普通标签页管理，以及网页正文读取、元素点击和文本框填写。
 
-Chrome DevTools MCP 默认启用，让 MCP 客户端连接 Rove 的网页标签，读取页面快照、截图、控制台和网络记录。可在「设置 → 实验性」关闭，重启后生效。 [接口配置](docs/CHROME_DEVTOOLS_MCP.md)
+Chrome DevTools MCP 默认关闭，可在「设置 → 实验性」启用并重启 Rove。启用后，MCP 客户端可以读取网页标签的页面快照、截图、控制台和网络记录。 [接口配置](docs/CHROME_DEVTOOLS_MCP.md)
 
 ### 构建与打包
 

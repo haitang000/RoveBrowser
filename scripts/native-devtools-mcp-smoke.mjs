@@ -140,7 +140,7 @@ async function checkMcp(userDataDir, url) {
 try {
   for (const enabled of [true, false]) {
     const profile = await mkdtemp(join(tmpdir(), 'rove-devtools-mcp-'));
-    createLegacyNativeProfile(profile, enabled ? {} : { devtoolsMcp: false });
+    createLegacyNativeProfile(profile, enabled ? { devtoolsMcp: true } : {});
     const db = new DatabaseSync(join(profile, 'era.sqlite'));
     try {
       const state = JSON.parse(db.prepare('SELECT json FROM session WHERE id=1').get().json);
@@ -179,7 +179,7 @@ try {
       await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }
-  console.log('Rove DevTools MCP verified default-on, saved opt-out, webpage isolation, snapshot, screenshot, navigation, console and network.');
+  console.log('Rove DevTools MCP verified default-off, saved opt-in, webpage isolation, snapshot, screenshot, navigation, console and network.');
 } finally {
   server.close();
 }

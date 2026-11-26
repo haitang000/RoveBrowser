@@ -12,6 +12,7 @@ export const english: Readonly<Record<string, string>> = {
   "实验性": "Experimental",
   "网页调试": "Web debugging",
   "允许本机 MCP 客户端通过无需身份验证的端口访问和调试网页。": "Allow local MCP clients to access and debug web pages through an unauthenticated port.",
+  "启用后，部分网站的人机验证可能失败。": "Enabling this may cause human verification to fail on some sites.",
   "此接口由 ROVE_DEVTOOLS_MCP 启用。清除该变量并重启 Rove 后可在此更改。": "ROVE_DEVTOOLS_MCP enables this interface. Clear the variable and restart Rove to change it here.",
   "关于 Rove": "About Rove",
   "无障碍": "Accessibility",

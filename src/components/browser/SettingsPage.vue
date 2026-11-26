@@ -483,6 +483,7 @@ const groups = computed<Group[]>(() => [
         id: "devtoolsMcp",
         title: "Chrome DevTools MCP",
         detail: b.t("允许本机 MCP 客户端通过无需身份验证的端口访问和调试网页。") + " " +
+          b.t("启用后，部分网站的人机验证可能失败。") + " " +
           b.t(devtoolsMcpFromEnv
             ? "此接口由 ROVE_DEVTOOLS_MCP 启用。清除该变量并重启 Rove 后可在此更改。"
             : "更改后重启 Rove 生效。"),
