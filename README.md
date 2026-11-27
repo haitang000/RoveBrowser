@@ -69,6 +69,8 @@ npm run native:dev
 
 Chrome DevTools MCP 默认关闭，可在「设置 → 实验性」启用并重启 Rove。启用后，MCP 客户端可以读取网页标签的页面快照、截图、控制台和网络记录。 [接口配置](docs/CHROME_DEVTOOLS_MCP.md)
 
+可以从浏览器菜单将当前标签页共享给 Codex，用于读取网页、点击、填写和滚动。 [Codex 接入说明](docs/CODEX.md)
+
 ### 构建与打包
 
 ```powershell

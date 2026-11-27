@@ -1,5 +1,5 @@
 //! Fixed Agent operations on the selected browser document.
-use crate::agent_bridge::{PageCommand, Response};
+use crate::{agent_bridge::{PageCommand, Response}, web_script::Guard};
 use serde_json::{json, Value};
 use std::{
     rc::Rc,
@@ -11,6 +11,7 @@ use windows::core::BOOL;
 use wry::{WebView, WebViewExtWindows};
 
 const MAX_FILL_BYTES: usize = 4096;
+const MAX_SCROLL: u32 = 16000;
 const SCRIPT: &str = include_str!("agent-page.js");
 
 pub fn run(
@@ -19,6 +20,7 @@ pub fn run(
     command: PageCommand,
     deadline: Instant,
     reply: SyncSender<Response>,
+    access: Option<(Uuid, Guard)>,
 ) {
     let mut params = match parameters(command) {
         Ok(params) => params,
@@ -35,6 +37,8 @@ pub fn run(
         .as_millis() as u64;
     params["url"] = json!(url);
     params["expires"] = json!(expires);
+    let (scope, access) = access.unzip();
+    params["scope"] = json!(scope.map(|scope| scope.to_string()));
     let expression = format!("({SCRIPT})({params})");
     let controller = view.controller();
     crate::web_script::evaluate(
@@ -45,6 +49,7 @@ pub fn run(
             let mut visible = BOOL::default();
             // SAFETY: the controller and callback belong to the UI thread.
             Instant::now() < deadline
+                && access.as_ref().is_none_or(|allowed| allowed())
                 && unsafe { controller.IsVisible(&mut visible) }.is_ok()
                 && visible.as_bool()
         },
@@ -65,6 +70,12 @@ fn parameters(command: PageCommand) -> Result<Value, &'static str> {
             return Ok(
                 json!({"op": "snapshot", "snapshot": Uuid::new_v4().to_string(), "offset": offset}),
             );
+        }
+        PageCommand::Scroll { dx, dy, .. } => {
+            if dx.unsigned_abs() > MAX_SCROLL || dy.unsigned_abs() > MAX_SCROLL {
+                return Err("invalid_scroll");
+            }
+            return Ok(json!({"op": "scroll", "dx": dx, "dy": dy}));
         }
         PageCommand::Click {
             snapshot, element, ..

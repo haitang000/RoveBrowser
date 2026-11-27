@@ -54,6 +54,9 @@ function act(type: "back" | "forward" | "reload" | "reader") {
       <Icon v-if="!pane" name="settings" :size="13" />
     </button>
     <div class="toolbar-actions" data-window-control>
+      <button v-if="b.codexSharedTab && b.codexSharedTab === id" class="icon-button codex-sharing" type="button"
+        :aria-label="b.t('停止与 Codex 共享')" :title="b.t('停止与 Codex 共享')"
+        @click="b.send({ type: 'codexStopSharing' })">Codex</button>
       <button v-if="b.native && !b.onboardingOpen" ref="extensionTrigger" type="button" class="icon-button extension-menu-trigger"
         :class="{ chosen: extensionsOpen }" :aria-label="b.t('扩展')" :title="b.t('扩展')"
         aria-haspopup="dialog" :aria-expanded="extensionsOpen"
@@ -70,3 +73,14 @@ function act(type: "back" | "forward" | "reload" | "reader") {
     </div>
   </div>
 </template>
+
+<style scoped>
+.icon-button.codex-sharing {
+  width: auto;
+  padding-inline: 6px;
+  background: var(--selected);
+  font-size: 10px;
+  font-weight: 600;
+}
+.icon-button.codex-sharing:hover { background: var(--hover); }
+</style>

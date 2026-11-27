@@ -7,6 +7,7 @@ use webview2_com::{
 use windows::core::HSTRING;
 
 pub type Reply = Rc<dyn Fn(Option<Value>)>;
+pub type Guard = Rc<dyn Fn() -> bool>;
 
 fn protocol(core: &ICoreWebView2, method: &str, parameters: Value, reply: Reply) {
     let failed = reply.clone();

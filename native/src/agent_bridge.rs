@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_REQUEST: usize = 16 * 1024;
+pub(crate) const MAX_REQUEST: usize = 16 * 1024;
 pub(crate) const MAX_URL_BYTES: usize = 8192;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -18,6 +18,14 @@ pub enum Command {
     Background(BackgroundCommand),
     Browser(BrowserCommand),
     Page(PageCommand),
+    Codex(CodexCommand),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "op", deny_unknown_fields)]
+pub enum CodexCommand {
+    #[serde(rename = "codex_shared_tab")]
+    SharedTab {},
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,12 +68,14 @@ pub enum PageCommand {
     Click { id: String, snapshot: String, element: u32 },
     #[serde(rename = "page_fill")]
     Fill { id: String, snapshot: String, element: u32, text: String },
+    #[serde(rename = "page_scroll")]
+    Scroll { id: String, dx: i32, dy: i32 },
 }
 
 impl PageCommand {
     pub fn tab_id(&self) -> &str {
         match self {
-            Self::Snapshot { id, .. } | Self::Click { id, .. } | Self::Fill { id, .. } => id,
+            Self::Snapshot { id, .. } | Self::Click { id, .. } | Self::Fill { id, .. } | Self::Scroll { id, .. } => id,
         }
     }
 }
@@ -127,6 +137,20 @@ pub fn start(dispatch: impl Fn(Request) -> bool + Send + 'static) -> io::Result<
     let browser_tabs_enabled = std::env::var("ROVE_AGENT_BROWSER_TABS").as_deref() == Ok("1");
     let page_actions_enabled = std::env::var("ROVE_AGENT_PAGE_ACTIONS").as_deref() == Ok("1");
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
+    listen(listener, token, move |command| match command {
+        Command::Codex(_) => Err("invalid_request"),
+        Command::Browser(_) | Command::Page(_) if !browser_tabs_enabled => Err("browser_tabs_disabled"),
+        Command::Page(_) if !page_actions_enabled => Err("page_actions_disabled"),
+        _ => Ok(()),
+    }, dispatch)
+}
+
+pub(crate) fn listen(
+    listener: TcpListener,
+    token: String,
+    authorize: impl Fn(&Command) -> Result<(), &'static str> + Send + 'static,
+    dispatch: impl Fn(Request) -> bool + Send + 'static,
+) -> io::Result<()> {
     // Limit host dispatch to one command at a time. The listener lives until
     // the browser process exits.
     std::thread::Builder::new()
@@ -137,13 +161,10 @@ pub fn start(dispatch: impl Fn(Request) -> bool + Send + 'static) -> io::Result<
                 if stream.set_write_timeout(Some(IO_TIMEOUT)).is_err() {
                     continue;
                 }
-                let response = match receive(&mut stream, &token) {
-                    Ok(Command::Browser(_) | Command::Page(_)) if !browser_tabs_enabled => {
-                        Response::error("browser_tabs_disabled")
-                    }
-                    Ok(Command::Page(_)) if !page_actions_enabled => {
-                        Response::error("page_actions_disabled")
-                    }
+                let response = match receive(&mut stream, &token).and_then(|command| {
+                    authorize(&command)?;
+                    Ok(command)
+                }) {
                     Ok(command) => {
                         let (reply, receiver) = mpsc::sync_channel(1);
                         let deadline = Instant::now() + COMMAND_TIMEOUT;

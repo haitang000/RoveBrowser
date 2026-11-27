@@ -15,12 +15,12 @@ use windows::{
     },
 };
 
-fn crypt(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn crypt(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>, String> {
     let input = CRYPT_INTEGER_BLOB {
         cbData: bytes
             .len()
             .try_into()
-            .map_err(|_| "密码数据过大".to_string())?,
+            .map_err(|_| "待加密数据过大".to_string())?,
         pbData: bytes.as_ptr().cast_mut(),
     };
     let mut output = CRYPT_INTEGER_BLOB::default();
@@ -38,7 +38,7 @@ fn crypt(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>, String> {
         } else {
             CryptProtectData(
                 &input,
-                w!("Rove imported login"),
+                w!("Rove private data"),
                 None,
                 None,
                 None,
@@ -46,7 +46,7 @@ fn crypt(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>, String> {
                 &mut output,
             )
         }
-        .map_err(|_| "Windows 账户无法加密或解密该密码".to_string())?;
+        .map_err(|_| "Windows 账户无法加密或解密此数据".to_string())?;
         let result = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
         // Wipe the OS plaintext buffer before releasing it.
         if decrypt {

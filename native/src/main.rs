@@ -8,6 +8,7 @@ mod capture;
 mod clipboard;
 mod clip;
 mod chrome_store;
+mod codex_mcp;
 mod downloads;
 mod error_page;
 mod extension_view;
@@ -53,6 +54,9 @@ mod updates;
 mod web_script;
 mod web_settings;
 fn main() {
+    if codex_mcp::run_helper() {
+        return;
+    }
     if update_install::run_helper() {
         return;
     }

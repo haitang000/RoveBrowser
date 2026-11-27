@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "test:native": "node scripts/native-smoke.mjs",
     "test:native:agent": "node scripts/native-agent-smoke.mjs",
+    "test:native:codex": "node scripts/native-codex-mcp-smoke.mjs",
     "test:native:devtools-mcp": "node scripts/native-devtools-mcp-smoke.mjs",
     "test:native:quit": "npm run build && cargo build --manifest-path native/Cargo.toml && node scripts/native-quit-smoke.mjs",
     "test:native:browsing": "node scripts/native-browsing-smoke.mjs",

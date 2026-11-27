@@ -135,6 +135,7 @@ enum PageLoad {
 #[derive(Debug)]
 enum Event {
     Agent(crate::agent_bridge::Request),
+    Codex(crate::agent_bridge::Request),
     ExternalUrls(Vec<String>),
     ImportSources(Vec<crate::import::Source>),
     ImportRead(Vec<crate::import::Batch>),
@@ -401,6 +402,9 @@ struct App {
     _instance: crate::instance::Instance,
     agent_tabs: Option<crate::agent_tabs::Tabs>,
     agent_data: PathBuf,
+    codex_profile: PathBuf,
+    codex_listener: Option<crate::codex_mcp::Listener>,
+    codex_grant: Option<crate::codex_mcp::Grant>,
     updating: bool,
     update_offer: Option<crate::updates::Offer>,
     update_message: Option<String>,
@@ -551,15 +555,10 @@ struct PreviewRender {
 }
 pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Keep the existing profile location so the rename preserves sessions and logins.
-    let data = std::env::var_os("ERA_DATA_DIR")
-        .map(PathBuf::from)
-        .or_else(|| {
-            directories::ProjectDirs::from("", "Era", "EraBrowser")
-                .map(|d| d.data_local_dir().to_path_buf())
-        })
-        .ok_or("无法定位用户数据目录")?;
+    let data = crate::codex_mcp::profile_dir().ok_or("无法定位用户数据目录")?;
     let external_urls = crate::instance::urls(std::env::args_os().skip(1))?;
     let Some(mut instance) = crate::instance::Instance::claim(&data, &external_urls)? else { return Ok(()); };
+    crate::codex_mcp::Listener::clear_stale_endpoint(&data);
     let mut storage = Storage::open(&data)?;
     // A malformed session is retained, and startup stops instead of overwriting it.
     let mut state = storage.load()?;
@@ -620,6 +619,9 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         _instance: instance,
         agent_tabs: None,
         agent_data,
+        codex_profile: std::path::absolute(&data)?,
+        codex_listener: None,
+        codex_grant: None,
         updating: false,
         update_offer: None,
         update_message,
@@ -4037,18 +4039,25 @@ impl App {
         }
     }
 
-    fn agent_page_target(&self, id: &str) -> Result<(&WebView, String), &'static str> {
+    fn agent_page_target(&self, id: &str) -> Result<(&Page, String), &'static str> {
         let tab = self.state.tabs.iter().find(|tab| tab.id == id).ok_or("tab_not_found")?;
-        if !self.state.visible_tab(id) || self.overlay || self.peek.is_some() {
+        if !self.state.visible_tab(id) || self.overlay || self.peek.is_some()
+            || self.fullscreen_page.as_ref().is_some_and(|(active, _)| active != id)
+        {
             return Err("tab_not_visible");
         }
-        if !model::is_web(&tab.url) || self.reader.as_ref().is_some_and(|reader| reader.id == id) {
+        let (page, url) = self.agent_page_document(tab)?;
+        if !page.visible.get() {
+            return Err("tab_not_visible");
+        }
+        Ok((page, url))
+    }
+
+    fn agent_page_document(&self, tab: &Tab) -> Result<(&Page, String), &'static str> {
+        if !model::is_web(&tab.url) || self.reader.as_ref().is_some_and(|reader| reader.id == tab.id) {
             return Err("page_unavailable");
         }
-        let page = self.pages.get(id).ok_or("page_not_ready")?;
-        if self.fullscreen_page.as_ref().is_some_and(|(active, _)| active != id) || !page.visible.get() {
-            return Err("tab_not_visible");
-        }
+        let page = self.pages.get(&tab.id).ok_or("page_not_ready")?;
         if page.error_page.is_failed() {
             return Err("page_unavailable");
         }
@@ -4059,7 +4068,54 @@ impl App {
         if agent_bridge::web_url(&url).is_none() {
             return Err("page_unavailable");
         }
-        Ok((&page.view, url))
+        Ok((page, url))
+    }
+
+    fn publish_codex(&self) {
+        self.emit(json!({"type":"codexSharing", "id":self.codex_grant.as_ref().map(|grant| &grant.tab)}));
+    }
+
+    fn stop_codex_share(&mut self) {
+        if self.codex_grant.take().is_some() {
+            self.publish_codex();
+        }
+    }
+
+    fn share_with_codex(&mut self, id: String, expected_url: &str) {
+        if !self.ready || !self.state.onboarding.completed || self.quit_pending || self.updating
+            || self.state.active_tab != id
+        {
+            return;
+        }
+        let Some(tab) = self.state.active() else { return; };
+        let Ok((_, url)) = self.agent_page_document(tab) else {
+            self.toast("请等待网页加载，再与 Codex 共享", None);
+            return;
+        };
+        if url != expected_url { return; }
+        let Some(grant) = crate::codex_mcp::Grant::new(id, &url) else { return; };
+        if self.codex_listener.is_none() {
+            let proxy = self.proxy.clone();
+            match crate::codex_mcp::Listener::start(&self.codex_profile, move |request| {
+                proxy.send_event(Event::Codex(request)).is_ok()
+            }) {
+                Ok(listener) => self.codex_listener = Some(listener),
+                Err(error) => {
+                    self.error(format!("无法启动 Codex 连接：{error}"));
+                    return;
+                }
+            }
+        }
+        self.codex_grant = Some(grant);
+        self.publish_codex();
+    }
+
+    fn codex_target(&self, id: &str) -> Result<(&Page, String, &crate::codex_mcp::Grant), &'static str> {
+        let grant = self.codex_grant.as_ref().filter(|grant| grant.tab == id && self.state.active_tab == id)
+            .ok_or("tab_not_shared")?;
+        let (page, url) = self.agent_page_target(id)?;
+        if !grant.allows(id, &url) { return Err("tab_not_shared"); }
+        Ok((page, url, grant))
     }
 
     fn command(&mut self, mut c: Command, event_loop: Option<&ActiveEventLoop>) {
@@ -4263,6 +4319,23 @@ impl App {
                     | Command::Move { .. }
             );
         match c {
+            Command::CodexShareTab { id, url } => {
+                self.share_with_codex(id, &url);
+                return;
+            }
+            Command::CodexStopSharing => {
+                self.stop_codex_share();
+                return;
+            }
+            Command::CodexCopyConfig => {
+                let result = crate::codex_mcp::config(&self.codex_profile).map_err(|error| error.to_string())
+                    .and_then(|config| crate::clipboard::write_text(&config).map_err(|error| error.to_string()));
+                match result {
+                    Ok(()) => self.toast("已复制 Codex MCP 配置", None),
+                    Err(error) => self.error(format!("无法复制 Codex MCP 配置：{error}")),
+                }
+                return;
+            }
             Command::TabSwitcher { input } => {
                 self.tab_switcher_input(input);
                 return;
@@ -4636,6 +4709,7 @@ impl App {
                 self.close_page_menu();
                 self.publish_reader();
                 self.publish_read_aloud();
+                self.publish_codex();
                 self.emit(json!({"type":"state","state":self.state}));
                 self.emit(json!({"type":"popupState","popup":self.popup_state}));
                 self.emit(json!({"type":"quitConfirmation","visible":self.quit_pending}));
@@ -5308,18 +5382,44 @@ impl ApplicationHandler<Event> for App {
                             .map_or_else(Response::error, Response::ok),
                         AgentCommand::Page(command) => {
                             match self.agent_page_target(command.tab_id()) {
-                                Ok((view, url)) => crate::agent_page::run(
-                                    view, &url, command, request.deadline, request.reply,
+                                Ok((page, url)) => crate::agent_page::run(
+                                    &page.view, &url, command, request.deadline, request.reply, None,
                                 ),
                                 Err(code) => { let _ = request.reply.try_send(Response::error(code)); }
                             }
                             return;
                         }
+                        AgentCommand::Codex(_) => Response::error("invalid_request"),
                     }
                 } else {
                     Response::error("unavailable")
                 };
                 let _ = request.reply.send(response);
+            }
+            Event::Codex(request) => {
+                use agent_bridge::{Command as AgentCommand, Response};
+                let result = if Instant::now() >= request.deadline {
+                    Err("timeout")
+                } else if !self.ready || !self.state.onboarding.completed || self.quit_pending || self.updating {
+                    Err("unavailable")
+                } else {
+                    match request.command {
+                        AgentCommand::Codex(_) => self.codex_target(&self.state.active_tab).map(|(_, url, grant)| {
+                            let title = self.state.active().map(|tab| tab.title.chars().take(512).collect::<String>());
+                            json!({"id":grant.tab,"url":url,"title":title})
+                        }),
+                        AgentCommand::Page(command) => match self.codex_target(command.tab_id()) {
+                            Ok((page, url, grant)) => {
+                                crate::agent_page::run(&page.view, &url, command,
+                                    request.deadline, request.reply, Some(grant.access()));
+                                return;
+                            }
+                            Err(code) => Err(code),
+                        },
+                        _ => Err("invalid_request"),
+                    }
+                };
+                let _ = request.reply.try_send(result.map_or_else(Response::error, Response::ok));
             }
             Event::RestoreKeyboardFocus => self.restore_keyboard_focus(),
             Event::PageMenuRequested => self.show_page_menu(),
@@ -5896,6 +5996,9 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::Source(id, url, new_document) => {
+                if self.codex_grant.as_ref().is_some_and(|grant| grant.tab == id && !grant.allows(&id, &url)) {
+                    self.stop_codex_share();
+                }
                 if self.read_aloud.as_ref().is_some_and(|session| session.id == id && (new_document || session.url != url)) {
                     self.stop_read_aloud();
                 }
@@ -6063,6 +6166,11 @@ impl ApplicationHandler<Event> for App {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.sync_permissions();
+        if self.codex_grant.as_ref().is_some_and(|grant| grant.tab != self.state.active_tab
+            || self.state.active().is_none_or(|tab| !grant.allows(&tab.id, &tab.url)))
+        {
+            self.stop_codex_share();
+        }
         // Publish the latest state once after draining this turn's events.
         if self.pending_publish.replace(false) {
             let message = self.state_publisher.message(&self.state);

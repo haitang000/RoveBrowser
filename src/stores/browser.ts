@@ -313,6 +313,7 @@ export const useBrowser = defineStore("browser", () => {
     placeExtensionMenu(trigger, tabId, extensionId);
   }
   const extensionView = ref<{ phase: "ready" | "error"; size?: [number, number]; message?: string }>();
+  const codexSharedTab = ref<string>();
   const defaultBrowser = ref<{ http: boolean; https: boolean }>();
   const importPhase = ref("checking");
   function scanImports() { importPhase.value = "checking"; if (native) send({ type: "importScan" }); }
@@ -832,6 +833,7 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "quitConfirmation") quitOpen.value = Boolean(e.visible);
     if (e.type === "readerState" && e.reader) reader.value = e.reader;
     if (e.type === "readAloudState") readAloud.value = e.readAloud ?? null;
+    if (e.type === "codexSharing") codexSharedTab.value = e.id ?? undefined;
     if (e.type === "sidebarResize" && typeof e.width === "number" && Number.isFinite(e.width))
       sidebarResize.value = { width: e.width, resizing: Boolean(e.resizing), reset: Boolean(e.reset) };
     if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
@@ -1072,6 +1074,7 @@ export const useBrowser = defineStore("browser", () => {
   return {
     canOutputPage, pageOutputShortcut, outputPage,
     canReadAloud, readAloudLabel, toggleReadAloud, stopReadAloud,
+    codexSharedTab,
     importSources, importBusy, importPhase, scanImports, runImport, importPasswords, defaultBrowser, extensions, extensionBackground,
     extensionMenuAnchor, extensionView, pinnedExtensions, placeExtensionMenu, toggleExtensionMenu,
     onboardingOpen, onboardingGreeting, openOnboarding, finishOnboarding, dismissOnboardingGreeting,

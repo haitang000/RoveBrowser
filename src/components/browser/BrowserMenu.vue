@@ -12,6 +12,7 @@ const panel = ref<HTMLElement>();
 const viewport = ref({ width: innerWidth, height: innerHeight });
 const open = computed(() => props.dropTargetsOnly ? props.dropMenuOpen : b.browserMenuOpen);
 const partner = computed(() => commandContext(b.state, b.recent).splitPartner);
+const shareableTab = computed(() => b.active && /^https?:\/\//i.test(b.active.url) && !b.active.loading ? b.active : undefined);
 const position = computed(() => {
   const anchor = b.browserMenuAnchor;
   const width = Math.min(256, viewport.value.width - 24);
@@ -61,6 +62,15 @@ function installStoreExtension() {
   const tab = b.active;
   close();
   if (tab) b.send({ type: "extensionsChromeStoreTab", id: tab.id });
+}
+function shareWithCodex() {
+  close(true);
+  if (b.codexSharedTab) b.send({ type: "codexStopSharing" });
+  else if (shareableTab.value) b.send({ type: "codexShareTab", id: shareableTab.value.id, url: shareableTab.value.url });
+}
+function copyCodexConfig() {
+  close(true);
+  b.send({ type: "codexCopyConfig" });
 }
 function readAloud(stop = false) {
   close(true);
@@ -128,6 +138,14 @@ onBeforeUnmount(() => {
             </div>
             <hr role="separator" />
             <div role="group" :aria-label="b.t('工具')">
+              <button v-if="b.native && (shareableTab || b.codexSharedTab)" role="menuitem" tabindex="-1"
+                :title="b.codexSharedTab ? undefined : b.t('Codex 可读取此网页并点击或填写页面元素')" @click="shareWithCodex">
+                <Icon :name="b.codexSharedTab ? 'stop' : 'extension'" :size="16" />
+                <span>{{ b.t(b.codexSharedTab ? '停止与 Codex 共享' : '允许 Codex 使用此标签页') }}</span>
+              </button>
+              <button v-if="b.native" role="menuitem" tabindex="-1" @click="copyCodexConfig">
+                <Icon name="copy" :size="16" /><span>{{ b.t('复制 Codex MCP 配置') }}</span>
+              </button>
               <button v-if="b.native && chromeStoreDetailId(b.active?.url)" role="menuitem" tabindex="-1" @click="installStoreExtension">
                 <Icon name="extension" :size="16" /><span>{{ b.t('安装此商店扩展…') }}</span>
               </button>

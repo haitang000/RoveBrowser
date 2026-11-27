@@ -20,6 +20,21 @@
   const initial = checkPage();
   if (initial) return error(initial);
 
+  function scrollPosition() {
+    const root = document.scrollingElement || document.documentElement;
+    return {
+      x: window.scrollX, y: window.scrollY,
+      width: root.scrollWidth, height: root.scrollHeight,
+      viewportWidth: document.documentElement.clientWidth,
+      viewportHeight: document.documentElement.clientHeight,
+    };
+  }
+
+  if (params.op === "scroll") {
+    window.scrollBy({ left: params.dx, top: params.dy, behavior: "instant" });
+    return { result: { scroll: scrollPosition() } };
+  }
+
   function elementKind(element) {
     if (element instanceof HTMLInputElement) {
       if (TEXT_INPUTS.has(element.type) && !element.readOnly) return "text";
@@ -85,7 +100,7 @@
     if (!globalThis.__roveAgentPageSnapshot) {
       addEventListener("pagehide", () => { globalThis.__roveAgentPageSnapshot = null; }, { once: true });
     }
-    globalThis.__roveAgentPageSnapshot = { token: params.snapshot, url: location.href, entries };
+    globalThis.__roveAgentPageSnapshot = { token: params.snapshot, url: location.href, scope: params.scope, entries };
     const text = getComputedStyle(document.body).display === "none" ? "" : document.body.innerText;
     return { result: {
       url: location.href,
@@ -99,7 +114,7 @@
   }
 
   const snapshot = globalThis.__roveAgentPageSnapshot;
-  if (!snapshot || snapshot.token !== params.snapshot || snapshot.url !== location.href) {
+  if (!snapshot || snapshot.token !== params.snapshot || snapshot.url !== location.href || snapshot.scope !== params.scope) {
     return error("stale_snapshot");
   }
   const entry = snapshot.entries[params.element - 1];

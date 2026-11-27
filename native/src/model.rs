@@ -257,6 +257,12 @@ pub enum Command {
     OpenHistory,
     #[serde(rename = "settingsUpdate")]
     UpdateSettings { settings: crate::settings::Settings },
+    #[serde(rename = "codexShareTab")]
+    CodexShareTab { id: String, url: String },
+    #[serde(rename = "codexStopSharing")]
+    CodexStopSharing,
+    #[serde(rename = "codexCopyConfig")]
+    CodexCopyConfig,
     #[serde(rename = "extensionsList")]
     ListExtensions,
     #[serde(rename = "extensionPin")]
