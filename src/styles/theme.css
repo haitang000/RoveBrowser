@@ -467,6 +467,7 @@ kbd {
 }
 .address-field {
   app-region: no-drag;
+  position: relative;
   height: var(--toolbar-button);
   min-width: 0;
   width: 100%;
@@ -478,7 +479,7 @@ kbd {
   border-radius: var(--radius-control);
   text-align: left;
 }
-.address-field span {
+.address-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -487,6 +488,44 @@ kbd {
 }
 .address-field:hover {
   background: var(--field-hover);
+}
+.address-loading {
+  position: absolute;
+  inset: 1px 0 auto;
+  width: min(120px, 45%);
+  height: 3px;
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-standard) linear;
+}
+.address-loading.is-loading {
+  opacity: 1;
+  transition-duration: 0s;
+}
+.address-loading::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 50%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: translateX(50%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .address-loading::after {
+    animation: address-loading-sweep 900ms linear infinite paused;
+  }
+  :root:not([data-reduce-motion="true"]) .address-loading.is-loading::after {
+    animation-play-state: running;
+  }
+}
+@keyframes address-loading-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(200%); }
 }
 .reader-toggle { app-region:no-drag; flex-shrink:0; }
 .reader-toggle.chosen { background:var(--field-hover); }

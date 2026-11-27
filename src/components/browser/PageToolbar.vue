@@ -46,7 +46,8 @@ function act(type: "back" | "forward" | "reload" | "reader") {
     </nav>
     <button class="address-field" :aria-label="b.t('搜索或输入地址')" data-window-control
       :title="pane ? address : b.shortcutTitle(b.t('搜索或输入地址'), 'address')" @click="b.openCommand('edit', pane?.id)">
-      <span>{{ address }}</span>
+      <span :key="id" class="address-loading" :class="{ 'is-loading': tab?.loading }" aria-hidden="true" />
+      <span class="address-label">{{ address }}</span>
       <Icon v-if="!pane" name="settings" :size="13" />
     </button>
     <div class="toolbar-actions" data-window-control>

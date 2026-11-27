@@ -912,11 +912,13 @@ impl State {
         let url = normalize_with(input, &self.settings)?;
         if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
             tab.url = url;
+            if !is_tab_page(&tab.url) {
+                tab.loading = false;
+            }
             if crate::settings::is_settings(&tab.url) {
                 tab.title = "设置".into();
             } else if crate::history::is_history(&tab.url) {
                 tab.title = "历史记录".into();
-                tab.loading = false;
             }
             tab.favicon = None;
         }

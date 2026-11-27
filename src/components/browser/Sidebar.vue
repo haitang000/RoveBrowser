@@ -43,7 +43,8 @@ function showMenu(e: MouseEvent, tab: Tab) {
       </div>
       <button class="address-field split-sidebar-address" :aria-label="b.t('搜索或输入地址')" data-chrome-motion="sidebar-address"
         :title="b.shortcutTitle(b.t('搜索或输入地址'), 'address')" @click="b.openCommand('edit', b.active?.id)">
-        <span>{{ splitAddress }}</span>
+        <span :key="b.active?.id" class="address-loading" :class="{ 'is-loading': b.active?.loading }" aria-hidden="true" />
+        <span class="address-label">{{ splitAddress }}</span>
         <Icon name="settings" :size="13" />
       </button>
     </template>

@@ -21,7 +21,7 @@ use std::{
 };
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, BytesReceivedChangedEventHandler, DOMContentLoadedEventHandler,
-    ContainsFullScreenElementChangedEventHandler, DownloadStartingEventHandler, FaviconChangedEventHandler,
+    ContainsFullScreenElementChangedEventHandler, ContentLoadingEventHandler, DownloadStartingEventHandler, FaviconChangedEventHandler,
     FocusChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler,
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
@@ -37,7 +37,7 @@ use webview2_com::{
         COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
         COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT,
     },
-    NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
+    NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
 };
 use windows::{
     core::{Interface, BOOL, PWSTR, HSTRING},
@@ -126,6 +126,13 @@ fn browsing_webview(
     }
 }
 #[derive(Debug)]
+enum PageLoad {
+    Started,
+    Content(String),
+    Finished(String),
+}
+
+#[derive(Debug)]
 enum Event {
     Agent(crate::agent_bridge::Request),
     ExternalUrls(Vec<String>),
@@ -147,7 +154,7 @@ enum Event {
     HistoryEdited(String, rusqlite::Result<(bool, bool)>),
     Command(Command),
     Title(String, String),
-    Load(String, String, bool),
+    Load(String, isize, PageLoad),
     Source(String, String, bool),
     PageFullscreen(String, isize, bool),
     Favicon(String, String, String),
@@ -2174,8 +2181,6 @@ impl App {
         });
         let p = self.proxy.clone();
         let id = tab.id.clone();
-        let p2 = p.clone();
-        let id2 = id.clone();
         let extension_id = url::Url::parse(&tab.url).ok()
             .as_ref().and_then(model::extension_id).map(str::to_owned);
         let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
@@ -2201,13 +2206,6 @@ impl App {
             .with_back_forward_navigation_gestures(true)
             .with_document_title_changed_handler(move |title| {
                 let _ = p.send_event(Event::Title(id.clone(), title));
-            })
-            .with_on_page_load_handler(move |event, url| {
-                let _ = p2.send_event(Event::Load(
-                    id2.clone(),
-                    url,
-                    matches!(event, PageLoadEvent::Started),
-                ));
             })
             // The page adapters use standard window requests. Websites have no application IPC.
             .build_as_child(self.window.as_ref().unwrap())?;
@@ -2237,6 +2235,7 @@ impl App {
             self.live_settings.clone(),
         )?;
         let error_page = crate::error_page::install(&view, self.state.theme == "dark")?;
+        register_page_loading(&view, tab.id.clone(), self.proxy.clone())?;
         let _ = crate::site::set_muted(&view, tab.muted);
         let permission_document = Rc::new(permissions::Document::default());
         let proxy = self.proxy.clone();
@@ -5780,7 +5779,24 @@ impl ApplicationHandler<Event> for App {
                 self.publish();
                 self.save();
             }
-            Event::Load(id, url, loading) => {
+            Event::Load(id, hwnd, phase) => {
+                if self.page_with_handle(&id, hwnd).is_none() { return; }
+                let (url, loading) = match phase {
+                    PageLoad::Started => {
+                        if let Some(peek) = self.peek.as_mut().filter(|peek| peek.tab.id == id) {
+                            peek.tab.loading = true;
+                            self.publish_peek();
+                        } else if let Some(tab) = self.state.tabs.iter_mut()
+                            .find(|tab| tab.id == id && model::is_tab_page(&tab.url) && !tab.loading)
+                        {
+                            tab.loading = true;
+                            self.publish();
+                        }
+                        return;
+                    }
+                    PageLoad::Content(url) => (url, true),
+                    PageLoad::Finished(url) => (url, false),
+                };
                 if loading {
                     if self.read_aloud.as_ref().is_some_and(|session| session.id == id) {
                         self.stop_read_aloud();
@@ -6102,6 +6118,68 @@ impl ApplicationHandler<Event> for App {
         self.save_downloads();
     }
 }
+fn page_source(view: &ICoreWebView2) -> windows::core::Result<String> {
+    let mut value = PWSTR::null();
+    unsafe { view.Source(&mut value)?; }
+    Ok(take_pwstr(value))
+}
+
+fn register_page_loading(
+    view: &WebView,
+    id: String,
+    proxy: EventLoopProxy<Event>,
+) -> windows::core::Result<()> {
+    let core = view.webview();
+    let hwnd = view.hwnd().0 as isize;
+    let pending = Rc::new(Cell::new(None));
+    let emit = move |phase| { let _ = proxy.send_event(Event::Load(id.clone(), hwnd, phase)); };
+    let emit_start = emit.clone();
+    let emit_content = emit.clone();
+    let started = pending.clone();
+    let content = pending.clone();
+    let mut token = 0;
+    unsafe {
+        // Navigation starts before content arrives. Redirects reuse the same ID,
+        // and an older navigation can complete while a newer one is pending.
+        core.add_NavigationStarting(&NavigationStartingEventHandler::create(Box::new(move |_, args| {
+            if let Some(args) = args {
+                let mut canceled = BOOL::default();
+                args.Cancel(&mut canceled)?;
+                if !canceled.as_bool() {
+                    let mut id = 0;
+                    args.NavigationId(&mut id)?;
+                    if started.replace(Some(id)) != Some(id) {
+                        emit_start(PageLoad::Started);
+                    }
+                }
+            }
+            Ok(())
+        })), &mut token)?;
+        core.add_ContentLoading(&ContentLoadingEventHandler::create(Box::new(move |sender, args| {
+            if let (Some(sender), Some(args)) = (sender, args) {
+                let mut id = 0;
+                args.NavigationId(&mut id)?;
+                if content.get() == Some(id) {
+                    emit_content(PageLoad::Content(page_source(&sender)?));
+                }
+            }
+            Ok(())
+        })), &mut token)?;
+        core.add_NavigationCompleted(&NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
+            if let (Some(sender), Some(args)) = (sender, args) {
+                let mut id = 0;
+                args.NavigationId(&mut id)?;
+                if pending.get() == Some(id) {
+                    pending.set(None);
+                    emit(PageLoad::Finished(page_source(&sender)?));
+                }
+            }
+            Ok(())
+        })), &mut token)?;
+    }
+    Ok(())
+}
+
 fn register_page_events(
     view: &WebView,
     id: String,
@@ -6274,13 +6352,11 @@ fn register_page_events(
     let nav = navigation.clone();
     let source = SourceChangedEventHandler::create(Box::new(move |sender, args| {
         if let Some(sender) = sender {
-            let mut value = PWSTR::null();
             let mut new_document = BOOL(1);
             unsafe {
-                sender.Source(&mut value)?;
                 if let Some(args) = args { let _ = args.IsNewDocument(&mut new_document); }
             }
-            let url = take_pwstr(value);
+            let url = page_source(&sender)?;
             *nav.current.borrow_mut() = url.clone();
             let _ = p.send_event(Event::Source(id2.clone(), url, new_document.as_bool()));
         }
