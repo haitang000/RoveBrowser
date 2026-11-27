@@ -43,6 +43,49 @@ html[data-reduce-motion="true"] :is(.bubble-enter-active, .bubble-leave-active) 
 .address-field {
   transition: background var(--motion-quick) var(--ease-out);
 }
+.navigation-arrow {
+  transition: transform var(--motion-selection) var(--ease-out);
+}
+.navigation-reload-icons {
+  display: grid;
+  place-items: center;
+}
+.navigation-reload-icons > svg {
+  grid-area: 1 / 1;
+  transition: opacity var(--motion-quick) linear;
+}
+.navigation-reload-icons > .navigation-reload {
+  transition:
+    opacity var(--motion-quick) linear,
+    transform var(--motion-selection) var(--ease-out);
+}
+.navigation-reload-icons > .reload-spinner {
+  opacity: 0;
+  animation-play-state: paused;
+}
+.browser-navigation [aria-busy="true"] .navigation-reload {
+  opacity: 0;
+}
+.browser-navigation [aria-busy="true"] .reload-spinner {
+  opacity: 1;
+  animation-play-state: running;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .browser-navigation [aria-busy="true"] .navigation-reload {
+    transform: rotate(42deg);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    :root:not([data-reduce-motion="true"]) .browser-navigation button:hover > .navigation-back {
+      transform: translateX(2px);
+    }
+    :root:not([data-reduce-motion="true"]) .browser-navigation button:hover > .navigation-forward {
+      transform: translateX(-2px);
+    }
+    :root:not([data-reduce-motion="true"]) .browser-navigation button:not([aria-busy="true"]):hover .navigation-reload {
+      transform: rotate(16deg);
+    }
+  }
+}
 .tab-list {
   position: relative;
   min-height: 4px;

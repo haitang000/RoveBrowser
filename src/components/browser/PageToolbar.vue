@@ -34,14 +34,17 @@ function act(type: "back" | "forward" | "reload" | "reader") {
   <div :class="pane ? 'pane-header' : 'browser-toolbar'" :data-window-drag="pane ? '' : undefined">
     <nav class="browser-navigation" :aria-label="b.t('网页导航')" data-window-control>
       <button class="icon-button" :title="b.shortcutTitle(b.t('后退'), 'back')" :aria-label="b.t('后退')" @click="act('back')">
-        <Icon name="back" :size="14" />
+        <Icon name="back" class="navigation-arrow navigation-back" :size="14" />
       </button>
       <button class="icon-button" :title="b.shortcutTitle(b.t('前进'), 'forward')" :aria-label="b.t('前进')" @click="act('forward')">
-        <Icon name="forward" :size="14" />
+        <Icon name="forward" class="navigation-arrow navigation-forward" :size="14" />
       </button>
       <button class="icon-button" :title="b.shortcutTitle(b.t('刷新'), 'reload')" :aria-label="b.t('刷新')"
         :aria-busy="tab?.loading || undefined" @click="act('reload')">
-        <Icon :name="tab?.loading ? 'spinner' : 'reload'" :class="{ 'reload-spinner': tab?.loading }" :size="14" />
+        <span class="navigation-reload-icons" aria-hidden="true">
+          <Icon name="reload" class="navigation-reload" :size="14" />
+          <Icon name="spinner" class="reload-spinner" :size="14" />
+        </span>
       </button>
     </nav>
     <button class="address-field" :aria-label="b.t('搜索或输入地址')" data-window-control
