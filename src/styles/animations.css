@@ -76,10 +76,10 @@ html[data-reduce-motion="true"] :is(.bubble-enter-active, .bubble-leave-active) 
   }
   @media (hover: hover) and (pointer: fine) {
     :root:not([data-reduce-motion="true"]) .browser-navigation button:hover > .navigation-back {
-      transform: translateX(2px);
+      transform: translateX(-2px);
     }
     :root:not([data-reduce-motion="true"]) .browser-navigation button:hover > .navigation-forward {
-      transform: translateX(-2px);
+      transform: translateX(2px);
     }
     :root:not([data-reduce-motion="true"]) .browser-navigation button:not([aria-busy="true"]):hover .navigation-reload {
       transform: rotate(16deg);
