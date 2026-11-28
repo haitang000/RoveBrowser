@@ -487,7 +487,7 @@ struct App {
     // Snapshot the preference at startup for every WebView2 environment this process creates.
     devtools_mcp_enabled: bool,
     devtools_mcp_from_env: bool,
-    web_rtc_preference_failed: bool,
+    web_preference_failures: web_settings::StartupPreferenceFailures,
     state: State,
     storage: Storage,
     session_writer: crate::session_writer::SessionWriter,
@@ -565,15 +565,10 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
     let devtools_mcp_from_env = std::env::var("ROVE_DEVTOOLS_MCP").as_deref() == Ok("1");
     let browsing_data = data.join("WebView2");
     let agent_data = data.join("AgentWebView2");
-    let mut web_rtc_preference_failed = false;
-    for profile in [&browsing_data, &agent_data] {
-        if let Err(error) = crate::web_settings::sync_webrtc_address_protection(
-            profile, state.settings.web_rtc_address_protection,
-        ) {
-            eprintln!("Rove WebRTC ({}): {error}", profile.display());
-            web_rtc_preference_failed = true;
-        }
-    }
+    let ui_data = data.join("UI");
+    let web_preference_failures = web_settings::sync_startup_preferences(
+        &ui_data, &browsing_data, &agent_data, &state.settings,
+    );
     // Icons cached by an older build were stretched to 64 pixels and are soft;
     // the one-time refresh after the UI is ready re-fetches each saved site. The
     // marker is only written once that refresh found real icons, so an offline
@@ -698,7 +693,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         tracking_profile: None,
         devtools_mcp_enabled: state.settings.devtools_mcp || devtools_mcp_from_env,
         devtools_mcp_from_env,
-        web_rtc_preference_failed,
+        web_preference_failures,
         state,
         storage,
         session_writer,
@@ -719,7 +714,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         quit_pending: false,
         ready: false,
         last_error: None,
-        ui_data: data.join("UI"),
+        ui_data,
         glass: false,
         site_icons: crate::favicon::SiteIcons::default(),
         icon_refresh,
@@ -4568,8 +4563,11 @@ impl App {
             }
             Command::Ready => {
                 self.ready = true;
-                if self.web_rtc_preference_failed {
+                if self.web_preference_failures.web_rtc {
                     self.error("无法应用 WebRTC 地址保护设置，请重启 Rove 后重试。");
+                }
+                if self.web_preference_failures.secure_dns {
+                    self.error("安全 DNS 设置未能应用，请重启 Rove 后重试。");
                 }
                 if let Some(message) = self.update_message.take() {
                     self.toast(&message, None);
@@ -5243,9 +5241,10 @@ impl ApplicationHandler<Event> for App {
             let initialization = format!(
                 // Document-created scripts may run before documentElement exists.
                 // App.onMounted sets the DOM attribute before the hidden window is shown.
-                "window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};window.__ERA_WEB_RTC_PREFERENCE_FAILED__={};window.__ERA_DEVTOOLS_MCP_FROM_ENV__={};",
+                "window.__ERA_NATIVE__=true;window.__ERA_INITIAL_STATE__={};window.__ERA_WEB_RTC_PREFERENCE_FAILED__={};window.__ERA_SECURE_DNS_PREFERENCE_FAILED__={};window.__ERA_DEVTOOLS_MCP_FROM_ENV__={};",
                 serde_json::to_string(&self.state)?,
-                self.web_rtc_preference_failed,
+                self.web_preference_failures.web_rtc,
+                self.web_preference_failures.secure_dns,
                 self.devtools_mcp_from_env,
             );
             let mut ui_context = WebContext::new(Some(self.ui_data.clone()));

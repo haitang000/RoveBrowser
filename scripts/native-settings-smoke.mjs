@@ -61,6 +61,14 @@ async function send(command) {
 async function state() {
   return ui.evaluate(() => window.__settingsTest.state);
 }
+async function expectSecureDnsMode(mode) {
+  assert.equal(await ui.evaluate(() => window.__ERA_SECURE_DNS_PREFERENCE_FAILED__), false);
+  for (const folder of ["UI", "WebView2", "AgentWebView2"]) {
+    const path = join(profile, folder, "EBWebView", "Local State");
+    const preferences = JSON.parse(await readFile(path, "utf8"));
+    assert.equal(preferences.dns_over_https.mode, mode, `${folder} DNS mode`);
+  }
+}
 function changeDownloadClearFailure(enabled) {
   const db = new DatabaseSync(join(profile, "era.sqlite"), { timeout: 5000 });
   try {
@@ -210,6 +218,9 @@ try {
     "rove://settings/privacy",
   );
   const webRtcToggle = (name) => ui.getByRole("switch", { name, exact: true });
+  const secureDnsToggle = (name = "Secure DNS") => ui.getByRole("switch", { name, exact: true });
+  assert.equal(await secureDnsToggle("安全 DNS").getAttribute("aria-checked"), "true");
+  await expectSecureDnsMode("automatic");
   assert.equal(await webRtcToggle("WebRTC 地址保护").getAttribute("aria-checked"), "false");
   checks.push("设置以内部标签页展示、复用，分类地址由 Rust 保存");
   await ui.screenshot({ path: join(output, "native-settings-privacy.png") });
@@ -380,6 +391,9 @@ try {
   await popup.getByRole("menuitem", { name: "Settings", exact: true }).click();
   await ui.getByRole("button", { name: "Privacy", exact: true }).click();
   await waitFor(async () => (await state()).tabs.find((t) => t.id === id)?.url === "rove://settings/privacy", "restore Privacy pane");
+  await secureDnsToggle().click();
+  await waitFor(async () => (await state()).settings.secureDns === false, "disable Secure DNS");
+  await expectSecureDnsMode("automatic");
   await webRtcToggle("WebRTC address protection").click();
   await waitFor(async () => (await state()).settings.webRtcAddressProtection, "enable WebRTC address protection");
   await stop();
@@ -402,6 +416,8 @@ try {
   await ui.locator('.sidebar[data-sidebar-density="compact"]').waitFor();
   await ui.getByRole("heading", { name: "Privacy", exact: true }).waitFor();
   assert.equal(await ui.getByRole("combobox", { name: "Tracking prevention", exact: true }).inputValue(), "strict");
+  assert.equal(await secureDnsToggle().getAttribute("aria-checked"), "false");
+  await expectSecureDnsMode("off");
   assert.equal(await webRtcToggle("WebRTC address protection").getAttribute("aria-checked"), "true");
   await ui.screenshot({ path: join(output, "native-settings-restored.png") });
   checks.push("设置和浏览器菜单即时切换英语；重启后恢复界面语言、引擎、外观、动态效果、快捷键、下载路径及设置分类");
@@ -409,10 +425,15 @@ try {
   assert.equal(await ui.evaluate(() => window.__settingsTest.events.some((e) => e.type === "error" && /跟踪防护/.test(e.message))), false);
   checks.push("通过真实 WebView2 配置切换基础和严格跟踪防护，重启后恢复严格等级");
   await send({ type: "settingsOpen", pane: "privacy" });
+  await secureDnsToggle().click();
+  await waitFor(async () => (await state()).settings.secureDns === true, "enable Secure DNS");
   await webRtcToggle("WebRTC address protection").click();
   await waitFor(async () => (await state()).settings.webRtcAddressProtection === false, "disable WebRTC address protection");
   await stop();
   await launch();
+  assert.equal(await secureDnsToggle().getAttribute("aria-checked"), "true");
+  await expectSecureDnsMode("automatic");
+  checks.push("旧配置默认开启安全 DNS，关闭或重新开启后于下次启动应用到各 WebView2 环境");
   assert.equal((await state()).settings.webRtcAddressProtection, false);
   assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), true);
   checks.push("WebRTC 地址保护默认关闭，重启后阻止直连 UDP 候选，关闭后再次重启恢复直连 UDP");

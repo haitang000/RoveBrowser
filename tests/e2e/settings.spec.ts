@@ -355,6 +355,12 @@ test("settings search highlights titles, descriptions and result paths without c
   await expect(group.locator(".setting-description p mark")).toHaveText(["表单", "登录"]);
   await search.fill("隐私");
   await expect(page.locator(".settings-result-pane mark")).toHaveText(["隐私", "隐私", "隐私"]);
+  await search.fill("DNS over HTTPS");
+  const secureDns = page.getByRole("switch", { name: "安全 DNS", exact: true });
+  await expect(secureDns).toHaveAccessibleDescription(/使用系统 DNS.*重启 Rove 生效/);
+  await expect(secureDns).toHaveAttribute("aria-checked", "true");
+  await secureDns.press("Space");
+  await expect(secureDns).toHaveAttribute("aria-checked", "false");
   await search.fill("WebRTC");
   const protection = page.getByRole("switch", { name: "WebRTC 地址保护", exact: true });
   await expect(protection).toHaveAccessibleDescription(/重启 Rove 生效/);

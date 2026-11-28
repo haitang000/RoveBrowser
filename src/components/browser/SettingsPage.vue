@@ -404,6 +404,17 @@ const groups = computed<Group[]>(() => [
         keywords: "tracking prevention tracker 防追踪 防跟踪",
       },
       {
+        id: "secure-dns",
+        title: b.t("安全 DNS"),
+        detail: b.t("当前 DNS 服务支持时，通过 HTTPS 加密网页的 DNS 查询。无法使用或关闭时，使用系统 DNS。") + " " +
+          b.t(window.__ERA_SECURE_DNS_PREFERENCE_FAILED__
+            ? "安全 DNS 设置未能应用，请重启 Rove 后重试。"
+            : "更改后重启 Rove 生效。"),
+        kind: "toggle",
+        setting: "secureDns",
+        keywords: "secure DNS DNS over HTTPS DoH 加密 域名解析 網域名稱解析",
+      },
+      {
         id: "webRtcAddressProtection",
         title: b.t("WebRTC 地址保护"),
         detail: b.t("限制 WebRTC 使用未经过代理的 UDP 连接，减少 IP 地址暴露。部分音视频通话可能受影响。") + " " +

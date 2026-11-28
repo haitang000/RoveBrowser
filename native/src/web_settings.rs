@@ -54,11 +54,47 @@ pub fn set_tracking_protection(
     Ok(())
 }
 
-/// WebView2 reads Chromium's IP handling preference when it opens the profile.
-/// Run before creating a WebView and wait out a previous session's final writes.
-pub fn sync_webrtc_address_protection(data: &Path, enabled: bool) -> io::Result<()> {
-    const POLICY: &str = "disable_non_proxied_udp";
-    let browser_data = data.join("EBWebView");
+#[derive(Default)]
+pub struct StartupPreferenceFailures {
+    pub secure_dns: bool,
+    pub web_rtc: bool,
+}
+
+/// WebView2 reads these preferences at startup. Wait for the previous browser
+/// process to finish writing before updating its user data.
+pub fn sync_startup_preferences(
+    ui: &Path,
+    browsing: &Path,
+    agent: &Path,
+    settings: &Settings,
+) -> StartupPreferenceFailures {
+    let mut failures = StartupPreferenceFailures::default();
+    for (profile, uses_webrtc) in [(ui, false), (browsing, true), (agent, true)] {
+        let browser_data = profile.join("EBWebView");
+        if let Err(error) = wait_for_profile(&browser_data) {
+            eprintln!("Rove WebView2 ({}): {error}", profile.display());
+            failures.secure_dns = true;
+            failures.web_rtc |= uses_webrtc;
+            continue;
+        }
+        if let Err(error) = sync_secure_dns(&browser_data, settings.secure_dns) {
+            eprintln!("Rove Secure DNS ({}): {error}", profile.display());
+            failures.secure_dns = true;
+        }
+        if uses_webrtc {
+            if let Err(error) = sync_webrtc_address_protection(
+                &browser_data.join("Default"),
+                settings.web_rtc_address_protection,
+            ) {
+                eprintln!("Rove WebRTC ({}): {error}", profile.display());
+                failures.web_rtc = true;
+            }
+        }
+    }
+    failures
+}
+
+fn wait_for_profile(browser_data: &Path) -> io::Result<()> {
     let lock = browser_data.join("lockfile");
     let deadline = Instant::now() + Duration::from_secs(5);
     while lock.try_exists()? {
@@ -70,36 +106,70 @@ pub fn sync_webrtc_address_protection(data: &Path, enabled: bool) -> io::Result<
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+    Ok(())
+}
 
-    let profile = browser_data.join("Default");
-    let path = profile.join("Preferences");
+fn sync_secure_dns(browser_data: &Path, enabled: bool) -> io::Result<()> {
+    // Automatic mode upgrades compatible system resolvers to DoH.
+    let mode = if enabled { "automatic" } else { "off" };
+    update_preference_file(browser_data, "Local State", |prefs| {
+        let dns = prefs
+            .entry("dns_over_https")
+            .or_insert_with(|| Value::Object(Map::new()));
+        let dns = dns.as_object_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "Invalid WebView2 DNS preferences")
+        })?;
+        if dns.get("mode").and_then(Value::as_str) == Some(mode) {
+            return Ok(false);
+        }
+        dns.insert("mode".into(), Value::String(mode.into()));
+        Ok(true)
+    })
+}
+
+fn sync_webrtc_address_protection(profile: &Path, enabled: bool) -> io::Result<()> {
+    const POLICY: &str = "disable_non_proxied_udp";
+    update_preference_file(profile, "Preferences", |prefs| {
+        let protected = prefs
+            .get("webrtc")
+            .and_then(|rtc| rtc.get("ip_handling_policy"))
+            .and_then(Value::as_str) == Some(POLICY);
+        if protected == enabled {
+            return Ok(false);
+        }
+        let rtc = prefs
+            .entry("webrtc")
+            .or_insert_with(|| Value::Object(Map::new()));
+        let rtc = rtc.as_object_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "Invalid WebView2 WebRTC preferences")
+        })?;
+        if enabled {
+            rtc.insert("ip_handling_policy".into(), Value::String(POLICY.into()));
+        } else {
+            rtc.remove("ip_handling_policy");
+        }
+        Ok(true)
+    })
+}
+
+fn update_preference_file(
+    directory: &Path,
+    filename: &str,
+    update: impl FnOnce(&mut Map<String, Value>) -> io::Result<bool>,
+) -> io::Result<()> {
+    let path = directory.join(filename);
     let mut prefs: Map<String, Value> = match fs::read(&path) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Map::new(),
         Err(error) => return Err(error),
     };
-    let protected = prefs
-        .get("webrtc")
-        .and_then(|rtc| rtc.get("ip_handling_policy"))
-        .and_then(Value::as_str) == Some(POLICY);
-    if protected == enabled {
+    if !update(&mut prefs)? {
         return Ok(());
     }
-    let rtc = prefs
-        .entry("webrtc")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let rtc = rtc.as_object_mut().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "Invalid WebView2 WebRTC preferences")
-    })?;
-    if enabled {
-        rtc.insert("ip_handling_policy".into(), Value::String(POLICY.into()));
-    } else {
-        rtc.remove("ip_handling_policy");
-    }
 
-    fs::create_dir_all(profile)?;
+    fs::create_dir_all(directory)?;
     let json = serde_json::to_vec(&prefs).map_err(io::Error::other)?;
-    let temporary = path.with_file_name(format!("Preferences.rove-{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = directory.join(format!("{filename}.rove-{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         let mut file = fs::File::create_new(&temporary)?;
         file.write_all(&json)?;

@@ -73,6 +73,7 @@ pub struct Settings {
     pub remember_history: bool,
     pub tracking_protection: TrackingProtection,
     pub permission_defaults: crate::permissions::Defaults,
+    pub secure_dns: bool,
     pub web_rtc_address_protection: bool,
     pub devtools_mcp: bool,
     /// Zigzag `TabSleep`: background pages nobody has seen for a while give
@@ -104,6 +105,7 @@ impl Default for Settings {
             remember_history: true,
             tracking_protection: TrackingProtection::default(),
             permission_defaults: crate::permissions::Defaults::default(),
+            secure_dns: true,
             web_rtc_address_protection: false,
             devtools_mcp: false,
             sleep_tabs: true,

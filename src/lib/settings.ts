@@ -185,6 +185,7 @@ export interface Settings {
   rememberHistory: boolean;
   trackingProtection: (typeof TRACKING_PROTECTION_LEVELS)[number][0];
   permissionDefaults: Record<PermissionKind, PermissionDefault>;
+  secureDns: boolean;
   webRtcAddressProtection: boolean;
   devtoolsMcp: boolean;
   /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
@@ -212,6 +213,7 @@ export const defaultSettings = (): Settings => ({
   rememberHistory: true,
   trackingProtection: "balanced",
   permissionDefaults: { camera: "ask", microphone: "ask", location: "ask", notifications: "ask", screen: "ask" },
+  secureDns: true,
   webRtcAddressProtection: false,
   devtoolsMcp: false,
   sleepTabs: true,
@@ -240,6 +242,7 @@ export function settingsFor(value?: Partial<Settings>): Settings {
   }
   settings.language = interfaceLanguage(settings.language);
   settings.sidebarDensity = sidebarDensityFor(settings.sidebarDensity);
+  settings.secureDns = settings.secureDns !== false;
   if (!PAGE_ZOOM_STEPS.includes(settings.defaultPageZoom)) settings.defaultPageZoom = 1;
   settings.readAloudEnabled = settings.readAloudEnabled === true;
   if (!READ_ALOUD_RATES.some(([rate]) => rate === settings.readAloudRate)) settings.readAloudRate = 0;
