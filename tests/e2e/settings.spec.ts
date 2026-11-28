@@ -50,6 +50,36 @@ test("default page zoom is selectable and searchable in accessibility settings",
   await expect(zoom).toHaveValue("1.25");
 });
 
+test("AI Agent settings can be found and site rules can be managed independently", async ({ page }) => {
+  await page.getByRole("searchbox", { name: "查找设置" }).fill("黑名单");
+  await page.getByRole("button", { name: /AI Agent.*黑名单/ }).click();
+  await expect(page.getByRole("tab", { name: "设置", exact: true })).toHaveAttribute("title", "rove://settings/ai-agent");
+  const allowAll = page.getByRole("switch", { name: "允许 Codex 访问所有网站" });
+  await expect(allowAll).not.toBeChecked();
+  await allowAll.click();
+  await expect(allowAll).toBeChecked();
+
+  const allowlist = page.getByRole("region", { name: "白名单" });
+  const blocklist = page.getByRole("region", { name: "黑名单" });
+  const allowed = allowlist.getByRole("textbox", { name: "网站地址" });
+  await allowed.fill("file:///example.com");
+  await allowed.press("Enter");
+  await expect(allowlist.getByRole("alert")).toHaveText("请输入有效的域名或 HTTP(S) 网址。");
+  await allowed.fill("https://EXAMPLE.com:8443/path");
+  await allowed.press("Enter");
+  await expect(allowlist.getByRole("listitem")).toHaveText("example.com");
+
+  const blocked = blocklist.getByRole("textbox", { name: "网站地址" });
+  await blocked.fill("example.com");
+  await blocklist.getByRole("button", { name: "添加", exact: true }).click();
+  await allowlist.getByRole("button", { name: "移除 example.com" }).click();
+  await expect(allowlist.getByRole("listitem")).toHaveCount(0);
+  await expect(blocklist.getByRole("listitem")).toHaveText("example.com");
+  await allowAll.click();
+  await expect(allowAll).not.toBeChecked();
+  await expect(blocklist.getByRole("listitem")).toHaveCount(1);
+});
+
 test("privacy settings expose selectable defaults and a confirmation for selected data", async ({ page }) => {
   const privacy = page.getByRole("button", { name: "隐私", exact: true });
   await privacy.click();

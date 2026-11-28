@@ -2,6 +2,7 @@ use crate::{
     agent_bridge::{self, BrowserCommand},
     chrome_store,
     clip::WindowClip,
+    codex_access::SiteAccess,
     downloads::{DownloadItem, DownloadState, Downloads},
     extensions,
     model::{self, Command, PeekPhase, Point, Rect, State, Tab, TabSwitcherInput},
@@ -2903,6 +2904,7 @@ impl App {
         }
     }
     fn sync(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.reconcile_codex_share();
         if self.window.is_none() {
             return Ok(());
         }
@@ -4146,12 +4148,49 @@ impl App {
     }
 
     fn publish_codex(&self) {
-        self.emit(json!({"type":"codexSharing", "id":self.codex_grant.as_ref().map(|grant| &grant.tab)}));
+        let id = self.codex_grant.as_ref().map(|grant| &grant.tab);
+        self.emit(json!({"type":"codexSharing", "id":id}));
     }
 
     fn stop_codex_share(&mut self) {
         if self.codex_grant.take().is_some() {
             self.publish_codex();
+        }
+    }
+
+    fn reconcile_codex_share(&mut self) {
+        if self.codex_grant.as_ref().is_some_and(|grant| {
+            self.quit_pending || self.updating || !self.state.onboarding.completed
+                || self.state.active().is_none_or(|tab| {
+                    let access = self.state.settings.codex_access.for_url(&tab.url);
+                    access == SiteAccess::Blocked || grant.automatic != (access == SiteAccess::Automatic)
+                        || !grant.allows(&tab.id, &tab.url)
+                })
+        }) {
+            self.stop_codex_share();
+        }
+    }
+
+    fn ensure_codex_listener(&mut self) -> bool {
+        if self.codex_listener.is_none() {
+            let proxy = self.proxy.clone();
+            match crate::codex_mcp::Listener::start(&self.codex_profile, move |request| {
+                proxy.send_event(Event::Codex(request)).is_ok()
+            }) {
+                Ok(listener) => self.codex_listener = Some(listener),
+                Err(error) => {
+                    self.error(format!("无法启动 Codex 连接：{error}"));
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    fn apply_codex_access(&mut self) {
+        self.reconcile_codex_share();
+        if self.state.settings.codex_access.has_automatic_access() {
+            self.ensure_codex_listener();
         }
     }
 
@@ -4167,26 +4206,34 @@ impl App {
             return;
         };
         if url != expected_url { return; }
-        let Some(grant) = crate::codex_mcp::Grant::new(id, &url) else { return; };
-        if self.codex_listener.is_none() {
-            let proxy = self.proxy.clone();
-            match crate::codex_mcp::Listener::start(&self.codex_profile, move |request| {
-                proxy.send_event(Event::Codex(request)).is_ok()
-            }) {
-                Ok(listener) => self.codex_listener = Some(listener),
-                Err(error) => {
-                    self.error(format!("无法启动 Codex 连接：{error}"));
-                    return;
-                }
+        match self.state.settings.codex_access.for_url(&url) {
+            SiteAccess::Blocked => {
+                self.toast("AI Agent 设置已禁止 Codex 访问此网站。", None);
+                return;
             }
+            SiteAccess::Automatic => {
+                self.ensure_codex_listener();
+                return;
+            }
+            SiteAccess::Manual => {}
         }
+        let Some(grant) = crate::codex_mcp::Grant::new(id, &url, false) else { return; };
+        if !self.ensure_codex_listener() { return; }
         self.codex_grant = Some(grant);
         self.publish_codex();
     }
 
-    fn codex_target(&self, id: &str) -> Result<(&Page, String, &crate::codex_mcp::Grant), &'static str> {
-        let grant = self.codex_grant.as_ref().filter(|grant| grant.tab == id && self.state.active_tab == id)
-            .ok_or("tab_not_shared")?;
+    fn codex_target(&mut self, id: &str) -> Result<(&Page, String, &crate::codex_mcp::Grant), &'static str> {
+        self.reconcile_codex_share();
+        let tab = self.state.active().filter(|tab| tab.id == id).ok_or("tab_not_shared")?;
+        let access = self.state.settings.codex_access.for_url(&tab.url);
+        if access == SiteAccess::Blocked { return Err("site_blocked"); }
+        if access == SiteAccess::Automatic && self.codex_grant.is_none() {
+            let (_, url) = self.agent_page_target(id)?;
+            self.codex_grant = crate::codex_mcp::Grant::new(id.to_owned(), &url, true);
+            self.publish_codex();
+        }
+        let grant = self.codex_grant.as_ref().ok_or("tab_not_shared")?;
         let (page, url) = self.agent_page_target(id)?;
         if !grant.allows(id, &url) { return Err("tab_not_shared"); }
         Ok((page, url, grant))
@@ -4397,6 +4444,14 @@ impl App {
             }
             Command::CodexStopSharing => {
                 self.stop_codex_share();
+                return;
+            }
+            Command::UpdateCodexAccess { .. } => {
+                if let Err(error) = self.state.apply(&c) { self.error(error); return; }
+                self.live_settings.borrow_mut().codex_access = self.state.settings.codex_access.clone();
+                self.apply_codex_access();
+                self.save();
+                self.publish();
                 return;
             }
             Command::CodexCopyConfig => {
@@ -4640,6 +4695,7 @@ impl App {
             }
             Command::Ready => {
                 self.ready = true;
+                self.apply_codex_access();
                 if self.web_preference_failures.web_rtc {
                     self.error("无法应用 WebRTC 地址保护设置，请重启 Rove 后重试。");
                 }
@@ -5488,10 +5544,11 @@ impl ApplicationHandler<Event> for App {
                     Err("unavailable")
                 } else {
                     match request.command {
-                        AgentCommand::Codex(_) => self.codex_target(&self.state.active_tab).map(|(_, url, grant)| {
+                        AgentCommand::Codex(_) => {
+                            let id = self.state.active_tab.clone();
                             let title = self.state.active().map(|tab| tab.title.chars().take(512).collect::<String>());
-                            json!({"id":grant.tab,"url":url,"title":title})
-                        }),
+                            self.codex_target(&id).map(|(_, url, _)| json!({"id":id,"url":url,"title":title}))
+                        }
                         AgentCommand::Page(command) => match self.codex_target(command.tab_id()) {
                             Ok((page, url, grant)) => {
                                 crate::agent_page::run(&page.view, &url, command,
@@ -6260,11 +6317,7 @@ impl ApplicationHandler<Event> for App {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.sync_permissions();
-        if self.codex_grant.as_ref().is_some_and(|grant| grant.tab != self.state.active_tab
-            || self.state.active().is_none_or(|tab| !grant.allows(&tab.id, &tab.url)))
-        {
-            self.stop_codex_share();
-        }
+        self.reconcile_codex_share();
         // Publish the latest state once after draining this turn's events.
         if self.pending_publish.replace(false) {
             let message = self.state_publisher.message(&self.state);

@@ -8,6 +8,7 @@ import bingIcon from "../../assets/onboarding/bing.svg";
 import duckDuckGoIcon from "../../assets/onboarding/duckDuckGo.png";
 import { useBrowser } from "../../stores/browser";
 import { INTERFACE_LANGUAGES } from "../../lib/language";
+import { CODEX_ALLOW_ALL, CODEX_SITE_LISTS } from "../../lib/codex-access";
 import {
   BROWSING_DATA_OPTIONS,
   SETTINGS_PANES,
@@ -40,6 +41,7 @@ import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } f
 import { paneDirection } from "../../lib/page-motion";
 import { permissionBehavior, permissions, sitePermissionOrder, type PermissionKind } from "../../lib/permissions";
 import SettingsAbout from "./SettingsAbout.vue";
+import SettingsAiAgent from "./SettingsAiAgent.vue";
 import SettingsExtensions from "./SettingsExtensions.vue";
 import SettingsSitePermissions from "./SettingsSitePermissions.vue";
 const props = defineProps<{ tabId: string; url: string }>();
@@ -96,7 +98,7 @@ function trapFocus(event: KeyboardEvent) {
 }
 const navigationIds = [
   ["general", "appearance", "spaces", "shortcuts"],
-  ["privacy", "passwords", "translation", "accessibility", "about"],
+  ["privacy", "ai-agent", "passwords", "translation", "accessibility", "about"],
   ["extensions"],
   ["experimental"],
 ] as const satisfies readonly (readonly SettingsPane[])[];
@@ -582,6 +584,12 @@ const extensionSummary = computed(() => b.t("加载本地 Chrome 扩展或从 Ch
 const showExtensionsResult = computed(() =>
   searching.value && matches(b.t("扩展"), extensionSummary.value, "extension plugin 插件 Manifest V3"),
 );
+const aiAgentPane = SETTINGS_PANES.find((item) => item.id === "ai-agent")!;
+const codexSummary = computed(() => [CODEX_ALLOW_ALL, ...CODEX_SITE_LISTS.map(([, title]) => title)]
+  .map((label) => b.t(label)).join(b.settings.language === "en" ? ", " : "、"));
+const showAiAgentResult = computed(() => searching.value && matches(
+  b.t(aiAgentPane.title), b.t("网站访问"), aiAgentPane.keywords, codexSummary.value,
+));
 const noResults = computed(
   () =>
     searching.value &&
@@ -590,7 +598,8 @@ const noResults = computed(
     !showSpaces.value &&
     !showShortcuts.value &&
     !showAboutResult.value &&
-    !showExtensionsResult.value,
+    !showExtensionsResult.value &&
+    !showAiAgentResult.value,
 );
 function pick(id: SettingsPane) {
   query.value = "";
@@ -815,6 +824,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
             <template v-else>
             <SettingsAbout v-if="pane === 'about' && !searching" :tab-id="tabId" @confirm-update="askToUpdate" />
             <SettingsExtensions v-if="pane === 'extensions' && !searching" />
+            <SettingsAiAgent v-if="pane === 'ai-agent' && !searching" :tab-id="tabId" />
+            <button v-if="showAiAgentResult" type="button" class="about-search-result" @click="pick('ai-agent')">
+              <Icon :name="aiAgentPane.icon" />
+              <span class="setting-description">
+                <strong><SearchHighlight :text="b.t(aiAgentPane.title)" :words="words" /></strong>
+                <span class="about-search-summary"><SearchHighlight :text="codexSummary" :words="words" /></span>
+              </span>
+              <Icon name="forward" :size="13" />
+            </button>
             <button v-if="showExtensionsResult" class="about-search-result" @click="pick('extensions')">
               <Icon name="extension" />
               <span class="setting-description">

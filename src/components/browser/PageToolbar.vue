@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { host, isHistoryUrl } from "../../lib/address";
 import { isSettingsUrl } from "../../lib/settings";
+import { codexSiteAccess } from "../../lib/codex-access";
 import type { Tab } from "../../lib/types";
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
@@ -12,6 +13,8 @@ const tab = computed(() => props.pane ?? b.active);
 const id = computed(() => tab.value?.id);
 const reading = computed(() => Boolean(id.value && b.reader.id === id.value));
 const waiting = computed(() => Boolean(id.value && b.reader.waiting === id.value));
+const codexAutomatic = computed(() => b.native && id.value === b.active?.id
+  && codexSiteAccess(b.settings.codexAccess, tab.value?.url ?? "") === "automatic");
 const canRead = computed(() => id.value && (reading.value || waiting.value || b.reader.available.includes(id.value)));
 const address = computed(() => isSettingsUrl(tab.value?.url) ? b.t("设置")
   : isHistoryUrl(tab.value?.url) ? b.t("历史记录")
@@ -54,7 +57,10 @@ function act(type: "back" | "forward" | "reload" | "reader") {
       <Icon v-if="!pane" name="settings" :size="13" />
     </button>
     <div class="toolbar-actions" data-window-control>
-      <button v-if="b.codexSharedTab && b.codexSharedTab === id" class="icon-button codex-sharing" type="button"
+      <button v-if="codexAutomatic" class="icon-button codex-sharing" type="button"
+        :aria-label="b.t('管理 Codex 网站访问')" :title="b.t('管理 Codex 网站访问')"
+        @click="b.openSettings('ai-agent')">Codex</button>
+      <button v-else-if="b.codexSharedTab && b.codexSharedTab === id" class="icon-button codex-sharing" type="button"
         :aria-label="b.t('停止与 Codex 共享')" :title="b.t('停止与 Codex 共享')"
         @click="b.send({ type: 'codexStopSharing' })">Codex</button>
       <button v-if="b.native && !b.onboardingOpen" ref="extensionTrigger" type="button" class="icon-button extension-menu-trigger"

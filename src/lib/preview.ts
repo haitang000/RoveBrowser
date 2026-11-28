@@ -5,6 +5,7 @@ import { favorite, MAX_FAVORITES, sameFavoriteUrl } from "./favorites";
 import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, upgradeLibrary } from "./bookmarks";
 import { tabsToDismiss } from "./command";
 import { sameOrigin } from "./favicon";
+import { codexSiteDomain, type CodexAccessChange } from "./codex-access";
 import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type PermissionSettingsPath, type SettingsPane, type Settings } from "./settings";
 import { nowSeconds, tabIsFaded } from "./tab-meta";
 import { cleanIcon } from "./space-icon";
@@ -138,9 +139,22 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
     case "settingsUpdate": {
-      const next = settingsFor(c.settings as Settings);
+      const next = settingsFor({ ...(c.settings as Settings), codexAccess: s.settings?.codexAccess });
       if (next.customSearchTemplate && !validSearchTemplate(next.customSearchTemplate)) throw Error("搜索地址需要包含 %s，并使用有效的 HTTP 或 HTTPS 网址");
       validateShortcuts(next); s.settings = next; break;
+    }
+    case "codexAccessUpdate": {
+      const change = c.change as CodexAccessChange;
+      const next = settingsFor(s.settings);
+      if (change.kind === "allowAll") next.codexAccess.allowAll = change.enabled;
+      else {
+        const site = codexSiteDomain(change.site);
+        if (!site) throw Error("请输入有效的域名或 HTTP(S) 网址。");
+        const others = next.codexAccess[change.list].filter((current) => current !== site);
+        next.codexAccess[change.list] = change.add ? [...others, site] : others;
+      }
+      s.settings = next;
+      break;
     }
     case "spaceReorder": {
       const index = s.spaces.findIndex((space) => space.id === c.id);

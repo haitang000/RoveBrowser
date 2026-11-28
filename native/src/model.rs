@@ -257,6 +257,8 @@ pub enum Command {
     OpenHistory,
     #[serde(rename = "settingsUpdate")]
     UpdateSettings { settings: crate::settings::Settings },
+    #[serde(rename = "codexAccessUpdate")]
+    UpdateCodexAccess { change: crate::codex_access::Change },
     #[serde(rename = "restart")]
     Restart,
     #[serde(rename = "codexShareTab")]
@@ -1231,8 +1233,13 @@ impl State {
                 }
             }
             Command::UpdateSettings { settings } => {
-                let mut next = settings.clone(); next.validate()?; self.settings = next;
+                let mut next = settings.clone();
+                // Codex access changes have their own command so a settings snapshot cannot restore an older grant policy.
+                next.codex_access.clone_from(&self.settings.codex_access);
+                next.validate()?;
+                self.settings = next;
             }
+            Command::UpdateCodexAccess { change } => self.settings.codex_access.apply(change)?,
             Command::UpdateNewTab { settings } => {
                 let mut next = settings.clone(); next.validate()?; self.new_tab = next;
             }

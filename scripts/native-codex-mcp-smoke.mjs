@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium, expect } from "@playwright/test";
 import { createLegacyNativeProfile } from "./native-profile-fixture.mjs";
@@ -146,7 +147,75 @@ try {
   await folder.click();
   await expect(savedRow).toHaveAttribute("data-bookmark-id", bookmarkId);
   await call("rove_shared_tab", {}, /tab_not_shared/);
-  console.log("Rove Codex MCP verified scoped access, revocation, and temporary grouping of regular and pinned tabs.");
+
+  const automaticAccess = { kind: "site", list: "allowlist", site: "127.0.0.1" };
+  await send({ type: "codexAccessUpdate", change: { ...automaticAccess, add: true } });
+  await expect(ui.getByRole("button", { name: "管理 Codex 网站访问", exact: true })).toBeVisible();
+  await expect(agentGroup).toHaveCount(0);
+  const automaticTab = await call("rove_shared_tab");
+  assert.equal(automaticTab.url, url);
+  await expect(agentGroup.locator(`[data-tab-id="${automaticTab.id}"]`)).toBeVisible();
+  await send({ type: "codexAccessUpdate", change: { ...automaticAccess, add: false } });
+  await expect(agentGroup).toHaveCount(0);
+  await call("rove_shared_tab", {}, /tab_not_shared/);
+
+  const allowAll = ui.getByRole("switch", { name: "允许 Codex 访问所有网站" });
+  const allowlist = ui.getByRole("region", { name: "白名单" });
+  const blocklist = ui.getByRole("region", { name: "黑名单" });
+  const localUrl = url.replace("127.0.0.1", "localhost");
+  const openAgentSettings = async () => {
+    await send({ type: "settingsOpen", pane: "ai-agent" });
+    await expect(allowAll).toBeVisible();
+  };
+  const addRule = async (list, site, expected) => {
+    const address = list.getByRole("textbox", { name: "网站地址" });
+    await address.fill(site);
+    await address.press("Enter");
+    await expect(list.getByRole("listitem")).toHaveText(expected);
+  };
+  await openAgentSettings();
+  await expect(allowAll).not.toBeChecked();
+  await allowAll.click();
+  await expect(allowAll).toBeChecked();
+  await addRule(allowlist, localUrl, "localhost");
+  await addRule(blocklist, "localhost", "localhost");
+
+  await send({ type: "new", url });
+  const automaticallyShared = await waitFor(async () => {
+    const shared = await call("rove_shared_tab");
+    return shared.url === url && shared;
+  }, "automatic access to an unlisted site");
+  assert.match((await call("rove_snapshot", { id: automaticallyShared.id })).text, /Shared test page/);
+  await send({ type: "navigate", id: automaticallyShared.id, url: localUrl });
+  await waitFor(async () => {
+    await call("rove_snapshot", { id: automaticallyShared.id }, /site_blocked/);
+    return true;
+  }, "blacklist precedence over both automatic grants");
+  await send({ type: "codexShareTab", id: automaticallyShared.id, url: localUrl });
+  await call("rove_shared_tab", {}, /site_blocked/);
+
+  await openAgentSettings();
+  await allowAll.click();
+  await expect(allowAll).not.toBeChecked();
+  await blocklist.getByRole("button", { name: "移除 localhost" }).click();
+  await expect(blocklist.getByRole("listitem")).toHaveCount(0);
+  await send({ type: "new", url: localUrl });
+  await waitFor(async () => (await call("rove_shared_tab")).url === localUrl, "automatic access to an allowlisted site");
+  await send({ type: "new", url });
+  await waitFor(async () => {
+    await call("rove_shared_tab", {}, /tab_not_shared/);
+    return true;
+  }, "revocation on unlisted sites after disabling global access");
+
+  const db = new DatabaseSync(join(profile, "era.sqlite"), { readOnly: true });
+  try {
+    await waitFor(() => {
+      const saved = JSON.parse(db.prepare("SELECT json FROM session").get().json).settings.codexAccess;
+      assert.deepEqual(saved, { allowAll: false, allowlist: ["localhost"], blocklist: [] });
+      return true;
+    }, "persisted AI Agent settings");
+  } finally { db.close(); }
+  console.log("Rove Codex MCP verified manual and automatic access, blacklist precedence, and saved site rules.");
 } finally {
   helper.stdin.end();
   helper.kill();

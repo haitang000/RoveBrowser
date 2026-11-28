@@ -8,6 +8,7 @@ mod capture;
 mod clipboard;
 mod clip;
 mod chrome_store;
+mod codex_access;
 mod codex_mcp;
 mod downloads;
 mod error_page;

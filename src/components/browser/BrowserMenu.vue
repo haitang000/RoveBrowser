@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useBrowser } from "../../stores/browser";
 import { commandContext } from "../../lib/command";
 import { chromeStoreDetailId } from "../../lib/extensions";
+import { codexSiteAccess } from "../../lib/codex-access";
 import Icon from "../common/Icon.vue";
 import SpaceGlyph from "../common/SpaceGlyph.vue";
 
@@ -13,6 +14,7 @@ const viewport = ref({ width: innerWidth, height: innerHeight });
 const open = computed(() => props.dropTargetsOnly ? props.dropMenuOpen : b.browserMenuOpen);
 const partner = computed(() => commandContext(b.state, b.recent).splitPartner);
 const shareableTab = computed(() => b.active && /^https?:\/\//i.test(b.active.url) && !b.active.loading ? b.active : undefined);
+const codexAccess = computed(() => codexSiteAccess(b.settings.codexAccess, b.active?.url ?? ""));
 const position = computed(() => {
   const anchor = b.browserMenuAnchor;
   const width = Math.min(256, viewport.value.width - 24);
@@ -65,7 +67,8 @@ function installStoreExtension() {
 }
 function shareWithCodex() {
   close(true);
-  if (b.codexSharedTab) b.send({ type: "codexStopSharing" });
+  if (codexAccess.value === "automatic") b.openSettings("ai-agent");
+  else if (b.codexSharedTab) b.send({ type: "codexStopSharing" });
   else if (shareableTab.value) b.send({ type: "codexShareTab", id: shareableTab.value.id, url: shareableTab.value.url });
 }
 function copyCodexConfig() {
@@ -138,10 +141,10 @@ onBeforeUnmount(() => {
             </div>
             <hr role="separator" />
             <div role="group" :aria-label="b.t('工具')">
-              <button v-if="b.native && (shareableTab || b.codexSharedTab)" role="menuitem" tabindex="-1"
-                :title="b.codexSharedTab ? undefined : b.t('Codex 可读取此网页并点击或填写页面元素')" @click="shareWithCodex">
-                <Icon :name="b.codexSharedTab ? 'stop' : 'extension'" :size="16" />
-                <span>{{ b.t(b.codexSharedTab ? '停止与 Codex 共享' : '允许 Codex 使用此标签页') }}</span>
+              <button v-if="b.native && codexAccess !== 'blocked' && (shareableTab || b.codexSharedTab)" role="menuitem" tabindex="-1"
+                :title="codexAccess === 'manual' && !b.codexSharedTab ? b.t('Codex 可读取此网页并点击或填写页面元素') : undefined" @click="shareWithCodex">
+                <Icon :name="codexAccess === 'automatic' ? 'agent' : b.codexSharedTab ? 'stop' : 'extension'" :size="16" />
+                <span>{{ b.t(codexAccess === 'automatic' ? '管理 Codex 网站访问' : b.codexSharedTab ? '停止与 Codex 共享' : '允许 Codex 使用此标签页') }}</span>
               </button>
               <button v-if="b.native" role="menuitem" tabindex="-1" @click="copyCodexConfig">
                 <Icon name="copy" :size="16" /><span>{{ b.t('复制 Codex MCP 配置') }}</span>

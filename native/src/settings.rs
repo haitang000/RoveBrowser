@@ -76,6 +76,7 @@ pub struct Settings {
     pub secure_dns: bool,
     pub web_rtc_address_protection: bool,
     pub devtools_mcp: bool,
+    pub codex_access: crate::codex_access::CodexAccess,
     /// Zigzag `TabSleep`: background pages nobody has seen for a while give
     /// their memory back. On unless the user turns it off.
     pub sleep_tabs: bool,
@@ -108,6 +109,7 @@ impl Default for Settings {
             secure_dns: true,
             web_rtc_address_protection: false,
             devtools_mcp: false,
+            codex_access: crate::codex_access::CodexAccess::default(),
             sleep_tabs: true,
             download_folder: String::new(),
             update_channel: "preview".into(),
@@ -142,7 +144,7 @@ pub fn settings_url(pane: Option<&str>) -> String {
             | "privacy/permissions/screen"
         )) => format!("rove://settings/{p}"),
         Some(
-            p @ ("appearance" | "spaces" | "passwords" | "privacy" | "translation" | "accessibility" | "extensions" | "experimental" | "shortcuts" | "about"),
+            p @ ("appearance" | "spaces" | "passwords" | "privacy" | "ai-agent" | "translation" | "accessibility" | "extensions" | "experimental" | "shortcuts" | "about"),
         ) => format!("rove://settings/{p}"),
         _ => "rove://settings".into(),
     }
@@ -206,6 +208,7 @@ impl Settings {
     }
     pub fn validate(&mut self) -> Result<(), String> {
         self.normalize_choices();
+        self.codex_access.normalize();
         if ![
             "google",
             "duckDuckGo",

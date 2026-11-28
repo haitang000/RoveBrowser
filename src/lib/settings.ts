@@ -2,6 +2,7 @@
 // Copyright 2026 Zigao Wang. Apache-2.0; adapted for Windows and Vue.
 import { DEFAULT_INTERFACE_LANGUAGE, interfaceLanguage, type InterfaceLanguage } from "./language";
 import { permissionKinds, sitePermissionOrder, type PermissionDefault, type PermissionKind } from "./permissions";
+import type { CodexAccess } from "./codex-access";
 
 export const SETTINGS_PANES = [
   {
@@ -33,6 +34,12 @@ export const SETTINGS_PANES = [
     title: "隐私",
     icon: "shield",
     keywords: "privacy 历史 cookies 缓存",
+  },
+  {
+    id: "ai-agent",
+    title: "AI Agent",
+    icon: "agent",
+    keywords: "codex website access whitelist blacklist allowlist blocklist 网站访问",
   },
   {
     id: "translation",
@@ -188,6 +195,7 @@ export interface Settings {
   secureDns: boolean;
   webRtcAddressProtection: boolean;
   devtoolsMcp: boolean;
+  codexAccess: CodexAccess;
   /** Background pages give their memory back after a while, as Zigzag's TabSleep. */
   sleepTabs: boolean;
   downloadFolder: string;
@@ -216,6 +224,7 @@ export const defaultSettings = (): Settings => ({
   secureDns: true,
   webRtcAddressProtection: false,
   devtoolsMcp: false,
+  codexAccess: { allowAll: false, allowlist: [], blocklist: [] },
   sleepTabs: true,
   downloadFolder: "",
   updateChannel: "preview",
@@ -233,6 +242,7 @@ export function updateChannelDetail(channel: UpdateChannel): string {
 }
 export function settingsFor(value?: Partial<Settings>): Settings {
   const settings = { ...defaultSettings(), ...value };
+  settings.codexAccess = { allowAll: false, allowlist: [], blocklist: [], ...value?.codexAccess };
   if (settings.trackingProtection !== "basic" && settings.trackingProtection !== "strict") {
     settings.trackingProtection = "balanced";
   }
