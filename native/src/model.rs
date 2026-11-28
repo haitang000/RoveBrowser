@@ -120,6 +120,26 @@ pub struct Favorite {
 pub fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub(crate) struct SplitRatio {
+    left: String,
+    right: String,
+    ratio: f64,
+}
+
+impl SplitRatio {
+    fn ratio_for(&self, left: &str, right: &str) -> Option<f64> {
+        if self.left == left && self.right == right {
+            Some(self.ratio)
+        } else if self.left == right && self.right == left {
+            Some(1. - self.ratio)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
@@ -149,6 +169,9 @@ pub struct State {
     pub sidebar_hidden: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_width: Option<f64>,
+    /// A preferred share belongs to the live pair and follows its panes on swap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) split_ratios: Vec<SplitRatio>,
     #[serde(default)]
     pub settings: crate::settings::Settings,
     #[serde(default)]
@@ -505,6 +528,8 @@ pub enum Command {
     SidebarWidth { width: Option<f64> },
     #[serde(rename = "split")]
     Split { id: String, other: String },
+    #[serde(rename = "splitRatio")]
+    SplitRatio { id: String, other: String, ratio: f64 },
     #[serde(rename = "swapSplit")]
     SwapSplit { id: String, other: String },
     #[serde(rename = "unsplit")]
@@ -840,6 +865,7 @@ impl Default for State {
             sidebar_collapsed: false,
             sidebar_hidden: false,
             sidebar_width: None,
+            split_ratios: Vec::new(),
             settings: crate::settings::Settings::default(),
             new_tab: crate::new_tab::NewTab::default(),
             borderless: true,
@@ -863,6 +889,50 @@ impl Default for State {
 impl State {
     pub fn active(&self) -> Option<&Tab> {
         self.tabs.iter().find(|t| t.id == self.active_tab)
+    }
+    pub fn split_ratio(&self, left: &str, right: &str) -> f64 {
+        self.split_ratios
+            .iter()
+            .find_map(|item| item.ratio_for(left, right))
+            .unwrap_or(0.5)
+    }
+    pub fn active_split_ratio(&self) -> f64 {
+        self.active()
+            .and_then(|tab| tab.split_with.as_deref())
+            .map_or(0.5, |right| self.split_ratio(&self.active_tab, right))
+    }
+    fn has_split(tabs: &[Tab], left: &str, right: &str) -> bool {
+        left != right
+            && tabs.iter()
+                .find(|tab| tab.id == left)
+                .zip(tabs.iter().find(|tab| tab.id == right))
+                .is_some_and(|(a, b)| {
+                    a.split_with.as_deref() == Some(right) || b.split_with.as_deref() == Some(left)
+                })
+    }
+    pub fn set_split_ratio(&mut self, left: &str, right: &str, ratio: f64) -> bool {
+        if !ratio.is_finite() || !Self::has_split(&self.tabs, left, right) {
+            return false;
+        }
+        let ratio = crate::layout::normalize_split_ratio(ratio);
+        if (self.split_ratio(left, right) - ratio).abs() < 1e-9 {
+            return false;
+        }
+        if let Some(item) = self.split_ratios.iter_mut()
+            .find(|item| item.ratio_for(left, right).is_some())
+        {
+            item.ratio = if item.left == left { ratio } else { 1. - ratio };
+        } else {
+            self.split_ratios.push(SplitRatio {
+                left: left.into(),
+                right: right.into(),
+                ratio,
+            });
+        }
+        true
+    }
+    fn retain_split_ratios(&mut self) {
+        self.split_ratios.retain(|item| Self::has_split(&self.tabs, &item.left, &item.right));
     }
     pub fn visible_tab(&self, id: &str) -> bool {
         self.active().is_some_and(|tab| tab.id == id || tab.split_with.as_deref() == Some(id))
@@ -1136,6 +1206,7 @@ impl State {
                 }
             }
         }
+        self.retain_split_ratios();
         self.remember_active();
     }
     pub fn repair(&mut self) {
@@ -1192,6 +1263,13 @@ impl State {
                 t.split_with = None
             }
         }
+        self.split_ratios.retain_mut(|item| {
+            if !item.ratio.is_finite() {
+                return false;
+            }
+            item.ratio = crate::layout::normalize_split_ratio(item.ratio);
+            Self::has_split(&self.tabs, &item.left, &item.right)
+        });
         if let Some(t) = self.active().cloned() {
             self.active_space = t.space_id
         } else {
@@ -1202,6 +1280,7 @@ impl State {
     pub fn apply(&mut self, c: &Command) -> Result<(), String> {
         if self.apply_pin_folder_command(c)? || self.apply_bookmark_command(c)? {
             self.sync_pin_layouts();
+            self.retain_split_ratios();
             self.remember_active();
             return Ok(());
         }
@@ -1526,6 +1605,7 @@ impl State {
             }
             _ => {}
         }
+        self.retain_split_ratios();
         self.remember_active();
         Ok(())
     }

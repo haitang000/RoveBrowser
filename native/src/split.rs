@@ -24,7 +24,6 @@ use windows::{
     },
 };
 const SUBCLASS: usize = 0x53504c54;
-pub const MINIMUM_PANE_WIDTH: f64 = 260.;
 const DRAG_THRESHOLD: f64 = 4.;
 
 /// Keep the visible edges and the renderer dimensions in one shared cache.
@@ -161,17 +160,11 @@ impl Layout {
     }
     /// Zigzag: a 20–80% share, at least 260 points per pane, equal halves when
     /// the available width cannot fit those minima. Round once, share the seam.
-    fn resized(self, x: f64) -> Self {
+    fn resized(self, x: f64) -> (Self, f64) {
         let width = self.width();
-        let floor = 0.2_f64.max(MINIMUM_PANE_WIDTH / width.max(1.));
-        let ceiling = 0.8_f64.min(1. - floor);
-        let ratio = if floor < ceiling {
-            ((x - self.primary.x) / width).clamp(floor, ceiling)
-        } else {
-            0.5
-        };
+        let ratio = crate::layout::clamp_split_ratio((x - self.primary.x) / width.max(1.), width);
         let left_width = (width * ratio).floor();
-        Self {
+        let layout = Self {
             primary: Rect {
                 width: left_width,
                 ..self.primary
@@ -181,7 +174,8 @@ impl Layout {
                 width: width - left_width,
                 ..self.secondary
             },
-        }
+        };
+        (layout, ratio)
     }
 }
 #[derive(Clone)]
@@ -198,6 +192,7 @@ pub struct Update {
     pub other: String,
     pub layout: Layout,
     pub resizing: bool,
+    pub committed_ratio: Option<f64>,
     pub error: Option<String>,
 }
 #[derive(Debug, PartialEq, Eq)]
@@ -218,6 +213,7 @@ struct State {
     dragging: Cell<bool>,
     busy: Cell<bool>,
     grab_offset: Cell<f64>,
+    changed_ratio: Cell<Option<f64>>,
 }
 pub struct SplitHandle {
     state: Box<State>,
@@ -242,6 +238,7 @@ impl SplitHandle {
             dragging: Cell::new(false),
             busy: Cell::new(false),
             grab_offset: Cell::new(0.),
+            changed_ratio: Cell::new(None),
         });
         // The native strip owns pointer input. The shell draws the themed guide.
         let hwnd = unsafe {
@@ -353,6 +350,7 @@ fn report(s: &State, config: &Config, resizing: bool, error: Option<String>) {
         other: config.other.clone(),
         layout: config.layout,
         resizing,
+        committed_ratio: if resizing { None } else { s.changed_ratio.take() },
         error,
     });
     if previous.is_none() {
@@ -394,8 +392,9 @@ fn move_to(s: &State, x: f64) {
     }
     let config = s.config.borrow().clone();
     if let Some(mut config) = config {
-        let next = config.layout.resized(x - s.grab_offset.get());
+        let (next, ratio) = config.layout.resized(x - s.grab_offset.get());
         if next.primary.width != config.layout.primary.width {
+            s.changed_ratio.set(Some(ratio));
             config.layout = next;
             *s.config.borrow_mut() = Some(config.clone());
             let error = apply(s, &config).err().map(|e| e.to_string());
@@ -415,6 +414,7 @@ fn drag(s: &State, point: POINT) {
         }
         let x = root_point(s, pressed).x as f64 / config.scale;
         s.grab_offset.set(x - config.layout.primary.x - config.layout.primary.width);
+        s.changed_ratio.set(None);
         s.dragging.set(true);
         report(s, &config, true, None);
     }
@@ -555,7 +555,7 @@ mod tests {
             },
         };
         for x in [-500., 241., 700.3, 1271., 3000.] {
-            let next = layout.resized(x);
+            let (next, _) = layout.resized(x);
             assert!(next.primary.width >= 260. && next.secondary.width >= 260.);
             assert_eq!(next.gap(), 8.);
             assert_eq!(next.secondary.x + next.secondary.width, 1271.);
@@ -572,8 +572,8 @@ mod tests {
                 ..layout.secondary
             },
         };
-        assert_eq!(narrow.resized(-500.).ratio(), 0.5);
-        assert_eq!(narrow.resized(3000.).ratio(), 0.5);
+        assert_eq!(narrow.resized(-500.).0.ratio(), 0.5);
+        assert_eq!(narrow.resized(3000.).0.ratio(), 0.5);
     }
     #[test]
     fn native_mouse_capture_updates_frames_before_shell_feedback_and_cancels() {
@@ -683,7 +683,9 @@ mod tests {
             );
         }
         assert!(handle.dragging());
-        assert!(handle.take_update().unwrap().resizing);
+        let live_update = handle.take_update().unwrap();
+        assert!(live_update.resizing);
+        assert_eq!(live_update.committed_ratio, None);
         // Config changed inside the mouse callback, before the app handles any
         // notification and without a UI renderer or IPC handler in this test.
         assert_eq!(
@@ -740,6 +742,7 @@ mod tests {
         let final_update = handle.take_update().unwrap();
         assert!(!final_update.resizing);
         assert_eq!(final_update.layout.primary.width, 260.);
+        assert_eq!(final_update.committed_ratio, Some(260. / 1022.));
         unsafe {
             SendMessageW(hwnd, WM_MOUSEMOVE, None, Some(point(1)));
         }

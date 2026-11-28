@@ -85,6 +85,52 @@ impl Storage {
 mod tests {
     use super::*;
     use crate::model::Command;
+
+    #[test]
+    fn split_ratios_upgrade_legacy_sessions_and_follow_each_pair_after_restart() {
+        let path = std::env::temp_dir().join(format!("rove-split-{}", uuid::Uuid::new_v4()));
+        let (left, right, other_left, other_right);
+        {
+            let db = Storage::open(&path).unwrap();
+            let mut state = State::default();
+            left = state.active_tab.clone();
+            state.new_tab("https://left.example").unwrap();
+            right = state.active_tab.clone();
+            state.apply(&Command::Split { id: left.clone(), other: right.clone() }).unwrap();
+            state.new_tab("https://work.example").unwrap();
+            other_left = state.active_tab.clone();
+            state.new_tab("https://personal.example").unwrap();
+            other_right = state.active_tab.clone();
+            state.apply(&Command::Split { id: other_left.clone(), other: other_right.clone() }).unwrap();
+            let legacy = serde_json::to_value(&state).unwrap();
+            assert!(legacy.get("splitRatios").is_none());
+            db.save(&state).unwrap();
+            let mut state = db.load().unwrap();
+            assert_eq!(state.split_ratio(&left, &right), 0.5);
+            assert_eq!(state.active_split_ratio(), 0.5);
+            assert!(state.set_split_ratio(&left, &right, 0.625));
+            assert!(state.set_split_ratio(&other_left, &other_right, 0.375));
+            assert!(!state.set_split_ratio(&left, &other_left, 0.6));
+            state.activate(&left);
+            state.apply(&Command::SwapSplit { id: left.clone(), other: right.clone() }).unwrap();
+            assert_eq!(state.active_tab, right);
+            db.save(&state).unwrap();
+        }
+        {
+            let db = Storage::open(&path).unwrap();
+            let mut state = db.load().unwrap();
+            assert_eq!(state.active_tab, right);
+            assert_eq!(state.active_split_ratio(), 0.375);
+            assert_eq!(state.split_ratio(&left, &right), 0.625);
+            assert_eq!(state.split_ratio(&other_left, &other_right), 0.375);
+            state.apply(&Command::Unsplit).unwrap();
+            state.apply(&Command::Split { id: right.clone(), other: left.clone() }).unwrap();
+            assert_eq!(state.active_split_ratio(), 0.5);
+            assert_eq!(state.split_ratio(&other_left, &other_right), 0.375);
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn new_tab_upgrades_and_persists_widgets_across_restart() {
         let path = std::env::temp_dir().join(format!("rove-new-tab-{}", uuid::Uuid::new_v4()));

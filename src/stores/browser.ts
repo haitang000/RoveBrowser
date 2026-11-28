@@ -44,7 +44,7 @@ export const useBrowser = defineStore("browser", () => {
   const permissionPrompt = ref<PermissionPrompt>();
   const permissionTabs = ref(new Set<string>());
   const permissionRules = ref<PermissionRule[]>([]);
-  const splitResize = ref<{ ratio: number; resizing: boolean }>();
+  const splitResize = ref<{ id: string; other: string; ratio: number; resizing: boolean; preferredRatio?: number }>();
   const splitHovered = ref(false);
   const splitClick = ref(0);
   const splitControls = ref<{ x: number; y: number; gap: number; id: string; other: string }>();
@@ -841,8 +841,11 @@ export const useBrowser = defineStore("browser", () => {
     if (e.type === "codexSharing") codexSharedTab.value = e.id ?? undefined;
     if (e.type === "sidebarResize" && typeof e.width === "number" && Number.isFinite(e.width))
       sidebarResize.value = { width: e.width, resizing: Boolean(e.resizing), reset: Boolean(e.reset) };
-    if (e.type === "splitResize" && typeof e.ratio === "number" && Number.isFinite(e.ratio))
-      splitResize.value = { ratio: e.ratio, resizing: Boolean(e.resizing) };
+    if (e.type === "splitResize" && e.id && e.other && typeof e.ratio === "number" && Number.isFinite(e.ratio))
+      splitResize.value = {
+        id: e.id, other: e.other, ratio: e.ratio, resizing: Boolean(e.resizing),
+        preferredRatio: e.preferredRatio ?? undefined,
+      };
     if (e.type === "splitHover") splitHovered.value = Boolean(e.visible);
     if (e.type === "splitClick") splitClick.value++;
     if (e.type === "tabPreviewPresented" && e.ticket !== undefined) previewPresentedTicket.value = e.ticket;

@@ -3157,7 +3157,8 @@ impl App {
                 .map(|(rect, viewport)| crate::sidebar::Config {
                     id: self.state.active_tab.clone(), other: second.cloned(),
                     primary: self.primary, secondary: self.secondary, handle: rect,
-                    preferred: self.state.sidebar_width, viewport, scale: window.scale_factor(),
+                    preferred: self.state.sidebar_width, split_ratio: self.state.active_split_ratio(),
+                    viewport, scale: window.scale_factor(),
                     left: self.pages.get(&self.state.active_tab).map(Page::split_pane),
                     right: second.and_then(|id| self.pages.get(id)).map(Page::split_pane),
                 });
@@ -3167,6 +3168,12 @@ impl App {
     }
     fn receive_split_resize(&mut self) {
         let Some(update) = self.split_handle.as_ref().and_then(|handle| handle.take_update()) else { return; };
+        if let Some(ratio) = update.committed_ratio {
+            if self.state.set_split_ratio(&update.id, &update.other, ratio) {
+                self.save();
+                self.publish();
+            }
+        }
         // A tab switch, close or a new split can invalidate a queued update.
         // Never apply the previous pair's dimensions to the new page.
         if update.id != self.state.active_tab || self.state.active().and_then(|t| t.split_with.as_ref()) != Some(&update.other) {
@@ -3179,7 +3186,11 @@ impl App {
         // The mouse callback already resized the pages. This only updates the
         // shell headers and drag decoration, without another renderer round trip.
         if let Some(ui) = &self.ui {
-            let event = json!({ "type": "splitResize", "ratio": update.layout.ratio(), "resizing": update.resizing });
+            let event = json!({
+                "type": "splitResize", "id": update.id, "other": update.other,
+                "ratio": update.layout.ratio(), "resizing": update.resizing,
+                "preferredRatio": (!update.resizing).then(|| self.state.active_split_ratio()),
+            });
             let _ = ui.evaluate_script(&format!("window.__ERA_RECEIVE__?.({event})"));
         }
         if let Some(error) = update.error { self.error(error); }
@@ -3234,7 +3245,6 @@ impl App {
             self.error(error);
         }
         self.save();
-        self.emit(json!({"type":"splitResize", "ratio":swapped.ratio(), "resizing":false}));
         self.publish();
         self.sync_layout()?;
         self.emit_active_zoom();
@@ -4977,6 +4987,13 @@ impl App {
                 }
                 return;
             }
+            Command::SplitRatio { id, other, ratio } => {
+                if self.state.set_split_ratio(&id, &other, ratio) {
+                    self.save();
+                    self.publish();
+                }
+                return;
+            }
             Command::SwapSplit { id, other } => {
                 if let Err(error) = self.swap_split(&id, &other) { self.error(error); }
                 return;
@@ -6284,6 +6301,7 @@ impl ApplicationHandler<Event> for App {
                             (self.primary, self.secondary) = crate::layout::resized(
                                 self.primary, self.secondary, previous, current,
                                 self.state.sidebar_width, self.state.sidebar_collapsed,
+                                self.state.active_split_ratio(),
                             );
                         }
                         self.layout_viewport = Some(current);

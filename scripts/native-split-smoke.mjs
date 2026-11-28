@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { createLegacyNativeProfile } from './native-profile-fixture.mjs';
 import { chromium } from '@playwright/test';
 import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { access, mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { DatabaseSync } from 'node:sqlite';
 import { checkSplitResize } from './native-split-checks.mjs';
 
 const profile = await mkdtemp(join(tmpdir(), 'rove-split-'));
@@ -38,27 +40,39 @@ async function waitFor(fn, label) {
   }
   throw Error('Timed out: ' + label);
 }
-let child, uiBrowser, pageBrowser;
-try {
+let child, uiBrowser, pageBrowser, ui;
+async function launch() {
   child = spawn(resolve(process.env.ERA_SMOKE_EXE || 'native/target/debug/rove.exe'), [], {
     env: { ...process.env, ERA_DATA_DIR: profile, ERA_DEBUG_PORT: String(port) },
     windowsHide: true, stdio: 'pipe',
   });
   child.stderr.on('data', data => process.stderr.write(data));
   uiBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port}`), 'UI debugger');
-  const ui = await waitFor(() => uiBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === 'https://era.ui/index.html'), 'shell');
+  ui = await waitFor(() => uiBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === 'https://era.ui/index.html'), 'shell');
   await ui.waitForSelector('.sidebar');
-  const send = command => ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
-  await send({ type: 'navigate', url: base + '/left' });
-  pageBrowser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port + 1}`), 'page debugger');
-  const site = path => waitFor(() => pageBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === base + path), path);
-  const left = await site('/left'); await left.waitForSelector('h1');
-  const leftId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
-  await send({ type: 'new', url: base + '/right' });
-  const right = await site('/right'); await right.waitForSelector('h1');
-  const rightId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
-  await send({ type: 'activate', id: leftId });
-  await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id')) === leftId, 'primary activation');
+}
+async function stop() {
+  const exited = child && child.exitCode === null && child.signalCode === null && once(child, 'exit');
+  if (exited) child.kill();
+  await exited;
+  await pageBrowser?.close().catch(() => {});
+  await uiBrowser?.close().catch(() => {});
+  child = uiBrowser = pageBrowser = undefined;
+}
+function savedState() {
+  const db = new DatabaseSync(join(profile, 'era.sqlite'), { readOnly: true });
+  try { return JSON.parse(db.prepare('SELECT json FROM session WHERE id=1').get().json); }
+  finally { db.close(); }
+}
+function savedRatio(left, right) {
+  const pair = savedState().splitRatios?.find(pair =>
+    pair.left === left && pair.right === right || pair.left === right && pair.right === left);
+  return pair && (pair.left === left ? pair.ratio : 1 - pair.ratio);
+}
+const send = command => ui.evaluate(command => window.ipc.postMessage(JSON.stringify(command)), command);
+const connectPages = () => waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${port + 1}`), 'page debugger');
+const site = path => waitFor(() => pageBrowser.contexts().flatMap(c => c.pages()).find(p => p.url() === base + path), path);
+async function splitByDrag(left, rightId) {
   const from = await ui.locator(`.tab-list [data-tab-id="${rightId}"]`).boundingBox();
   const area = await ui.locator('.page-area').boundingBox();
   const viewport = await ui.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -88,11 +102,30 @@ try {
   await tabDropInput('drag-tab');
   await ui.locator('.split-divider').waitFor({ timeout: 5000 });
   await ui.locator('.split-drop-target').waitFor({ state: 'detached' });
+  assert.equal(await left.evaluate(() => window.tabDropMarker), marker, 'dragging keeps the live page document');
+}
+try {
+  await launch();
+  await send({ type: 'navigate', url: base + '/left' });
+  pageBrowser = await connectPages();
+  const left = await site('/left'); await left.waitForSelector('h1');
+  const leftId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
+  await send({ type: 'new', url: base + '/right' });
+  const right = await site('/right'); await right.waitForSelector('h1');
+  const rightId = await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id');
+  await send({ type: 'activate', id: leftId });
+  await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id')) === leftId, 'primary activation');
+  // Allow the viewport and restart checks to run without taking desktop focus.
+  if (process.env.ERA_SMOKE_IPC_SPLIT === '1') {
+    await send({ type: 'split', id: leftId, other: rightId });
+    await ui.locator('.split-divider').waitFor();
+  } else {
+    await splitByDrag(left, rightId);
+  }
   const splitTab = ui.getByRole('tab', { name: '分屏：Left split fixture / Right split fixture', selected: true });
   await splitTab.waitFor();
   assert.equal(await splitTab.locator('.tab-close').count(), 1);
   assert.equal(await ui.locator('.tab-list').getByRole('tab', { name: 'Right split fixture', exact: true }).count(), 0);
-  assert.equal(await left.evaluate(() => window.tabDropMarker), marker, 'dragging keeps the live page document');
   const widths = await ui.locator('.webview-slot').evaluateAll(slots => slots.map(slot => slot.getBoundingClientRect().width));
   await waitFor(async () => {
     const viewports = await Promise.all([left, right].map(page => page.evaluate(() => innerWidth)));
@@ -135,6 +168,31 @@ try {
   await rightPane.getByRole('button', { name: '刷新' }).click();
   await waitFor(() => hits['/right-next'] > reloads, 'right pane refresh');
   assert.equal(hits['/left'], leftLoads);
+
+  const draggedRatio = await waitFor(() => savedRatio(leftId, rightId), 'drag ratio written to SQLite');
+  const key = draggedRatio >= 0.5 ? 'ArrowLeft' : 'ArrowRight';
+  const expected = draggedRatio + (key === 'ArrowRight' ? 0.05 : -0.05);
+  await ui.locator('.split-divider').press(key);
+  await waitFor(() => Math.abs(savedRatio(leftId, rightId) - expected) < 0.001, 'keyboard ratio written to SQLite');
+  await send({ type: 'swapSplit', id: leftId, other: rightId });
+  await waitFor(async () => (await ui.getByRole('tab', { selected: true }).getAttribute('data-tab-id')) === rightId, 'split swapped');
+  await waitFor(() => savedState().activeTab === rightId, 'swapped order written to SQLite');
+  await stop();
+  await launch();
+  pageBrowser = await connectPages();
+  const restoredPanes = await Promise.all([site('/right-next'), site('/left')]);
+  await ui.locator('.split-divider').waitFor();
+  const verifyPaneRatio = label => waitFor(async () => {
+    const slots = await ui.locator('.webview-slot').evaluateAll(slots => slots.map(slot => slot.getBoundingClientRect().width));
+    if (Math.abs(slots[0] / (slots[0] + slots[1]) - (1 - expected)) >= 0.003) return false;
+    const widths = await Promise.all(restoredPanes.map(page => page.evaluate(() => innerWidth)));
+    return widths.every((width, index) => Math.abs(width - slots[index]) <= 1);
+  }, label);
+  await verifyPaneRatio('relaunch applies the swapped proportions to both WebView2 viewports');
+  await send({ type: 'sidebarWidth', width: 420 });
+  await waitFor(async () => await ui.locator('.sidebar-track').evaluate(track =>
+    track.getBoundingClientRect().width) === 420, 'sidebar adjusted');
+  await verifyPaneRatio('sidebar width changes preserve the restored WebView2 proportions');
   await ui.getByRole('button', { name: '关闭分屏' }).click();
   await ui.locator('.titlebar').waitFor();
   const report = { passed: true, profile, hits, ...metrics };
@@ -142,5 +200,6 @@ try {
   await writeFile(join(output, 'result.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
 } finally {
-  await pageBrowser?.close(); await uiBrowser?.close(); child?.kill(); server.close();
+  await stop();
+  server.close();
 }

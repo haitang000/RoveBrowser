@@ -27,6 +27,22 @@ fn sidebar(viewport: Viewport, preferred: Option<f64>) -> f64 {
     width.min((viewport.width - 248.).clamp(192., 480.))
 }
 
+const MIN_SPLIT_RATIO: f64 = 0.2;
+const MIN_PANE_WIDTH: f64 = 260.;
+
+pub(crate) fn normalize_split_ratio(ratio: f64) -> f64 {
+    ratio.clamp(MIN_SPLIT_RATIO, 1. - MIN_SPLIT_RATIO)
+}
+
+pub(crate) fn clamp_split_ratio(ratio: f64, width: f64) -> f64 {
+    let minimum = MIN_SPLIT_RATIO.max(MIN_PANE_WIDTH / width.max(1.)).min(0.5);
+    ratio.clamp(minimum, 1. - minimum)
+}
+
+pub(crate) fn split_left_width(ratio: f64, width: f64) -> f64 {
+    (width * clamp_split_ratio(ratio, width)).floor()
+}
+
 /// Preserve the DOM's borders, caption/header heights, split share and gap.
 /// Only the flex dimensions change. The next current-viewport DOM report remains
 /// authoritative for transitions and changes to the shell's appearance.
@@ -37,6 +53,7 @@ pub fn resized(
     current: Viewport,
     preferred_sidebar: Option<f64>,
     collapsed: bool,
+    split_ratio: f64,
 ) -> (Rect, Option<Rect>) {
     let dx = if collapsed {
         0.
@@ -52,9 +69,8 @@ pub fn resized(
     };
     let right = if let Some(right) = secondary {
         let gap = right.x - primary.x - primary.width;
-        let total = primary.width + right.width;
-        let width = (total + dw).max(0.);
-        left.width = width * (primary.width / total.max(1.));
+        let width = (primary.width + right.width + dw).max(0.);
+        left.width = split_left_width(split_ratio, width);
         Some(Rect {
             x: left.x + left.width + gap,
             width: width - left.width,
@@ -89,14 +105,14 @@ mod tests {
             width: 700.,
             height: 600.,
         };
-        let (next, second) = resized(page, None, old, small, None, false);
+        let (next, second) = resized(page, None, old, small, None, false, 0.5);
         assert!(second.is_none());
         assert_eq!(
             (next.x, next.y, next.width, next.height),
             (217., 39., 474., 552.)
         );
         assert_eq!(next.corners, page.corners);
-        let (restored, _) = resized(next, None, small, old, None, false);
+        let (restored, _) = resized(next, None, small, old, None, false, 0.5);
         assert_eq!(
             (restored.x, restored.width, restored.height),
             (page.x, page.width, page.height)
@@ -125,14 +141,15 @@ mod tests {
             width: 482.,
             ..left
         };
-        let (a, b) = resized(left, Some(right), old, small, Some(480.), false);
+        let preference = left.width / (left.width + right.width);
+        let (a, b) = resized(left, Some(right), old, small, Some(480.), false, preference);
         let b = b.unwrap();
         assert_eq!(a.x, 233.);
         assert!((b.x - a.x - a.width - 8.).abs() < 0.001);
         assert!((b.x + b.width - 471.).abs() < 0.001);
-        assert!((a.width / b.width - left.width / right.width).abs() < 0.001);
+        assert!((a.width - b.width).abs() <= 1.);
         assert_eq!((a.y, a.height, b.height), (69., 322., 322.));
-        let (a, b) = resized(a, Some(b), small, old, Some(480.), false);
+        let (a, b) = resized(a, Some(b), small, old, Some(480.), false, preference);
         assert_eq!(a.x, left.x);
         assert!((b.unwrap().width - right.width).abs() < 0.001);
     }
@@ -158,6 +175,7 @@ mod tests {
             },
             None,
             true,
+            0.5,
         );
         assert_eq!((next.x, next.width, next.height), (9., 462., 352.));
     }

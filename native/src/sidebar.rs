@@ -28,6 +28,7 @@ pub struct Config {
     pub secondary: Option<Rect>,
     pub handle: Rect,
     pub preferred: Option<f64>,
+    pub split_ratio: f64,
     pub viewport: Viewport,
     pub scale: f64,
     pub left: Option<Pane>,
@@ -49,7 +50,7 @@ impl Config {
             let total = self.primary.width + right.width;
             let available = (total - dx).max(0.);
             let gap = right.x - self.primary.x - self.primary.width;
-            next.primary.width = available * self.primary.width / total.max(1.);
+            next.primary.width = crate::layout::split_left_width(self.split_ratio, available);
             next.secondary = Some(Rect {
                 x: next.primary.x + next.primary.width + gap,
                 width: available - next.primary.width,
@@ -470,6 +471,7 @@ mod tests {
             other: Some("right".into()),
             scale,
             preferred: None,
+            split_ratio: 0.5,
             viewport: Viewport {
                 width: 1280.,
                 height: 820.,

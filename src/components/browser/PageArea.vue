@@ -19,6 +19,7 @@ import SplitControls from "./SplitControls.vue";
 import { isSettingsUrl } from "../../lib/settings";
 import { isHistoryUrl } from "../../lib/address";
 import { pageDirection, type PageDirection } from "../../lib/page-motion";
+import { clampSplitRatio, splitRatio } from "../../lib/split-layout";
 const SettingsPage = defineAsyncComponent(() => import("./SettingsPage.vue"));
 const HistoryPage = defineAsyncComponent(() => import("./HistoryPage.vue"));
 const b = useBrowser(),
@@ -29,20 +30,22 @@ const b = useBrowser(),
   divider = ref<HTMLElement>(),
   container = ref<HTMLElement>(),
   ratio = ref(0.5),
+  preferredRatio = ref(0.5),
   resizing = ref(false),
   swapping = ref(false),
   sidebarMotion = ref(false);
 const other = computed(() => b.splitPartner);
 let ro: ResizeObserver;
-let finishResize: (() => void) | undefined;
+let finishResize: ((commit?: boolean) => void) | undefined;
 let paneAnimations: Animation[] = [];
 let reported: { primary: Rect; secondary: Rect | null; sidebar: Rect | null } | undefined;
 // Zigzag's native ResizeHandle owns the real frames while dragging. This event
 // only keeps the shell headers and fallback content in step with native input.
 watch(() => b.splitResize, (update) => {
-  if (!update) return;
+  if (!update || update.id !== b.active?.id || update.other !== other.value?.id) return;
   resizing.value = update.resizing;
-  ratio.value = update.ratio;
+  if (update.resizing) displayRatio(update.ratio);
+  else if (update.preferredRatio !== undefined) preferredRatio.value = update.preferredRatio;
 });
 watch([() => b.active?.id, () => b.active?.splitWith], ([left, right], [previousLeft, previousRight]) => {
   finishResize?.();
@@ -55,7 +58,6 @@ watch([() => b.active?.id, () => b.active?.splitWith], ([left, right], [previous
   paneAnimations = [];
   swapping.value = swap;
   if (!swap) return;
-  if (!b.native) ratio.value = 1 - ratio.value;
   void nextTick(() => {
     if (b.active?.id !== left || other.value?.id !== right) return;
     swapping.value = false;
@@ -76,6 +78,10 @@ watch([() => b.active?.id, () => b.active?.splitWith], ([left, right], [previous
     });
   });
 });
+const savedRatio = computed(() => splitRatio(b.state, b.active?.id, other.value?.id));
+watch([() => b.active?.id, () => other.value?.id, savedRatio], ([, , value]) => {
+  preferredRatio.value = value;
+}, { immediate: true });
 watch([resizing, () => b.overlay, () => b.peek, () => b.sidebarResizing], ([dragging, overlay, peek, sidebar]) => {
   if (dragging || overlay || peek || sidebar) b.splitControls = undefined;
 });
@@ -118,11 +124,36 @@ watch(
     if (dir !== undefined) secondaryDir.value = dir;
   },
 );
+function availableSplitWidth() {
+  return (container.value?.clientWidth ?? 0) - (divider.value?.offsetWidth ?? 0);
+}
+function displayRatio(value: number) {
+  if (value === ratio.value) return;
+  ratio.value = value;
+  container.value?.style.setProperty("--split-ratio", String(value));
+}
+function commitSplitRatio(id: string, partner: string, value: number) {
+  if (b.active?.id !== id || other.value?.id !== partner) return;
+  preferredRatio.value = value;
+  b.send({ type: "splitRatio", id, other: partner, ratio: value });
+}
+function adjustSplitRatio(direction: -1 | 1) {
+  const id = b.active?.id, partner = other.value?.id;
+  const width = availableSplitWidth();
+  if (!id || !partner || width <= 0 || resizing.value) return;
+  const current = clampSplitRatio(preferredRatio.value, width);
+  const next = clampSplitRatio(current + direction * 0.05, width);
+  if (next !== current) commitSplitRatio(id, partner, next);
+}
 function layout() {
   // Native sidebar capture owns the HWNDs and renderer viewports. Feedback
   // changes only the shell; sending its intermediate bounds back creates a loop.
-  if (b.sidebarResize?.resizing) return;
+  if (resizing.value || b.sidebarResize?.resizing) return;
   if (!primary.value || !container.value) return;
+  if (other.value) {
+    const width = availableSplitWidth();
+    if (width > 0) displayRatio(Math.floor(width * clampSplitRatio(preferredRatio.value, width)) / width);
+  }
   if (b.splitControls) positionSplitControls();
   const card = container.value.getBoundingClientRect();
   const popup = { x: card.x + container.value.clientLeft, y: card.y + container.value.clientTop, width: container.value.clientWidth, height: container.value.clientHeight };
@@ -157,8 +188,9 @@ function resizeSidebar(delta: number) {
   if (secondary) {
     const total = primary.width + secondary.width;
     const gap = secondary.x - reported.primary.x - primary.width;
-    primary.width = Math.max(0, total - delta) * primary.width / Math.max(1, total);
-    secondary = { ...secondary, x: primary.x + primary.width + gap, width: Math.max(0, total - delta) - primary.width };
+    const width = Math.max(0, total - delta);
+    primary.width = Math.floor(width * clampSplitRatio(preferredRatio.value, width));
+    secondary = { ...secondary, x: primary.x + primary.width + gap, width: width - primary.width };
   } else primary.width = Math.max(0, primary.width - delta);
   primary.corners = [0, 0, 0, 0];
   if (secondary) secondary.corners = [0, 0, 0, 0];
@@ -187,7 +219,7 @@ watch(
     () => b.active?.id,
     () => b.active?.splitWith,
     () => b.sidebarResizing,
-    ratio,
+    preferredRatio,
     resizing,
   ],
   () => { if (!resizing.value) layout(); },
@@ -207,7 +239,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", layout);
 });
 function resize(e: PointerEvent) {
-  if (e.button !== 0) return;
+  const id = b.active?.id, partner = other.value?.id;
+  if (e.button !== 0 || !id || !partner) return;
   e.preventDefault();
   const handle = e.currentTarget as HTMLElement;
   finishResize?.();
@@ -217,7 +250,8 @@ function resize(e: PointerEvent) {
   const primaryRect = primary.value!.getBoundingClientRect();
   const secondaryRect = secondary.value!.getBoundingClientRect();
   const gap = handle.offsetWidth;
-  const width = area.clientWidth - gap;
+  const width = availableSplitWidth();
+  let draggedRatio: number | undefined;
   const rect = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height, corners: [0, 0, 0, 0] });
   handle.setPointerCapture(e.pointerId);
   // Pointer capture keeps dragging over native pages without covering them.
@@ -228,12 +262,13 @@ function resize(e: PointerEvent) {
       if (Math.abs(ev.clientX - e.clientX) < 4) return;
       resizing.value = true;
     }
-    const floor = Math.max(0.2, 260 / width), ceiling = Math.min(0.8, 1 - floor);
     const next = (ev.clientX - card.x - area.clientLeft - grabOffset) / width;
     // Match Zigzag's minimumPaneWidth and floor the shared edge once.
-    ratio.value = Math.floor(width * (floor < ceiling ? Math.max(floor, Math.min(ceiling, next)) : 0.5)) / width;
-    area.style.setProperty('--split-ratio', String(ratio.value));
-    const leftWidth = width * ratio.value;
+    const clamped = clampSplitRatio(next, width);
+    const leftWidth = Math.floor(width * clamped);
+    const displayed = leftWidth / width;
+    if (displayed !== ratio.value) draggedRatio = clamped;
+    displayRatio(displayed);
     // Resize real controllers in the input event, before waiting for Vue/layout
     // or a paint callback. Native keeps only the latest pending dimensions.
     b.send({ type: 'layout', liveResize: true,
@@ -242,7 +277,7 @@ function resize(e: PointerEvent) {
       secondary: { ...rect(secondaryRect), x: primaryRect.x + leftWidth + gap, width: width - leftWidth },
     });
   };
-  const finish = () => {
+  const finish = (commit = false) => {
     finishResize = undefined;
     resizing.value = false;
     handle.onpointermove = null;
@@ -250,15 +285,15 @@ function resize(e: PointerEvent) {
     handle.onpointercancel = null;
     handle.onlostpointercapture = null;
     if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
+    if (commit && draggedRatio !== undefined) commitSplitRatio(id, partner, draggedRatio);
   };
   finishResize = finish;
   handle.onpointerup = (ev) => {
     const click = !resizing.value && Math.abs(ev.clientX - e.clientX) < 4 && Math.abs(ev.clientY - e.clientY) < 4;
-    finish();
+    finish(true);
     if (click) toggleSplitControls();
   };
-  handle.onpointercancel = finish;
-  handle.onlostpointercapture = finish;
+  handle.onpointercancel = handle.onlostpointercapture = () => finish(true);
 }
 </script>
 <template>
@@ -313,8 +348,8 @@ function resize(e: PointerEvent) {
         @keydown.enter.prevent="toggleSplitControls"
         @keydown.space.prevent="toggleSplitControls"
         @pointerdown="resize"
-        @keydown.left.prevent="ratio = Math.max(0.2, ratio - 0.05)"
-        @keydown.right.prevent="ratio = Math.min(0.8, ratio + 0.05)"
+        @keydown.left.prevent="adjustSplitRatio(-1)"
+        @keydown.right.prevent="adjustSplitRatio(1)"
       />
       <div ref="rightPane" class="page-pane" role="region" :aria-label="b.t('右侧窗格')">
         <PageToolbar :pane="other" data-chrome-motion="right-pane">

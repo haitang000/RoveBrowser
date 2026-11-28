@@ -104,6 +104,8 @@ export interface BrowserState {
   sidebarHidden?: boolean;
   /** Preferred width in CSS pixels; absent uses the responsive default. */
   sidebarWidth?: number;
+  /** Preferred left share for each split. The tab IDs also identify its original orientation. */
+  splitRatios?: { left: string; right: string; ratio: number }[];
   settings?: import("./settings").Settings;
   newTab?: import("./new-tab").NewTabSettings;
   /** Per-site zoom by normalized host; 100% is stored as absence. */
@@ -165,6 +167,7 @@ declare global {
       rect?: Rect;
       defaultBrowser?: { http: boolean; https: boolean };
       ratio?: number;
+      preferredRatio?: number | null;
       width?: number;
       reset?: boolean;
       resizing?: boolean;
@@ -183,6 +186,7 @@ declare global {
       action?: string;
       peek?: Tab | null;
       id?: string;
+      other?: string;
       background?: string;
       backgrounds?: (string | null)[] | null;
       backgroundReady?: boolean;

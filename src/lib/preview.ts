@@ -101,6 +101,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
   };
   if (bookmarkCommand(s, c, (id) => { Object.assign(s, reduce(s, { type: "close", id })); })) {
     syncPinLayouts(s);
+    retainSplitRatios(s);
     rememberActive(s);
     return { ...s };
   }
@@ -327,6 +328,16 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       if (c.width === null) delete s.sidebarWidth;
       else if (typeof c.width === "number" && Number.isFinite(c.width)) s.sidebarWidth = normalizeSidebarWidth(c.width);
       break;
+    case "splitRatio": {
+      const left = tab();
+      const right = left?.splitWith;
+      if (!left || !right || right !== c.other || typeof c.ratio !== "number" || !Number.isFinite(c.ratio)) break;
+      s.splitRatios = (s.splitRatios ?? []).filter(pair =>
+        !(pair.left === left.id && pair.right === right || pair.left === right && pair.right === left.id),
+      );
+      s.splitRatios.push({ left: left.id, right, ratio: Math.max(0.2, Math.min(0.8, c.ratio)) });
+      break;
+    }
     case "split": {
       const t = tab(),
         other = s.tabs.find((x) => x.id === c.other);
@@ -424,6 +435,16 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
   }
+  retainSplitRatios(s);
   rememberActive(s);
   return { ...s };
+}
+
+function retainSplitRatios(s: BrowserState) {
+  if (!s.splitRatios?.length) return;
+  s.splitRatios = s.splitRatios.filter(({ left, right }) => {
+    const a = s.tabs.find(tab => tab.id === left);
+    const b = s.tabs.find(tab => tab.id === right);
+    return a && b && (a.splitWith === right || b.splitWith === left);
+  });
 }

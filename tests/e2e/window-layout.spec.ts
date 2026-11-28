@@ -12,6 +12,7 @@ declare global {
       samples: { expected: number; reported: number }[];
       overlays: boolean[];
       layoutCount: number;
+      splitCommits: { id: string; other: string; ratio: number }[];
       popupUpdates: number;
       observer?: ResizeObserver;
       paletteReads?: number;
@@ -25,7 +26,7 @@ async function nativeShell(page: import("@playwright/test").Page, state: Browser
   await page.addInitScript((state) => {
     window.__ERA_NATIVE__ = true;
     window.__ERA_INITIAL_STATE__ = state;
-    window.__windowTest = { samples: [], overlays: [], glass: [], layoutCount: 0, popupUpdates: 0 };
+    window.__windowTest = { samples: [], overlays: [], glass: [], layoutCount: 0, popupUpdates: 0, splitCommits: [] };
     window.ipc = {
       postMessage(message) {
         const command = JSON.parse(message);
@@ -33,6 +34,7 @@ async function nativeShell(page: import("@playwright/test").Page, state: Browser
           window.__windowTest.layout = command;
           window.__windowTest.layoutCount++;
         }
+        if (command.type === "splitRatio") window.__windowTest.splitCommits.push(command);
         if (command.type === "popupState" && command.popup?.popupArea) window.__windowTest.popupUpdates++;
         if (command.type === "overlay") window.__windowTest.overlays.push(command.visible);
         if (command.type === "windowChrome") window.__windowTest.chrome = command;
@@ -616,7 +618,11 @@ test("split dragging updates both live pane bounds without opening an overlay", 
     expect(Number(await divider.getAttribute("aria-valuenow"))).toBeLessThanOrEqual(80);
     expect(await page.evaluate(() => window.__windowTest.overlays)).toEqual([]);
   }
+  expect(await page.evaluate(() => window.__windowTest.splitCommits)).toEqual([]);
   await page.mouse.up();
+  expect(await page.evaluate(() => window.__windowTest.splitCommits)).toMatchObject([
+    { id: "github", other: "wiki" },
+  ]);
   await expect(page.locator('.page-area')).toHaveCSS('border-radius', '8px');
   await expect.poll(() => page.evaluate(() => (window.__windowTest.layout as Layout & { liveResize: boolean })?.liveResize)).toBe(false);
   const settled = await divider.getAttribute("aria-valuenow");
@@ -676,20 +682,61 @@ test("native split feedback updates the shell without sending a resize back whil
   await expect.poll(guideOpacity).toBe('0');
   await page.evaluate(() => {
     window.__windowTest.layoutCount = 0;
-    window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: true });
+    window.__ERA_RECEIVE__!({ type: 'splitResize', id: 'github', other: 'wiki', ratio: 0.6, resizing: true });
   });
   await expect(divider).toHaveAttribute('aria-valuenow', '60');
   await expect.poll(guideOpacity).toBe('1');
   await expect(page.locator('.page-area')).toHaveCSS('border-radius', '0px');
   expect(await page.evaluate(() => window.__windowTest.layoutCount)).toBe(0);
-  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: false }));
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitResize', id: 'github', other: 'wiki', ratio: 0.6, resizing: false, preferredRatio: 0.6 }));
   await expect.poll(guideOpacity).toBe('0');
   await expect(page.locator('.page-area')).toHaveCSS('border-radius', '8px');
   await expect.poll(() => page.evaluate(() => window.__windowTest.layoutCount)).toBe(1);
-  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitResize', ratio: 0.6, resizing: true }));
+  await page.evaluate(() => window.__ERA_RECEIVE__!({ type: 'splitResize', id: 'github', other: 'wiki', ratio: 0.6, resizing: true }));
   await expect(page.locator('.page-area')).toHaveClass(/resizing/);
   state.tabs.find(t => t.id === 'github')!.splitWith = undefined;
   await page.evaluate(state => window.__ERA_RECEIVE__!({ type: 'state', state }), state);
   await expect(page.getByRole('separator', { name: '调整分屏比例' })).toHaveCount(0);
   await expect(page.locator('.page-area')).not.toHaveClass(/resizing/);
+});
+
+test("split preferences follow each pair through narrow windows, keyboard changes and swapping", async ({ page }) => {
+  const state = initialState();
+  const first = state.tabs.find(tab => tab.id === "github")!;
+  first.splitWith = "wiki";
+  state.tabs.push(
+    { ...first, id: "pair-b-left", splitWith: "pair-b-right" },
+    { ...first, id: "pair-b-right", splitWith: undefined },
+  );
+  state.activeTab = first.id;
+  state.splitRatios = [
+    { left: first.id, right: "wiki", ratio: 0.65 },
+    { left: "pair-b-left", right: "pair-b-right", ratio: 0.35 },
+  ];
+  await nativeShell(page, state);
+  const divider = page.getByRole("separator", { name: "调整分屏比例" });
+  await expect(divider).toHaveAttribute("aria-valuenow", "65");
+  await page.setViewportSize({ width: 700, height: 700 });
+  await expect(divider).toHaveAttribute("aria-valuenow", "50");
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await expect(divider).toHaveAttribute("aria-valuenow", "65");
+  expect(await page.evaluate(() => window.__windowTest.splitCommits)).toEqual([]);
+  state.activeTab = "pair-b-left";
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+  await expect(divider).toHaveAttribute("aria-valuenow", "35");
+  await page.evaluate(() => window.__ERA_RECEIVE__!({
+    type: "splitResize", id: "github", other: "wiki", ratio: 0.7, resizing: true,
+  }));
+  await expect(divider).toHaveAttribute("aria-valuenow", "35");
+  await divider.press("ArrowRight");
+  await expect(divider).toHaveAttribute("aria-valuenow", "40");
+  const [commit] = await page.evaluate(() => window.__windowTest.splitCommits);
+  expect(commit).toMatchObject({ id: "pair-b-left", other: "pair-b-right" });
+  expect(commit.ratio).toBeCloseTo(0.4);
+  state.splitRatios[1]!.ratio = commit.ratio;
+  state.activeTab = "pair-b-right";
+  state.tabs.at(-2)!.splitWith = undefined;
+  state.tabs.at(-1)!.splitWith = "pair-b-left";
+  await page.evaluate(state => window.__ERA_RECEIVE__!({ type: "state", state }), state);
+  await expect(divider).toHaveAttribute("aria-valuenow", "60");
 });

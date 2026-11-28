@@ -35,7 +35,7 @@
 | 13 | Now Playing 侧栏卡片 | `Sidebar/NowPlaying.swift` | 中 | S | 复用现有音频状态；**已实现** |
 | 14 | 数字键提示 + Ctrl+Tab 切换器 + 空间切换器 | `Sidebar/NumberHints.swift`、`Switcher/*` | 中高 | S–M | 纯 UI |
 | 15 | 侧栏尺寸 Small/Medium/Large + 右侧侧栏 | `Sidebar/SidebarView.swift`、`BrowserRootView` 镜像布局 | 中高 | S / M | 原生页面矩形需镜像 |
-| 16 | 新标签排列选项 + 分屏比例持久化 + 分屏关闭按钮 | `Tabs/TabManager.swift`、`Tabs/TileLayout.swift` | 中 | S | 低 |
+| 16 | 新标签排列选项 + 分屏比例持久化（已完成） + 分屏关闭按钮 | `Tabs/TabManager.swift`、`Tabs/TileLayout.swift` | 中 | S | 低 |
 | 17 | 导入扩展：Arc 空间/固定页/打开标签 + 更多 Chromium 浏览器 | `Import/ArcImporter.swift`、`Import/ChromiumImporter.swift` | 高 | M | Windows 版 Arc 数据路径待核 |
 | 18 | 整页截图 | `Web/PageScreenshot.swift` | 中 | M | CDP `captureBeyondViewport` 或滚动拼接 |
 | **P2 / 大工程** | | | | | |
@@ -194,7 +194,7 @@
 
 15. **侧栏尺寸 + 右侧侧栏**（S / M）：0.9 的 Sidebar size 是 0.9 / 1 / 1.15 三档缩放（`#183`，行高 30、图标 16、空间名 26/36 等基数）；右侧侧栏是把所有左侧布局镜像（`BrowserRootView` 的 `mirrored`），Rove 需要同步镜像原生页面矩形、标题栏按钮顺序与浮层锚点。
 
-16. **新标签排列 + 分屏持久化**（S）：`TabManager.newTabPlace` 支持“当前标签旁 / 顶部 / 底部 / 同站标签旁”；分屏比例写入会话（Rove 目前只存组合，`splitWith` 已持久化，比例没存）；分屏每个面板一个关闭按钮（`PaneHeader` 的 Close Tab）。
+16. **新标签排列 + 分屏持久化**（S）：`TabManager.newTabPlace` 支持“当前标签旁 / 顶部 / 底部 / 同站标签旁”；Rove 已按分屏组合保存比例并在重启后恢复，旧会话默认均分。窄窗口遵守最小窗格尺寸，放宽后恢复保存的比例；分屏每个面板一个关闭按钮（`PaneHeader` 的 Close Tab）。
 
 17. **导入扩展**（M）：Arc 导入空间名/颜色、固定页、Favorites、每个空间的打开标签（未加载，`ArcImporter.swift`）；Chromium 系浏览器列表扩到 Helium/Comet/Yandex/Whale/Chromium/Thorium 等，Windows 上数据布局与 Chrome 相同；Chrome 127+ 的密码 app-bound 加密（`v20`）无解时只导入书签/历史并提示 CSV。这是拉新最强的功能。
 
