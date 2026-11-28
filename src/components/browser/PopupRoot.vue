@@ -48,9 +48,15 @@ const keyUp = (event: KeyboardEvent) => browserKeyUp(b, event);
 function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
+function leavePermission(layer: Element) {
+  (layer as HTMLElement).inert = true;
+  const focused = document.activeElement;
+  if (focused instanceof HTMLElement && layer.contains(focused)) focused.blur();
+  layer.setAttribute("aria-hidden", "true");
+}
 function report() {
-  const modals = ".quit-scrim, .extension-dialog-scrim, .extension-menu-layer, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer, .tab-switcher-layer";
-  const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .permission-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer, .split-controls, .split-controls-dismiss`);
+  const modals = ".quit-scrim, .extension-dialog-scrim, .extension-menu-layer, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer, .tab-switcher-layer, .permission-layer";
+  const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer, .split-controls, .split-controls-dismiss`);
   const preview = document.getElementById("tab-hover-preview");
   if (preview !== observedPreview) {
     if (observedPreview) resize.unobserve(observedPreview);
@@ -65,7 +71,7 @@ function report() {
   const modal = Boolean(document.querySelector(modals));
   const downloads = Boolean(document.querySelector(".downloads-layer"));
   const content = document.querySelector<HTMLElement>(".peek-content");
-  const cutout = !modal && !b.permissionPrompt && b.peek && b.peekPhase === "open" && content ? { ...rect(content), corners: [12, 12, 12, 12] } : null;
+  const cutout = !modal && b.peek && b.peekPhase === "open" && content ? { ...rect(content), corners: [12, 12, 12, 12] } : null;
   const regions = Array.from(surfaces, (element) => {
     const bounds = rect(element);
     // The native opacity layer is clipped to these regions; a shadow must have
@@ -84,7 +90,7 @@ function report() {
   }
   if (focus) {
     const selector = active === "pageMenu" ? ".page-context-menu"
-      : active === "tabSwitcher" ? ".tab-switcher-panel" : active === "quit" ? ".quit-dialog" : active === "extension" ? ".extension-dialog [autofocus]" : active === "extensionsMenu" ? ".extension-menu-panel" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
+      : active === "tabSwitcher" ? ".tab-switcher-panel" : active === "quit" ? ".quit-dialog" : active === "extension" ? ".extension-dialog [autofocus]" : active === "extensionsMenu" ? ".extension-menu-panel" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-layer:not([inert]) .permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
     document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: active === "pageMenu" || active === "menu" });
   }
 }
@@ -118,7 +124,9 @@ onBeforeUnmount(() => {
   <ReaderControls />
   <SplitControls />
   <TabSwitcher />
-  <PermissionPrompt v-if="b.permissionPrompt" :key="b.permissionPrompt.id" :prompt="b.permissionPrompt" />
+  <Transition name="bubble" @before-leave="leavePermission" appear>
+    <PermissionPrompt v-if="b.permissionPrompt" :key="b.permissionPrompt.id" :prompt="b.permissionPrompt" />
+  </Transition>
   <ExtensionMenu />
   <ExtensionDialog v-if="b.extensions.popup && !b.quitOpen" />
   <QuitDialog v-if="b.quitOpen" />

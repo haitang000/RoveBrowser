@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useId } from "vue";
 import { permissions, type PermissionPrompt } from "../../lib/permissions";
 import { useBrowser } from "../../stores/browser";
 import Icon from "../common/Icon.vue";
@@ -8,6 +8,8 @@ const props = defineProps<{ prompt: PermissionPrompt }>();
 const b = useBrowser();
 const remember = ref(props.prompt.canRemember && props.prompt.remember);
 const canAllow = ref(false);
+const questionId = useId();
+const requesterId = useId();
 const permission = computed(() => permissions[props.prompt.scope.kind]);
 const paneStyle = computed(() => {
   const { x, y, width, height } = props.prompt.pane;
@@ -24,13 +26,13 @@ function answer(allowed: boolean | null) {
 
 <template>
   <div class="permission-layer" :style="paneStyle" @click.self="answer(null)">
-    <section class="permission-prompt" role="dialog" tabindex="-1"
-      aria-labelledby="permission-question" aria-describedby="permission-requester">
+    <section class="permission-prompt bubble-surface" role="dialog" tabindex="-1"
+      :aria-labelledby="questionId" :aria-describedby="requesterId">
       <div class="permission-heading">
         <div class="permission-icon"><Icon :name="permission.icon" :size="19" /></div>
         <div class="permission-source">
-          <h2 id="permission-question">{{ b.t(permission.question) }}</h2>
-          <p id="permission-requester">
+          <h2 :id="questionId">{{ b.t(permission.question) }}</h2>
+          <p :id="requesterId">
             <bdi>{{ prompt.scope.requester }}</bdi>
             <template v-if="prompt.scope.requester !== prompt.scope.page">
               {{ b.t('嵌入在') }} <bdi>{{ prompt.scope.page }}</bdi>
@@ -55,6 +57,8 @@ function answer(allowed: boolean | null) {
 
 <style scoped>
 .permission-layer {
+  --bubble-enter-y: -7px;
+  --bubble-exit-y: -5px;
   position: fixed;
   z-index: 88;
   display: flex;
@@ -73,6 +77,7 @@ function answer(allowed: boolean | null) {
   border: 1px solid var(--panel-edge);
   border-radius: var(--radius-panel);
   box-shadow: 0 6px 18px var(--panel-shadow);
+  transform-origin: top center;
   outline: none;
 }
 .permission-heading { display: flex; align-items: flex-start; gap: 10px; }
