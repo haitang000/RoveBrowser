@@ -95,12 +95,17 @@ fn download_host(url: &Url) -> bool {
     }
 }
 
-pub fn download(id: &str, runtime: &str, max: u64) -> Result<Vec<u8>> {
+pub fn download(
+    id: &str,
+    runtime: &str,
+    max: u64,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<Vec<u8>> {
     debug_assert!(id_bytes(id).is_some());
     let url = download_url(id, runtime)?;
     let start = Instant::now();
     let mut bytes = Vec::new();
-    https::fetch(
+    https::fetch_with_progress(
         &url,
         download_host,
         "application/x-chrome-extension, application/octet-stream",
@@ -113,6 +118,7 @@ pub fn download(id: &str, runtime: &str, max: u64) -> Result<Vec<u8>> {
             bytes.extend_from_slice(chunk);
             Ok(())
         },
+        progress,
     )
     .map_err(|error| match error {
         https::Error::Status(204 | 404 | 410) => "商店没有为当前版本提供这个扩展".into(),
@@ -463,13 +469,16 @@ pub fn unpack(
     payload: &Path,
     mut remaining: u64,
     max_entries: usize,
+    mut progress: impl FnMut(usize, usize),
 ) -> Result<()> {
     let mut zip = zip::ZipArchive::new(Cursor::new(archive))?;
     if zip.len() > max_entries {
         return Err("商店扩展目录的文件数量过多".into());
     }
     fs::create_dir(payload)?;
-    for i in 0..zip.len() {
+    let total = zip.len();
+    for i in 0..total {
+        progress(i, total);
         let mut entry = zip.by_index(i)?;
         let name = std::str::from_utf8(entry.name_raw())?;
         let relative = package_path(name).ok_or("商店安装包包含无效路径")?;

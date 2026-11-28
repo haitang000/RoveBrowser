@@ -156,11 +156,20 @@ try {
   await expect(review()).toHaveCount(0);
   assert.deepEqual(await readdir(packages), []);
 
+  await ui.evaluate(() => {
+    window.extensionSteps = [];
+    window.chrome.webview.addEventListener("message", ({ data }) => {
+      if (data.type === "extensionsState" && data.extensions.progress) {
+        window.extensionSteps.push(data.extensions.progress.current);
+      }
+    });
+  });
   await choose().click();
   await expect(review()).toBeVisible();
   await writeFile(join(fixture, "content.js"), "document.body.dataset.extension = 'changed-source';");
   await review().getByRole("button", { name: "安装扩展" }).click();
   await expect(toggle()).toHaveAttribute("aria-checked", "true");
+  assert.deepEqual(await ui.evaluate(() => [...new Set(window.extensionSteps)]), ["copyFiles", "readManifest", "install"]);
   await expect(ui.locator(".extension-row", { has: toggle() }).locator(".extension-icon svg")).toBeVisible();
   const [installed] = await readdir(packages);
   assert.equal(await readFile(join(packages, installed, "payload", "content.js"), "utf8"), originalScript);

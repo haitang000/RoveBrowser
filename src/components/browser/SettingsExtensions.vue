@@ -4,6 +4,7 @@ import { CHROME_STORE_URL } from "../../lib/extensions";
 import type { Command } from "../../lib/types";
 import { useBrowser } from "../../stores/browser";
 import ExtensionIcon from "./ExtensionIcon.vue";
+import ExtensionProgress from "./ExtensionProgress.vue";
 import ExtensionReviewDetails from "./ExtensionReviewDetails.vue";
 
 const b = useBrowser();
@@ -39,7 +40,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="settings-group extension-settings" :aria-label="b.t('浏览器扩展')" :aria-busy="b.extensions.busy">
+  <section class="settings-group extension-settings" :aria-label="b.t('浏览器扩展')" :aria-busy="b.extensions.busy && !b.extensions.progress">
     <div v-if="!inlineReview" class="setting-row extension-intro">
       <div class="setting-description">
         <strong>{{ b.t('Chrome 网上应用店') }}</strong>
@@ -77,6 +78,7 @@ onMounted(() => {
     </div>
 
     <p v-if="!b.extensions.popup && b.extensions.error" class="settings-feedback" role="alert">{{ b.extensions.error }}</p>
+    <ExtensionProgress v-else-if="!b.extensions.popup && b.extensions.progress" :progress="b.extensions.progress" class="extension-settings-progress" />
     <p v-else-if="!b.extensions.popup && b.extensions.busy" class="settings-feedback" role="status">{{ b.t('正在处理扩展…') }}</p>
 
     <section
@@ -148,6 +150,7 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 .extension-identity { display: flex; align-items: center; min-width: 0; gap: 10px; }
+.extension-settings-progress { margin: 12px 16px 16px; }
 .extension-review {
   display: grid;
   gap: 12px;

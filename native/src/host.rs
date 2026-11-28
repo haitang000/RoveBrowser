@@ -141,6 +141,7 @@ enum Event {
     ExternalUrls(Vec<String>),
     ImportSources(Vec<crate::import::Source>),
     ImportRead(Vec<crate::import::Batch>),
+    ExtensionProgress(uuid::Uuid, extensions::Step, Option<u8>),
     ExtensionPrepared(uuid::Uuid, Result<extensions::Prepared, String>),
     ExtensionBackground(uuid::Uuid, Rect, String),
     ExtensionView(uuid::Uuid, crate::extension_view::Event),
@@ -421,6 +422,7 @@ struct App {
     extensions_root: PathBuf,
     extension_candidate: Option<extensions::Prepared>,
     extension_preparation: Option<uuid::Uuid>,
+    extension_progress: Option<extensions::Progress>,
     extension_popup: Option<ExtensionPopup>,
     extension_error: Option<String>,
     extension_view: Option<ExtensionView>,
@@ -632,6 +634,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         extensions_root: std::path::absolute(data.join("Extensions"))?,
         extension_candidate: None,
         extension_preparation: None,
+        extension_progress: None,
         extension_popup: None,
         extension_error: None,
         extension_view: None,
@@ -3665,7 +3668,8 @@ impl App {
                 "items": items,
                 "review": self.extension_candidate.as_ref().map(|extension| &extension.review),
                 "removal": removal,
-                "busy": self.extension_preparation.is_some(),
+                "busy": self.extension_progress.is_some(),
+                "progress": self.extension_progress,
                 "popup": self.extension_popup.is_some(),
                 "error": self.extension_error,
             }
@@ -3777,18 +3781,35 @@ impl App {
         self.publish_extensions(items);
     }
 
+    fn start_extension_progress(&mut self, steps: &'static [extensions::Step]) {
+        self.extension_progress = Some(extensions::Progress { steps, current: steps[0], percent: None });
+        self.emit_extensions(None, None);
+    }
+
     fn prepare_extension(
         &mut self,
-        prepare: impl FnOnce(&FilePath) -> Result<extensions::Prepared, String> + Send + 'static,
+        steps: &'static [extensions::Step],
+        prepare: impl FnOnce(&FilePath, &mut dyn FnMut(extensions::Step, Option<u8>))
+            -> Result<extensions::Prepared, String> + Send + 'static,
     ) {
         let request = uuid::Uuid::new_v4();
         self.extension_candidate = None;
         self.extension_preparation = Some(request);
-        self.emit_extensions(None, None);
+        self.start_extension_progress(steps);
         let root = self.extensions_root.clone();
         let proxy = self.proxy.clone();
         std::thread::spawn(move || {
-            let _ = proxy.send_event(Event::ExtensionPrepared(request, prepare(&root)));
+            let mut last = (steps[0], None, Instant::now());
+            let prepared = prepare(&root, &mut |step, percent| {
+                if step == last.0 && (percent == last.1
+                    || (last.1.is_some() && last.2.elapsed() < Duration::from_millis(60)))
+                {
+                    return;
+                }
+                last = (step, percent, Instant::now());
+                let _ = proxy.send_event(Event::ExtensionProgress(request, step, percent));
+            });
+            let _ = proxy.send_event(Event::ExtensionPrepared(request, prepared));
         });
     }
 
@@ -3833,9 +3854,11 @@ impl App {
     }
 
     fn extension_command(&mut self, command: Command) {
+        if self.extension_progress.is_some() && self.extension_preparation.is_none() { return; }
         if matches!(command, Command::DismissExtensionPopup) {
             if self.extension_popup.take().is_some() {
                 self.extension_preparation = None;
+                self.extension_progress = None;
                 self.extension_candidate = None;
                 self.emit_extensions(None, None);
             }
@@ -3867,8 +3890,8 @@ impl App {
                 self.extension_candidate = None;
                 match extensions::choose_folder(owner) {
                     Ok(Some(path)) => {
-                        self.prepare_extension(move |root| {
-                            extensions::prepare(root, &path)
+                        self.prepare_extension(extensions::LOCAL_PREPARATION, move |root, progress| {
+                            extensions::prepare(root, &path, progress)
                                 .map_err(|error| format!("无法读取扩展目录：{error}"))
                         });
                     }
@@ -3890,8 +3913,8 @@ impl App {
                         return;
                     }
                 };
-                self.prepare_extension(move |root| {
-                    extensions::prepare_store(root, &id, &runtime)
+                self.prepare_extension(extensions::STORE_PREPARATION, move |root, progress| {
+                    extensions::prepare_store(root, &id, &runtime, progress)
                         .map_err(|error| format!("无法准备商店扩展：{error}"))
                 });
                 return;
@@ -3911,13 +3934,14 @@ impl App {
                     self.emit_extensions(None, Some("这次安装确认已失效，请重新选择目录".into()));
                     return;
                 }
-                let candidate = self.extension_candidate.take().unwrap();
                 if !install {
-                    drop(candidate);
+                    self.extension_candidate = None;
                     self.extension_popup = None;
                     self.emit_extensions(None, None);
                     return;
                 }
+                self.start_extension_progress(&[extensions::Step::Install]);
+                let candidate = self.extension_candidate.take().unwrap();
                 let result = self.extension_profile(|profile, root| {
                     profile.install(root, candidate)?;
                     profile.list(root)
@@ -3932,10 +3956,13 @@ impl App {
                 }
                 result
             }
-            Command::EnableExtension { id, enabled } => self.extension_profile(|profile, root| {
-                profile.enable(root, &id, enabled)?;
-                profile.list(root)
-            }),
+            Command::EnableExtension { id, enabled } => {
+                self.start_extension_progress(if enabled { &[extensions::Step::Enable] } else { &[extensions::Step::Disable] });
+                self.extension_profile(|profile, root| {
+                    profile.enable(root, &id, enabled)?;
+                    profile.list(root)
+                })
+            }
             Command::RequestExtensionRemoval { id } => {
                 if self.extension_popup.is_some() || self.extension_candidate.is_some() || self.quit_pending {
                     return;
@@ -3960,10 +3987,12 @@ impl App {
                     .filter(|popup| popup.ticket == ticket && self.extension_error.is_none())
                     .and_then(|popup| popup.removal.as_ref())
                     .map(|item| item.id.clone()) else { return };
+                self.start_extension_progress(&[extensions::Step::Remove]);
                 let result = self.extension_profile(|profile, root| {
                     let removed = profile.remove(root, &id);
                     Ok((profile.list(root)?, removed.err()))
                 });
+                self.extension_progress = None;
                 match result {
                     Ok((items, error)) => {
                         if error.is_none() { self.extension_popup = None; }
@@ -3975,6 +4004,7 @@ impl App {
             }
             _ => return,
         };
+        self.extension_progress = None;
         match result {
             Ok(items) => self.emit_extensions(Some(items), None),
             Err(error) => self.emit_extensions(None, Some(format!("扩展操作失败：{error}"))),
@@ -4252,7 +4282,7 @@ impl App {
             | Command::PopupState { .. } | Command::PopupLayer { .. } | Command::Overlay { .. }
         ) { return; }
         if let Command::PrepareChromeStoreTab { id, expected_url } = &c {
-            if self.extension_preparation.is_some() || self.extension_popup.is_some() || self.quit_pending {
+            if self.extension_progress.is_some() || self.extension_popup.is_some() || self.quit_pending {
                 return;
             }
             let extension_id = self.state.active()
@@ -5484,9 +5514,19 @@ impl ApplicationHandler<Event> for App {
                     let _ = unsafe { popup.webview().PostWebMessageAsJson(&HSTRING::from(value.to_string())) };
                 }
             }
+            Event::ExtensionProgress(request, current, percent) => {
+                if self.extension_preparation == Some(request) {
+                    if let Some(progress) = &mut self.extension_progress {
+                        progress.current = current;
+                        progress.percent = percent;
+                        self.publish_extensions(None);
+                    }
+                }
+            }
             Event::ExtensionPrepared(request, result) => {
                 if self.extension_preparation != Some(request) { return; }
                 self.extension_preparation = None;
+                self.extension_progress = None;
                 match result {
                     Ok(prepared) => {
                         self.extension_candidate = Some(prepared);

@@ -37,11 +37,21 @@ export interface ExtensionReview {
   hosts: string[];
 }
 
+export type ExtensionStep = "download" | "verifySignature" | "unpack" | "copyFiles"
+  | "readManifest" | "install" | "remove" | "enable" | "disable";
+
+export interface ExtensionProgress {
+  steps: ExtensionStep[];
+  current: ExtensionStep;
+  percent: number | null;
+}
+
 export interface ExtensionsState {
   items: ExtensionItem[] | null;
   review: ExtensionReview | null;
   removal: { ticket: string; item: ExtensionItem } | null;
   popup: boolean;
   busy: boolean;
+  progress: ExtensionProgress | null;
   error: string | null;
 }

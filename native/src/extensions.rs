@@ -44,6 +44,39 @@ const MAX_MANIFEST: u64 = 1024 * 1024;
 const MAX_ICON: u64 = 512 * 1024;
 pub const MAX_PINNED: usize = 4;
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Step {
+    Download,
+    VerifySignature,
+    Unpack,
+    CopyFiles,
+    ReadManifest,
+    Install,
+    Remove,
+    Enable,
+    Disable,
+}
+
+#[derive(Serialize)]
+pub struct Progress {
+    pub steps: &'static [Step],
+    pub current: Step,
+    pub percent: Option<u8>,
+}
+
+pub const LOCAL_PREPARATION: &[Step] = &[Step::CopyFiles, Step::ReadManifest];
+pub const STORE_PREPARATION: &[Step] = &[
+    Step::Download,
+    Step::VerifySignature,
+    Step::Unpack,
+    Step::ReadManifest,
+];
+
+fn percent(completed: u64, total: u64) -> Option<u8> {
+    (total > 0).then(|| (completed.saturating_mul(100) / total).min(99) as u8)
+}
+
 #[derive(Deserialize)]
 struct Manifest {
     manifest_version: u32,
@@ -388,7 +421,11 @@ fn id_for(payload: &Path, key: Option<&str>) -> Result<String> {
         .collect())
 }
 
-pub fn prepare(root: &Path, source: &Path) -> Result<Prepared> {
+pub fn prepare(
+    root: &Path,
+    source: &Path,
+    progress: &mut dyn FnMut(Step, Option<u8>),
+) -> Result<Prepared> {
     if reparse(&fs::symlink_metadata(source)?) {
         return Err("请选择实际的扩展目录".into());
     }
@@ -413,19 +450,32 @@ pub fn prepare(root: &Path, source: &Path) -> Result<Prepared> {
         0,
         &mut (MAX_BYTES, MAX_FILES),
     )?;
+    progress(Step::ReadManifest, None);
     finish(prepared, None)
 }
 
-pub fn prepare_store(root: &Path, id: &str, runtime: &str) -> Result<Prepared> {
-    let bytes = chrome_store::download(id, runtime, MAX_BYTES)?;
+pub fn prepare_store(
+    root: &Path,
+    id: &str,
+    runtime: &str,
+    progress: &mut dyn FnMut(Step, Option<u8>),
+) -> Result<Prepared> {
+    let bytes = chrome_store::download(id, runtime, MAX_BYTES, &mut |received, total| {
+        progress(Step::Download, total.and_then(|total| percent(received, total)));
+    })?;
+    progress(Step::VerifySignature, None);
     let verified = chrome_store::verify(&bytes, id)?;
+    progress(Step::Unpack, None);
     let prepared = stage(
         root,
         format!("chrome-web-store:{id}").as_bytes(),
         Source::ChromeStore,
     )?;
     let payload = prepared.stage.join("payload");
-    chrome_store::unpack(verified.archive, &payload, MAX_BYTES, MAX_FILES)?;
+    chrome_store::unpack(verified.archive, &payload, MAX_BYTES, MAX_FILES, |entries, total| {
+        progress(Step::Unpack, percent(entries as u64, total as u64));
+    })?;
+    progress(Step::ReadManifest, None);
     // WebView2 loads unpacked extensions. Keep the ID from the verified CRX
     // developer key instead of letting Chromium derive it from the local path.
     let manifest_path = payload.join("manifest.json");
