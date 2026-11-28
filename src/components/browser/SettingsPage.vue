@@ -442,6 +442,15 @@ const groups = computed<Group[]>(() => [
         keywords: "tracking prevention tracker 防追踪 防跟踪",
       },
       {
+        id: "font-fingerprint-protection",
+        title: b.t("字体指纹保护"),
+        detail: b.t("阻止网站读取本机字体列表，并限制网页脚本通过本地字体源探测已安装的字体。") + " " +
+          b.t("更改后重启 Rove 生效。"),
+        kind: "toggle",
+        setting: "fontFingerprintProtection",
+        keywords: "font fingerprint protection local fonts 字體指紋 字型",
+      },
+      {
         id: "secure-dns",
         title: b.t("安全 DNS"),
         detail: b.t("当前 DNS 服务支持时，通过 HTTPS 加密网页的 DNS 查询。无法使用或关闭时，使用系统 DNS。") + " " +

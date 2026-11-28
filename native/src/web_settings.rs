@@ -19,7 +19,23 @@ use webview2_com::{
     },
 };
 use windows::core::{Interface, HSTRING};
-use wry::{WebView, WebViewExtWindows};
+use wry::{WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
+
+pub fn browsing_builder(
+    context: &mut WebContext,
+    mut args: String,
+    font_fingerprint_protection: bool,
+) -> WebViewBuilder<'_> {
+    let mut builder = WebViewBuilder::new_with_web_context(context);
+    if font_fingerprint_protection {
+        args.push_str(" --disable-blink-features=FontAccess");
+        builder = builder.with_initialization_script_for_main_only(
+            include_str!("font-fingerprint-protection.js"),
+            false,
+        );
+    }
+    builder.with_additional_browser_args(args)
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -112,6 +112,8 @@ export const english: Readonly<Record<string, string>> = {
   "允许填充表单信息，并在登录页提供已导入密码的账号选择。": "Fill forms and offer accounts with imported passwords on sign-in pages.",
   "网络连接": "Network connections",
   "跟踪防护": "Tracking prevention",
+  "字体指纹保护": "Font fingerprinting protection",
+  "阻止网站读取本机字体列表，并限制网页脚本通过本地字体源探测已安装的字体。": "Block websites from listing fonts installed on your device and limit page scripts from detecting installed fonts through local font sources.",
   "限制跨站跟踪。更改后请刷新网页，严格模式可能影响部分网站。": "Limit cross-site tracking. Reload pages after changing this setting. Strict mode may affect some sites.",
   "基础": "Basic",
   "平衡": "Balanced",

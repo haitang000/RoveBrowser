@@ -18,8 +18,7 @@ use winit::{
     window::Window,
 };
 use wry::{
-    NewWindowResponse, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
-    WebViewExtWindows,
+    NewWindowResponse, WebContext, WebView, WebViewBuilderExtWindows, WebViewExtWindows,
 };
 
 const MAX_TABS: usize = 4;
@@ -41,13 +40,15 @@ struct Tab {
 pub struct Tabs {
     tabs: Vec<Tab>,
     context: WebContext,
+    font_fingerprint_protection: bool,
 }
 
 impl Tabs {
-    pub fn new(data: PathBuf) -> Self {
+    pub fn new(data: PathBuf, font_fingerprint_protection: bool) -> Self {
         Self {
             tabs: Vec::new(),
             context: WebContext::new(Some(data)),
+            font_fingerprint_protection,
         }
     }
 
@@ -68,13 +69,16 @@ impl Tabs {
                 if self.tabs.len() >= MAX_TABS {
                     return Err("tab_limit");
                 }
-                let mut builder = WebViewBuilder::new_with_web_context(&mut self.context)
+                let mut builder = crate::web_settings::browsing_builder(
+                    &mut self.context,
+                    "--autoplay-policy=user-gesture-required".into(),
+                    self.font_fingerprint_protection,
+                )
                     .with_visible(false)
                     .with_focused(false)
                     .with_incognito(true)
                     .with_devtools(false)
                     .with_autoplay(false)
-                    .with_additional_browser_args("--autoplay-policy=user-gesture-required")
                     .with_new_window_req_handler(|_, _| NewWindowResponse::Deny)
                     .with_bounds(wry::Rect {
                         position: LogicalPosition::new(0, 0).into(),

@@ -191,6 +191,7 @@ export interface Settings {
   autofill: boolean;
   rememberHistory: boolean;
   trackingProtection: (typeof TRACKING_PROTECTION_LEVELS)[number][0];
+  fontFingerprintProtection: boolean;
   permissionDefaults: Record<PermissionKind, PermissionDefault>;
   secureDns: boolean;
   webRtcAddressProtection: boolean;
@@ -220,6 +221,7 @@ export const defaultSettings = (): Settings => ({
   autofill: true,
   rememberHistory: true,
   trackingProtection: "balanced",
+  fontFingerprintProtection: false,
   permissionDefaults: { camera: "ask", microphone: "ask", location: "ask", notifications: "ask", screen: "ask" },
   secureDns: true,
   webRtcAddressProtection: false,
@@ -246,6 +248,7 @@ export function settingsFor(value?: Partial<Settings>): Settings {
   if (settings.trackingProtection !== "basic" && settings.trackingProtection !== "strict") {
     settings.trackingProtection = "balanced";
   }
+  settings.fontFingerprintProtection = settings.fontFingerprintProtection === true;
   settings.permissionDefaults = { ...settings.permissionDefaults };
   for (const kind of permissionKinds) {
     if (settings.permissionDefaults[kind] !== "block") settings.permissionDefaults[kind] = "ask";

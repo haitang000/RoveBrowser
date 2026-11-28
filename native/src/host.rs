@@ -117,11 +117,15 @@ fn browsing_webview(
     context: &mut WebContext,
     environment: Option<ICoreWebView2Environment>,
     devtools_mcp: bool,
+    font_fingerprint_protection: bool,
 ) -> WebViewBuilder<'_> {
-    let builder = WebViewBuilder::new_with_web_context(context)
-        .with_additional_browser_args(browser_args(false, devtools_mcp))
-        .with_scroll_bar_style(ScrollBarStyle::FluentOverlay)
-        .with_browser_extensions_enabled(true);
+    let builder = web_settings::browsing_builder(
+        context,
+        browser_args(false, devtools_mcp),
+        font_fingerprint_protection,
+    )
+    .with_scroll_bar_style(ScrollBarStyle::FluentOverlay)
+    .with_browser_extensions_enabled(true);
     if let Some(environment) = environment {
         builder.with_environment(environment)
     } else {
@@ -493,8 +497,9 @@ struct App {
     /// Reuse the first WebView2 environment for every controller in the
     /// browsing profile. WebContext only stores its data path on Windows.
     web_environment: Option<ICoreWebView2Environment>,
-    // Snapshot the preference at startup for every WebView2 environment this process creates.
+    // These settings are fixed when the WebView2 environments start.
     devtools_mcp_enabled: bool,
+    font_fingerprint_protection: bool,
     devtools_mcp_from_env: bool,
     web_preference_failures: web_settings::StartupPreferenceFailures,
     state: State,
@@ -701,6 +706,7 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         context: WebContext::new(Some(browsing_data)),
         web_environment: None,
         devtools_mcp_enabled: state.settings.devtools_mcp || devtools_mcp_from_env,
+        font_fingerprint_protection: state.settings.font_fingerprint_protection,
         devtools_mcp_from_env,
         web_preference_failures,
         state,
@@ -1384,7 +1390,7 @@ impl App {
         let source_id = reader_id.clone();
         let initial_document = Cell::new(true);
         let ticket = self.reader_epoch;
-        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled, self.font_fingerprint_protection)
             .with_visible(false).with_focused(false).with_javascript_disabled()
             .with_transparent(true)
             .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
@@ -1955,7 +1961,7 @@ impl App {
     }
 
     fn clear_web_browsing_data(&mut self, kind: BrowsingDataKind) -> Result<WebView, Box<dyn std::error::Error>> {
-        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled, self.font_fingerprint_protection)
             .with_url("about:blank")
             .with_visible(false)
             .with_focused(false)
@@ -2194,7 +2200,7 @@ impl App {
         let id = tab.id.clone();
         let extension_id = url::Url::parse(&tab.url).ok()
             .as_ref().and_then(model::extension_id).map(str::to_owned);
-        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled, self.font_fingerprint_protection)
             .with_visible(false)
             .with_focused(false)
             .with_background_color(surface_color(self.state.theme == "dark"))
@@ -2379,7 +2385,7 @@ impl App {
             let epoch = self.preview_epoch;
             let key = tab.id.clone();
             let proxy = self.proxy.clone();
-            let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
+            let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled, self.font_fingerprint_protection)
                 .with_visible(false).with_focused(false)
                 .with_theme(if self.state.theme == "dark" { wry::Theme::Dark } else { wry::Theme::Light })
                 .with_background_color(surface_color(self.state.theme == "dark"))
@@ -3720,7 +3726,7 @@ impl App {
         let ticket = uuid::Uuid::new_v4();
         let proxy = self.proxy.clone();
         let view = crate::extension_view::build(
-            browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled),
+            browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled, self.font_fingerprint_protection),
             window,
             &page.url,
             page.options.as_ref(),
@@ -3856,7 +3862,7 @@ impl App {
         // Settings can be the only open tab. Use the browsing profile without
         // keeping an extra WebView that extensions would see as a tab.
         let window = self.window.as_ref().ok_or("窗口尚未就绪")?;
-        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled)
+        let view = browsing_webview(&mut self.context, self.web_environment.clone(), self.devtools_mcp_enabled, self.font_fingerprint_protection)
             .with_url("about:blank")
             .with_visible(false)
             .with_focused(false)
@@ -5532,7 +5538,10 @@ impl ApplicationHandler<Event> for App {
                     match request.command {
                         AgentCommand::Background(command) => self
                             .agent_tabs
-                            .get_or_insert_with(|| crate::agent_tabs::Tabs::new(self.agent_data.clone()))
+                            .get_or_insert_with(|| crate::agent_tabs::Tabs::new(
+                                self.agent_data.clone(),
+                                self.font_fingerprint_protection,
+                            ))
                             .run(window, command),
                         AgentCommand::Browser(command) => self
                             .agent_browser(command, event_loop)

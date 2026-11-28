@@ -20,9 +20,15 @@ await mkdir(downloads);
 await mkdir(output, { recursive: true });
 const port = 19786,
   checks = [];
+const webFont = await readFile(resolve("node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2"));
 let app, uiBrowser, webBrowser, ui;
 let cacheRequests = 0;
 const server = createServer((req, res) => {
+  if (req.url.startsWith("/probe-font.woff2")) {
+    res.writeHead(200, { "Content-Type": "font/woff2" });
+    res.end(webFont);
+    return;
+  }
   if (req.url === "/cache-check") {
     cacheRequests++;
     res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "max-age=3600" });
@@ -39,7 +45,10 @@ const server = createServer((req, res) => {
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(
-    '<!doctype html><title>Settings native fixture</title><h1>Settings native fixture</h1><a href="/file" download>Download fixture</a>',
+    '<!doctype html><title>Settings native fixture</title>' +
+    '<script>window.fontProbe = { enumeration: typeof queryLocalFonts, Face: FontFace };</script>' +
+    '<h1>Settings native fixture</h1><a href="/file" download>Download fixture</a>' +
+    (req.url === "/webrtc" ? '<iframe src="/font-frame" title="Font probe"></iframe>' : ""),
   );
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -155,6 +164,26 @@ async function hasDirectWebRtcCandidates(page) {
     }
   });
 }
+async function expectFontProtection(document, enabled) {
+  const probe = await document.evaluate(async () => {
+    const { enumeration, Face } = window.fontProbe;
+    const load = (source) => new Face("RoveFontProbe", source).load().then(() => true, () => false);
+    const url = "/probe-font.woff2?probe=local(font),fallback";
+    const bytes = await fetch(url).then((response) => response.arrayBuffer());
+    return {
+      enumeration,
+      local: await load(String.raw`l\6f cal(Arial)`),
+      fallback: await load('local(Arial), url("' + url + '") format("woff2")'),
+      binary: await load(bytes),
+    };
+  });
+  assert.deepEqual(probe, {
+    enumeration: enabled ? "undefined" : "function",
+    local: !enabled,
+    fallback: true,
+    binary: true,
+  });
+}
 async function openWebRtcFixture() {
   const url = base + "/webrtc";
   await send({ type: "new", url });
@@ -222,6 +251,8 @@ try {
   assert.equal(await secureDnsToggle("安全 DNS").getAttribute("aria-checked"), "true");
   await expectSecureDnsMode("automatic");
   assert.equal(await webRtcToggle("WebRTC 地址保护").getAttribute("aria-checked"), "false");
+  const fontToggle = (name = "Font fingerprinting protection") => ui.getByRole("switch", { name, exact: true });
+  assert.equal(await fontToggle("字体指纹保护").getAttribute("aria-checked"), "false");
   checks.push("设置以内部标签页展示、复用，分类地址由 Rust 保存");
   await ui.screenshot({ path: join(output, "native-settings-privacy.png") });
   await ui.getByRole("button", { name: "关于 Rove", exact: true }).click();
@@ -258,6 +289,7 @@ try {
   );
   await page.locator("h1").waitFor();
   assert.equal(await hasDirectWebRtcCandidates(page), true);
+  await expectFontProtection(page, false);
   // Playwright's CDP default denies downloads. Restore WebView2 behavior without
   // supplying a destination: the application must choose the saved folder.
   const downloadSession = await page.context().newCDPSession(page);
@@ -396,6 +428,8 @@ try {
   await expectSecureDnsMode("automatic");
   await webRtcToggle("WebRTC address protection").click();
   await waitFor(async () => (await state()).settings.webRtcAddressProtection, "enable WebRTC address protection");
+  await fontToggle().click();
+  await waitFor(async () => (await state()).settings.fontFingerprintProtection, "enable font fingerprinting protection");
   await Promise.all([
     page.waitForEvent("close"),
     send({ type: "close", id: fixtureId }),
@@ -406,7 +440,7 @@ try {
   const englishTracking = ui.getByRole("combobox", { name: "Tracking prevention", exact: true });
   await englishTracking.selectOption("strict");
   await waitFor(async () => (await state()).settings.trackingProtection === "strict", "save tracking prevention with only Settings open");
-  await openWebRtcFixture();
+  await expectFontProtection(await openWebRtcFixture(), false);
   await send({ type: "settingsOpen", pane: "privacy" });
   await englishTracking.waitFor();
   await stop();
@@ -437,9 +471,14 @@ try {
   assert.equal(await secureDnsToggle().getAttribute("aria-checked"), "false");
   await expectSecureDnsMode("off");
   assert.equal(await webRtcToggle("WebRTC address protection").getAttribute("aria-checked"), "true");
+  assert.equal(await fontToggle().getAttribute("aria-checked"), "true");
   await ui.screenshot({ path: join(output, "native-settings-restored.png") });
   checks.push("设置和浏览器菜单即时切换英语；重启后恢复界面语言、引擎、外观、动态效果、快捷键、下载路径及设置分类");
-  assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), false);
+  const protectedPage = await openWebRtcFixture();
+  assert.equal(await hasDirectWebRtcCandidates(protectedPage), false);
+  await expectFontProtection(protectedPage, true);
+  await protectedPage.frameLocator("iframe").locator("h1").waitFor();
+  await expectFontProtection(protectedPage.frame({ url: base + "/font-frame" }), true);
   assert.equal(await ui.evaluate(() => window.__settingsTest.events.some((e) => e.type === "error" && /跟踪防护/.test(e.message))), false);
   checks.push("有网页时可切换跟踪防护，关闭最后一个网页后仍可保存，并在重新打开网页和重启后应用严格等级");
   await send({ type: "settingsOpen", pane: "privacy" });
@@ -447,14 +486,20 @@ try {
   await waitFor(async () => (await state()).settings.secureDns === true, "enable Secure DNS");
   await webRtcToggle("WebRTC address protection").click();
   await waitFor(async () => (await state()).settings.webRtcAddressProtection === false, "disable WebRTC address protection");
+  await fontToggle().click();
+  await waitFor(async () => (await state()).settings.fontFingerprintProtection === false, "disable font fingerprinting protection");
   await stop();
   await launch();
   assert.equal(await secureDnsToggle().getAttribute("aria-checked"), "true");
   await expectSecureDnsMode("automatic");
   checks.push("旧配置默认开启安全 DNS，关闭或重新开启后于下次启动应用到各 WebView2 环境");
   assert.equal((await state()).settings.webRtcAddressProtection, false);
-  assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), true);
+  assert.equal(await fontToggle().getAttribute("aria-checked"), "false");
+  const unprotectedPage = await openWebRtcFixture();
+  assert.equal(await hasDirectWebRtcCandidates(unprotectedPage), true);
   checks.push("WebRTC 地址保护默认关闭，重启后阻止直连 UDP 候选，关闭后再次重启恢复直连 UDP");
+  await expectFontProtection(unprotectedPage, false);
+  checks.push("字体指纹保护默认关闭，重启后限制主页面及子框架读取本机字体，网络字体和二进制字体可正常加载，关闭重启后恢复");
 
   await send({ type: "settingsOpen" });
   await ui.getByRole("button", { name: "Experimental", exact: true }).click();
