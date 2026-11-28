@@ -115,6 +115,8 @@ export const traditionalChinese: Readonly<Record<string, string>> = {
   "WebRTC 地址保护": "WebRTC 位址保護",
   "限制 WebRTC 使用未经过代理的 UDP 连接，减少 IP 地址暴露。部分音视频通话可能受影响。": "限制 WebRTC 使用未經代理伺服器的 UDP 連線，以減少 IP 位址暴露。部分語音和視訊通話可能會受到影響。",
   "更改后重启 Rove 生效。": "重新啟動 Rove 後套用變更。",
+  "重启 Rove 以应用设置更改。": "重新啟動 Rove 以套用設定變更。",
+  "立即重启": "立即重新啟動",
   "无法应用 WebRTC 地址保护设置，请重启 Rove 后重试。": "無法套用 WebRTC 位址保護設定，請重新啟動 Rove 後再試一次。",
   "浏览数据": "瀏覽資料",
   "记录浏览历史": "保留瀏覽紀錄",

@@ -18,6 +18,7 @@ import {
   SIDEBAR_DENSITIES,
   TRACKING_PROTECTION_LEVELS,
   settingsPane,
+  settingsFor,
   settingsPermission,
   shortcutFor,
   shortcutText,
@@ -178,6 +179,12 @@ type Row = {
 };
 type Group = { pane: SettingsPane; title: string; rows: Row[] };
 const devtoolsMcpFromEnv = window.__ERA_DEVTOOLS_MCP_FROM_ENV__ === true;
+const startupSettings = settingsFor(window.__ERA_INITIAL_STATE__?.settings);
+const restartRequired = computed(() => b.native && (
+  b.settings.secureDns !== startupSettings.secureDns ||
+  b.settings.webRtcAddressProtection !== startupSettings.webRtcAddressProtection ||
+  (!devtoolsMcpFromEnv && b.settings.devtoolsMcp !== startupSettings.devtoolsMcp)
+));
 const groups = computed<Group[]>(() => [
   {
     pane: "general",
@@ -788,6 +795,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 @keydown.esc.stop="query = ''"
               />
             </label>
+            <div v-if="restartRequired" class="settings-restart">
+              <span role="status">{{ b.t('重启 Rove 以应用设置更改。') }}</span>
+              <button type="button" class="primary-button" :disabled="b.updating" @click="b.send({ type: 'restart' })">
+                {{ b.t('立即重启') }}
+              </button>
+            </div>
             <h2>
               <Icon :name="searching ? 'search' : paneMeta.icon" :size="19" />
               {{ searching ? b.t('搜索结果') : b.t(paneMeta.title) }}

@@ -69,9 +69,11 @@ pub fn sync_startup_preferences(
     settings: &Settings,
 ) -> StartupPreferenceFailures {
     let mut failures = StartupPreferenceFailures::default();
+    // A WebView2 process can outlive Rove. All profiles share one startup deadline.
+    let deadline = Instant::now() + Duration::from_secs(15);
     for (profile, uses_webrtc) in [(ui, false), (browsing, true), (agent, true)] {
         let browser_data = profile.join("EBWebView");
-        if let Err(error) = wait_for_profile(&browser_data) {
+        if let Err(error) = wait_for_profile(&browser_data, deadline) {
             eprintln!("Rove WebView2 ({}): {error}", profile.display());
             failures.secure_dns = true;
             failures.web_rtc |= uses_webrtc;
@@ -94,9 +96,8 @@ pub fn sync_startup_preferences(
     failures
 }
 
-fn wait_for_profile(browser_data: &Path) -> io::Result<()> {
+fn wait_for_profile(browser_data: &Path, deadline: Instant) -> io::Result<()> {
     let lock = browser_data.join("lockfile");
-    let deadline = Instant::now() + Duration::from_secs(5);
     while lock.try_exists()? {
         if Instant::now() >= deadline {
             return Err(io::Error::new(

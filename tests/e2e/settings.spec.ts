@@ -1,5 +1,6 @@
 import { chooseBrowserMenuItem } from "./browser-menu";
 import { expect, test } from "@playwright/test";
+import type { Settings } from "../../src/lib/settings";
 import type { Command } from "../../src/lib/types";
 
 test.beforeEach(async ({ page }) => {
@@ -148,6 +149,51 @@ test("DevTools MCP has a dedicated experimental setting and appears in search", 
   await expect(toggle).toBeChecked();
   await toggle.click();
   await expect(toggle).not.toBeChecked();
+});
+
+test("desktop settings offer a restart until all startup preferences are restored", async ({ page }) => {
+  type RestartTestWindow = Window & { restartCommands: Command[] };
+  await page.addInitScript(() => {
+    const w = window as RestartTestWindow;
+    w.__ERA_NATIVE__ = true;
+    w.__ERA_INITIAL_STATE__ = {
+      spaces: [{ id: "personal", name: "Personal", color: "sky" }],
+      activeSpace: "personal", activeTab: "settings",
+      tabs: [{ id: "settings", spaceId: "personal", title: "设置", url: "rove://settings/privacy", pinned: false }],
+      favorites: [], pins: [], theme: "dark", sidebarCollapsed: false, closed: [],
+    };
+    const initial = w.__ERA_INITIAL_STATE__;
+    w.restartCommands = [];
+    w.ipc = { postMessage(text) {
+      const command: Command = JSON.parse(text);
+      if (command.type === "settingsUpdate") {
+        w.__ERA_RECEIVE__?.({ type: "state", state: { ...initial, settings: command.settings as Settings } });
+      } else if (command.type === "restart") {
+        w.restartCommands.push(command);
+      }
+    } };
+  });
+  await page.reload();
+
+  const header = page.locator(".settings-page-header");
+  const restart = header.getByRole("button", { name: "立即重启", exact: true });
+  const dns = page.getByRole("switch", { name: "安全 DNS", exact: true });
+  const rtc = page.getByRole("switch", { name: "WebRTC 地址保护", exact: true });
+  await page.getByRole("combobox", { name: "跟踪防护", exact: true }).selectOption("strict");
+  await expect(restart).toHaveCount(0);
+  await dns.click();
+  await expect(header.getByRole("status")).toHaveText("重启 Rove 以应用设置更改。");
+  await rtc.click();
+  await dns.click();
+  await expect(restart).toBeVisible();
+  await rtc.click();
+  await expect(restart).toHaveCount(0);
+
+  await header.getByRole("searchbox").fill("DevTools MCP");
+  await page.getByRole("switch", { name: "Chrome DevTools MCP", exact: true }).click();
+  await expect(restart).toBeVisible();
+  await restart.click();
+  await expect.poll(() => page.evaluate(() => (window as RestartTestWindow).restartCommands)).toEqual([{ type: "restart" }]);
 });
 
 test("read aloud starts off and the accessibility switch follows the interface language", async ({ page }) => {

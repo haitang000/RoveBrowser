@@ -157,6 +157,25 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
+.settings-restart {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--edge));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 11%, var(--settings-group-bg));
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.settings-restart button {
+  flex: none;
+  margin-inline-start: auto;
+  font-size: 12px;
+}
 .settings-scroll {
   position: relative;
   flex: 1;

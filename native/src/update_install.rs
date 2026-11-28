@@ -7,7 +7,6 @@ use std::{
     io::{self, Read},
     os::windows::{
         fs::{MetadataExt, OpenOptionsExt},
-        io::{AsRawHandle, FromRawHandle, OwnedHandle},
         process::CommandExt,
     },
     path::{Component, Path, PathBuf},
@@ -28,10 +27,7 @@ use windows::{
     },
     UI::Notifications::{ToastNotification, ToastNotificationManager},
 };
-use windows_sys::Win32::{
-    Foundation::{ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
-    System::Threading::{OpenProcess, WaitForSingleObject, CREATE_NO_WINDOW, PROCESS_SYNCHRONIZE},
-};
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 use winreg::{
     enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY},
     RegKey,
@@ -292,28 +288,6 @@ pub fn run_helper() -> bool {
     true
 }
 
-fn wait_for_exit(pid: u32) -> io::Result<()> {
-    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
-    if handle.is_null() {
-        let error = io::Error::last_os_error();
-        // The browser can finish shutdown before the helper opens the handle.
-        return if pid != 0 && error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
-            Ok(())
-        } else {
-            Err(error)
-        };
-    }
-    let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
-    if unsafe { WaitForSingleObject(handle.as_raw_handle(), 45_000) } == WAIT_OBJECT_0 {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "等待 Rove 退出超时",
-        ))
-    }
-}
-
 fn show_restart_notification() -> Result<(), Box<dyn std::error::Error>> {
     const APP_ID: &str = "Rove.Browser.Updates";
     const TOAST: &str = r#"<toast>
@@ -356,7 +330,7 @@ fn run_update(id: Uuid, parent: u32, target: &Path, kind: PackageKind, hash: &st
     let stage = portable_stage(directory, id);
     let downloaded = workspace(id).join(kind.file());
     let result = (|| -> Result<(), String> {
-        wait_for_exit(parent).map_err(|e| e.to_string())?;
+        crate::instance::wait_for_exit(parent).map_err(|e| e.to_string())?;
         // Different profiles can run the same executable. Serialize mutations
         // and reject a prepared update if another process has already applied one.
         let _lock = OpenOptions::new()

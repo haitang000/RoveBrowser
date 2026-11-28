@@ -3,9 +3,13 @@
 use std::{
     fs::{File, OpenOptions},
     hash::{Hash, Hasher},
-    io::{Read, Write},
-    os::windows::io::{AsRawHandle, FromRawHandle},
+    io::{self, Read, Write},
+    os::windows::{
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        process::CommandExt,
+    },
     path::Path,
+    process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -23,7 +27,62 @@ use windows::{
         },
     },
 };
+use windows_sys::Win32::{
+    Foundation::{ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
+    System::Threading::{OpenProcess, WaitForSingleObject, CREATE_NO_WINDOW, PROCESS_SYNCHRONIZE},
+};
 const MAX_MESSAGE: usize = 65536;
+const RESTART_AFTER: &str = "--restart-after";
+
+pub fn restart() -> io::Result<()> {
+    Command::new(std::env::current_exe()?)
+        .arg(RESTART_AFTER)
+        .arg(std::process::id().to_string())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+    Ok(())
+}
+
+pub fn startup_urls() -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut args = std::env::args_os().skip(1).peekable();
+    if !args.peek().is_some_and(|arg| arg == RESTART_AFTER) {
+        return Ok(urls(args)?);
+    }
+    args.next();
+    let pid = args
+        .next()
+        .and_then(|arg| arg.to_str()?.parse::<u32>().ok())
+        .filter(|&pid| pid != 0 && pid != std::process::id())
+        .ok_or("重启参数无效")?;
+    if args.next().is_some() {
+        return Err("重启参数无效".into());
+    }
+    // Wait before claiming the profile, so the child cannot hand off to its parent.
+    wait_for_exit(pid)?;
+    Ok(Vec::new())
+}
+
+pub fn wait_for_exit(pid: u32) -> io::Result<()> {
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if handle.is_null() {
+        let error = io::Error::last_os_error();
+        // The browser can finish shutdown before the child opens the handle.
+        return if pid != 0 && error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+            Ok(())
+        } else {
+            Err(error)
+        };
+    }
+    let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+    if unsafe { WaitForSingleObject(handle.as_raw_handle(), 45_000) } == WAIT_OBJECT_0 {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "等待 Rove 退出超时",
+        ))
+    }
+}
 
 pub fn urls(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Vec<String>, String> {
     let mut urls = vec![];

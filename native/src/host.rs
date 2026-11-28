@@ -556,7 +556,7 @@ struct PreviewRender {
 pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Keep the existing profile location so the rename preserves sessions and logins.
     let data = crate::codex_mcp::profile_dir().ok_or("无法定位用户数据目录")?;
-    let external_urls = crate::instance::urls(std::env::args_os().skip(1))?;
+    let external_urls = crate::instance::startup_urls()?;
     let Some(mut instance) = crate::instance::Instance::claim(&data, &external_urls)? else { return Ok(()); };
     crate::codex_mcp::Listener::clear_stale_endpoint(&data);
     let mut storage = Storage::open(&data)?;
@@ -4803,6 +4803,15 @@ impl App {
                     if let Some(id) = self.pending_download_review.take() {
                         self.review_download(id);
                     }
+                }
+                return;
+            }
+            Command::Restart => {
+                let Some(event_loop) = event_loop else { return };
+                if event_loop.exiting() || self.updating || !self.flush_session() { return; }
+                match crate::instance::restart() {
+                    Ok(()) => event_loop.exit(),
+                    Err(error) => self.error(format!("无法重新启动 Rove：{error}")),
                 }
                 return;
             }
