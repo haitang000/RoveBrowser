@@ -272,12 +272,6 @@
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
-.settings-group-detail {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--quiet);
-}
 .settings-group h3.settings-result-heading {
   display: flex;
   flex-wrap: wrap;
@@ -849,4 +843,3 @@
     grid-column: 1;
   }
 }
-.permission-description { overflow-wrap: anywhere; }

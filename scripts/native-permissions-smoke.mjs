@@ -98,6 +98,14 @@ async function expectTitle(page, value) {
   await until(async () => (await page.title()) === value, `notification result ${value}`);
 }
 
+async function openPermission(name) {
+  await send({ type: "settingsOpen", pane: "privacy" });
+  const overview = shell.getByRole("region", { name: "网站权限", exact: true });
+  if (name === "屏幕共享") await overview.getByRole("button", { name: "更多权限" }).click();
+  await overview.getByRole("button", { name, exact: true }).click();
+  return shell.getByRole("region", { name, exact: true });
+}
+
 try {
   await launch();
   await send({ type: "new", url: address });
@@ -131,11 +139,11 @@ try {
   await card().press("Escape");
   await card().waitFor({ state: "hidden", timeout: 8000 });
 
-  await send({ type: "settingsOpen", pane: "privacy" });
-  const defaultNotifications = () => shell.getByRole("combobox", { name: "通知", exact: true });
-  assert.equal(await defaultNotifications().inputValue(), "ask");
-  await defaultNotifications().selectOption("block");
-  await until(async () => (await defaultNotifications().inputValue()) === "block", "block notifications by default");
+  await openPermission("通知");
+  const askNotifications = () => shell.getByRole("radio", { name: "网站可以请求发送通知" });
+  const blockNotifications = () => shell.getByRole("radio", { name: "阻止网站发送通知" });
+  assert.equal(await askNotifications().isChecked(), true);
+  await blockNotifications().check();
   await send({ type: "new", url: `${otherAddress}?blocked` });
   const blocked = await pageAt(`${otherAddress}?blocked`);
   await ask(blocked);
@@ -150,10 +158,10 @@ try {
   await expectTitle(site, "granted");
   assert.equal(await card().count(), 0);
 
-  await send({ type: "settingsOpen", pane: "privacy" });
-  const rule = shell.getByLabel(`通知 · ${origin}`);
+  const notifications = await openPermission("通知");
+  const rule = notifications.getByRole("combobox", { name: `更改 ${origin} 的权限` });
   await rule.waitFor({ timeout: 8000 });
-  assert.equal(await defaultNotifications().inputValue(), "block");
+  assert.equal(await blockNotifications().isChecked(), true);
   assert.equal(await rule.inputValue(), "allow");
   await rule.selectOption({ label: "使用默认设置" });
   await rule.waitFor({ state: "detached", timeout: 8000 });
@@ -163,8 +171,21 @@ try {
   await expectTitle(site, "denied");
   assert.equal(await card().count(), 0);
 
-  await send({ type: "settingsOpen", pane: "privacy" });
-  await defaultNotifications().selectOption("ask");
+  await openPermission("通知");
+  await notifications.getByRole("group", { name: "允许的网站" }).getByRole("button", { name: "添加" }).click();
+  const add = shell.getByRole("dialog", { name: "添加允许的网站" });
+  await add.getByRole("textbox", { name: "网站地址" }).fill(origin);
+  await add.getByRole("button", { name: "添加" }).click();
+  await rule.waitFor({ timeout: 8000 });
+  await send({ type: "new", url: `${address}?explicit-allow` });
+  site = await pageAt(`${address}?explicit-allow`);
+  await ask(site);
+  await expectTitle(site, "granted");
+
+  await openPermission("通知");
+  await rule.selectOption({ label: "使用默认设置" });
+  await rule.waitFor({ state: "detached", timeout: 8000 });
+  await askNotifications().check();
   await send({ type: "new", url: `${address}?ask` });
   site = await pageAt(`${address}?ask`);
   await ask(site);
@@ -194,8 +215,8 @@ try {
   await Promise.all([embed.waitForEvent("domcontentloaded"), send({ type: "reload" })]);
   await card().waitFor({ state: "hidden", timeout: 8000 });
 
-  await send({ type: "settingsOpen", pane: "privacy" });
-  await shell.getByRole("combobox", { name: "屏幕共享", exact: true }).selectOption("block");
+  const screenSettings = await openPermission("屏幕共享");
+  await screenSettings.getByRole("radio", { name: "阻止网站共享屏幕" }).check();
   await send({ type: "new", url: `${address}?screen-blocked` });
   site = await pageAt(`${address}?screen-blocked`);
   await site.getByRole("button", { name: "Share screen" }).click();

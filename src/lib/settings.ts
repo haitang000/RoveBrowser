@@ -1,7 +1,7 @@
 // Ported from Zigzag SettingsView, SettingsPage, SearchEngine and Shortcuts.
 // Copyright 2026 Zigao Wang. Apache-2.0; adapted for Windows and Vue.
 import { DEFAULT_INTERFACE_LANGUAGE, interfaceLanguage, type InterfaceLanguage } from "./language";
-import { permissionKinds, type PermissionDefault, type PermissionKind } from "./permissions";
+import { permissionKinds, sitePermissionOrder, type PermissionDefault, type PermissionKind } from "./permissions";
 
 export const SETTINGS_PANES = [
   {
@@ -275,7 +275,15 @@ export function settingsPane(value: string): SettingsPane {
     : "";
   return SETTINGS_PANES.find((pane) => pane.id === path)?.id || "general";
 }
-export function settingsUrl(pane: SettingsPane = "general"): string {
+export type PermissionSettingsPath = `privacy/permissions/${PermissionKind}`;
+
+export function settingsPermission(value: string): PermissionKind | undefined {
+  if (!isSettingsUrl(value)) return;
+  const path = new URL(value).pathname;
+  return sitePermissionOrder.find((kind) => path === `/privacy/permissions/${kind}`);
+}
+
+export function settingsUrl(pane: SettingsPane | PermissionSettingsPath = "general"): string {
   return `rove://settings${pane === "general" ? "" : "/" + pane}`;
 }
 export function validSearchTemplate(template: string): boolean {

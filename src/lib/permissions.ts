@@ -11,6 +11,15 @@ export const permissions = {
 export type PermissionKind = keyof typeof permissions;
 export type PermissionDefault = "ask" | "block";
 export const permissionKinds = Object.keys(permissions) as PermissionKind[];
+export const sitePermissionOrder = ["location", "camera", "microphone", "notifications", "screen"] as const;
+
+export const permissionBehavior = {
+  location: { ask: "网站可以请求访问你的位置", block: "阻止网站访问你的位置" },
+  camera: { ask: "网站可以请求使用摄像头", block: "阻止网站使用摄像头" },
+  microphone: { ask: "网站可以请求使用麦克风", block: "阻止网站使用麦克风" },
+  notifications: { ask: "网站可以请求发送通知", block: "阻止网站发送通知" },
+  screen: { ask: "网站可以请求共享屏幕", block: "阻止网站共享屏幕" },
+} as const satisfies Record<PermissionKind, Record<PermissionDefault, string>>;
 
 export interface PermissionScope {
   page: string;
@@ -19,6 +28,23 @@ export interface PermissionScope {
 }
 
 export type PermissionRule = [scope: PermissionScope, allowed: boolean];
+
+export function samePermissionScope(a: PermissionScope, b: PermissionScope): boolean {
+  return a.kind === b.kind && a.requester === b.requester && a.page === b.page;
+}
+
+export function permissionOrigin(input: string): string | undefined {
+  const address = input.trim();
+  if (!address || /[\s\\*]/.test(address)) return;
+  try {
+    const url = new URL(address.includes("://") ? address : `https://${address}`);
+    if ((url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password) {
+      return url.origin;
+    }
+  } catch {
+    return;
+  }
+}
 
 export interface PermissionPrompt {
   id: string;

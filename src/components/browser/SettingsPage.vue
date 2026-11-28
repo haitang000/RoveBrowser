@@ -18,6 +18,7 @@ import {
   SIDEBAR_DENSITIES,
   TRACKING_PROTECTION_LEVELS,
   settingsPane,
+  settingsPermission,
   shortcutFor,
   shortcutText,
   shortcutFromEvent,
@@ -36,9 +37,10 @@ import SpaceIdentityEditor from "./SpaceIdentityEditor.vue";
 import SpaceLookEditor from "./SpaceLookEditor.vue";
 import { commandLook, committed, frameOf, lookOf, openDraft, type LookFields } from "../../lib/space-look";
 import { paneDirection } from "../../lib/page-motion";
-import { permissionKinds, permissions, type PermissionKind, type PermissionScope } from "../../lib/permissions";
+import { permissionBehavior, permissions, sitePermissionOrder, type PermissionKind } from "../../lib/permissions";
 import SettingsAbout from "./SettingsAbout.vue";
 import SettingsExtensions from "./SettingsExtensions.vue";
+import SettingsSitePermissions from "./SettingsSitePermissions.vue";
 const props = defineProps<{ tabId: string; url: string }>();
 const b = useBrowser(),
   query = ref(""),
@@ -128,26 +130,53 @@ const words = computed(() => settingsSearchWords(query.value));
 function matches(...text: string[]) {
   return matchesSettingsSearch(words.value, ...text);
 }
-const visiblePermissionRules = computed(() => b.permissionRules.filter(([scope]) =>
-  matches(b.t("网站权限"), b.t(permissions[scope.kind].name), scope.page, scope.requester, "site permissions"),
-));
-function setPermission(scope: PermissionScope, event: Event) {
-  const choice = (event.target as HTMLSelectElement).value;
-  b.send({ type: "permissionRule", scope, allowed: choice === "default" ? null : choice === "allow" });
+const permissionDetail = computed(() => settingsPermission(props.url));
+const morePermissions = ref(false);
+const permissionSiteFilter = ref("");
+let permissionBack = false;
+const visiblePermissions = computed(() => {
+  if (!searching.value) return pane.value === "privacy" ? sitePermissionOrder : [];
+  if (matches(b.t("隐私"), b.t("网站权限"), b.t("网站权限默认行为"), "privacy site permissions default")) {
+    return sitePermissionOrder;
+  }
+  return sitePermissionOrder.filter((kind) =>
+    matches(b.t(permissions[kind].name), b.t(permissionBehavior[kind].ask), b.t(permissionBehavior[kind].block), kind) ||
+    (kind === "screen" && matches(b.t("更多权限"), "more permissions")) ||
+    b.permissionRules.some(([scope]) => scope.kind === kind &&
+      matches(b.t(permissions[kind].name), b.t("网站权限"), scope.page, scope.requester)),
+  );
+});
+function openPermission(kind: PermissionKind) {
+  if (kind === "screen") morePermissions.value = true;
+  permissionSiteFilter.value = searching.value && b.permissionRules.some(([scope]) =>
+    scope.kind === kind && matches(scope.page, scope.requester),
+  ) ? query.value.trim() : "";
+  query.value = "";
+  b.send({ type: "settingsPane", id: props.tabId, pane: `privacy/permissions/${kind}` });
 }
+function closePermission() {
+  permissionBack = true;
+  pick("privacy");
+}
+watch(permissionDetail, async (kind, previous) => {
+  const back = permissionBack;
+  permissionBack = false;
+  await nextTick();
+  if (kind) document.getElementById(`permission-heading-${props.tabId}`)?.focus();
+  else if (back && previous) document.getElementById(`permission-${previous}-${props.tabId}`)?.focus();
+});
 type Row = {
   id: string;
   title: string;
   detail: string;
   kind: "toggle" | "select" | "input" | "button" | "status";
   setting?: keyof Settings;
-  permission?: PermissionKind;
   forcedOn?: boolean;
   options?: readonly (readonly [string | number, string])[];
   action?: string;
   keywords?: string;
 };
-type Group = { pane: SettingsPane; title: string; detail?: string; rows: Row[] };
+type Group = { pane: SettingsPane; title: string; rows: Row[] };
 const devtoolsMcpFromEnv = window.__ERA_DEVTOOLS_MCP_FROM_ENV__ === true;
 const groups = computed<Group[]>(() => [
   {
@@ -459,20 +488,6 @@ const groups = computed<Group[]>(() => [
     ],
   },
   {
-    pane: "privacy",
-    title: b.t("网站权限默认行为"),
-    detail: b.t("已保存的网站权限优先。"),
-    rows: permissionKinds.map((kind) => ({
-      id: `permission-${kind}`,
-      title: b.t(permissions[kind].name),
-      detail: "",
-      kind: "select",
-      permission: kind,
-      options: [["ask", b.t("询问")], ["block", b.t("阻止")]],
-      keywords: `site permissions default ${kind}`,
-    })),
-  },
-  {
     pane: "translation",
     title: b.t("网页翻译"),
     rows: [
@@ -564,6 +579,7 @@ const noResults = computed(
   () =>
     searching.value &&
     !visibleGroups.value.length &&
+    !visiblePermissions.value.length &&
     !showSpaces.value &&
     !showShortcuts.value &&
     !showAboutResult.value &&
@@ -580,7 +596,6 @@ function update(key: keyof Settings, value: unknown) {
 }
 function value(row: Row) {
   if (row.forcedOn) return true;
-  if (row.permission) return b.settings.permissionDefaults[row.permission];
   return row.id === "theme"
     ? b.state.theme
     : row.setting
@@ -591,8 +606,6 @@ function select(row: Row, event: Event) {
   const selected = (event.target as HTMLSelectElement).value;
   if (row.id === "theme") {
     if (selected !== b.state.theme) b.send({ type: "theme" });
-  } else if (row.permission) {
-    update("permissionDefaults", { ...b.settings.permissionDefaults, [row.permission]: selected });
   } else if (row.setting) {
     const option = row.options?.find(([value]) => String(value) === selected);
     if (row.id === "engine") focusCustomSearch = selected === "custom" && !custom.value;
@@ -784,6 +797,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
         <div ref="scroll" class="settings-scroll" :data-page-dir="paneDir">
           <Transition name="settings-pane">
           <div :key="pane" class="settings-content">
+            <SettingsSitePermissions v-if="permissionDetail && !searching" :key="permissionDetail" :tab-id="tabId"
+              :kind="permissionDetail" :initial-filter="permissionSiteFilter" @back="closePermission" />
+            <template v-else>
             <SettingsAbout v-if="pane === 'about' && !searching" :tab-id="tabId" @confirm-update="askToUpdate" />
             <SettingsExtensions v-if="pane === 'extensions' && !searching" />
             <button v-if="showExtensionsResult" class="about-search-result" @click="pick('extensions')">
@@ -822,7 +838,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 </span>
                 <span><SearchHighlight :text="group.title" :words="words" /></span>
               </h3>
-              <p v-if="group.detail" class="settings-group-detail">{{ group.detail }}</p>
               <div v-for="row in group.rows" :key="row.id" class="setting-row" :class="{ 'setting-engine-row': row.id === 'engine' }">
                 <div class="setting-description">
                   <label :for="`setting-${row.id}-${tabId}`"><SearchHighlight :text="row.title" :words="words" /></label>
@@ -907,29 +922,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
                 </li>
               </ul>
             </section>
-            <section
-              v-if="b.native && (searching ? visiblePermissionRules.length : pane === 'privacy')"
-              class="settings-group"
-              :aria-label="b.t('网站权限')"
-            >
-              <h3>{{ b.t('网站权限') }}</h3>
-              <div v-if="!visiblePermissionRules.length" class="setting-row">
-                <div class="setting-description"><p>{{ b.t('你还没有保存任何网站的权限选择。') }}</p></div>
-              </div>
-              <div v-for="([scope, allowed], index) in visiblePermissionRules"
-                :key="JSON.stringify(scope)" class="setting-row">
-                <div class="setting-description permission-description">
-                  <label :for="`permission-rule-${tabId}-${index}`">{{ b.t(permissions[scope.kind].name) }} · <bdi>{{ scope.requester }}</bdi></label>
-                  <p v-if="scope.page !== scope.requester">{{ b.t('嵌入在') }} <bdi>{{ scope.page }}</bdi></p>
-                </div>
-                <select :id="`permission-rule-${tabId}-${index}`" class="setting-select" :value="allowed ? 'allow' : 'block'"
-                  @change="setPermission(scope, $event)">
-                  <option value="default">{{ b.t('使用默认设置') }}</option>
-                  <option value="allow">{{ b.t('允许') }}</option>
-                  <option value="block">{{ b.t('阻止') }}</option>
-                </select>
-              </div>
-            </section>
+            <SettingsSitePermissions v-if="visiblePermissions.length" v-model:more="morePermissions" :tab-id="tabId"
+              :kinds="visiblePermissions" :words="words" @open="openPermission" />
             <section
               v-if="showSpaces"
               class="settings-group"
@@ -1048,6 +1042,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", record, true));
             <p v-if="noResults" class="settings-empty">
               {{ b.t('没有找到与“{query}”匹配的设置。', { query: query.trim() }) }}
             </p>
+            </template>
           </div>
           </Transition>
         </div>

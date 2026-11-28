@@ -16,7 +16,7 @@ import { address, host } from "../lib/address";
 import { normalizeFindQuery } from "../lib/find";
 import type { ReaderState } from "../lib/reader";
 import type { ExtensionsState } from "../lib/extensions";
-import type { PermissionPrompt, PermissionRule } from "../lib/permissions";
+import { samePermissionScope, type PermissionPrompt, type PermissionRule, type PermissionScope } from "../lib/permissions";
 import { nowSeconds } from "../lib/tab-meta";
 import { activeDownloadCount, isActiveDownload } from "../lib/downloads";
 import { SHORTCUTS, SIDEBAR_DENSITY_STORAGE_KEY, sameShortcut, settingsFor, shortcutFor, shortcutText, sidebarDensityFor, type BrowsingDataKind, type SettingsPane, type UpdateChannel } from "../lib/settings";
@@ -489,6 +489,11 @@ export const useBrowser = defineStore("browser", () => {
         previewHistoryPage(String(c.ticket), c as Command & HistoryQuery);
       } else if (c.type === "historyEdit") {
         previewHistoryEdit(String(c.ticket), c.change as HistoryEdit);
+      } else if (c.type === "permissionRule") {
+        const scope = c.scope as PermissionScope;
+        const rules = permissionRules.value.filter(([current]) => !samePermissionScope(current, scope));
+        if (typeof c.allowed === "boolean") rules.push([scope, c.allowed]);
+        permissionRules.value = rules;
       } else if (c.type === "clearBrowsingData" && c.kind === "history") {
         previewHistory.clear();
         previewHistoryUndo = [];

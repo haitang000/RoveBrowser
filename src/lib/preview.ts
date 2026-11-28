@@ -5,7 +5,7 @@ import { favorite, MAX_FAVORITES, sameFavoriteUrl } from "./favorites";
 import { activateTab, bookmarkCommand, openBookmark, removeBookmark, savedPage, upgradeLibrary } from "./bookmarks";
 import { tabsToDismiss } from "./command";
 import { sameOrigin } from "./favicon";
-import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type SettingsPane, type Settings } from "./settings";
+import { isSettingsUrl, settingsUrl, settingsFor, validSearchTemplate, validateShortcuts, type PermissionSettingsPath, type SettingsPane, type Settings } from "./settings";
 import { nowSeconds, tabIsFaded } from "./tab-meta";
 import { cleanIcon } from "./space-icon";
 import { paintKeys } from "./space-look";
@@ -128,7 +128,7 @@ export function reduce(s: BrowserState, c: Command): BrowserState {
       break;
     }
     case "settingsPane": {
-      const t = tab(); if (t && isSettingsUrl(t.url)) t.url = settingsUrl(c.pane as SettingsPane);
+      const t = tab(); if (t && isSettingsUrl(t.url)) t.url = settingsUrl(c.pane as SettingsPane | PermissionSettingsPath);
       break;
     }
     case "historyOpen": {

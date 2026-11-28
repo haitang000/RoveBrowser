@@ -134,6 +134,13 @@ pub fn normalize_settings_url(value: &str) -> Option<String> {
 }
 pub fn settings_url(pane: Option<&str>) -> String {
     match pane {
+        Some(p @ (
+            "privacy/permissions/location"
+            | "privacy/permissions/camera"
+            | "privacy/permissions/microphone"
+            | "privacy/permissions/notifications"
+            | "privacy/permissions/screen"
+        )) => format!("rove://settings/{p}"),
         Some(
             p @ ("appearance" | "spaces" | "passwords" | "privacy" | "translation" | "accessibility" | "extensions" | "experimental" | "shortcuts" | "about"),
         ) => format!("rove://settings/{p}"),

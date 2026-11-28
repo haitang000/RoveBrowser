@@ -23,6 +23,7 @@ const paths: Record<string, string> = {
   microphone: "M6 3a2 2 0 1 1 4 0v4a2 2 0 1 1-4 0zM3.5 7a4.5 4.5 0 0 0 9 0M8 11.5V15M6 15h4",
   location: "M13 6c0 3-5 8-5 8S3 9 3 6a5 5 0 0 1 10 0zM9.5 6a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z",
   bell: "M6 13a2 2 0 0 0 4 0M3 11h10l-1.5-2V6a3.5 3.5 0 1 0-7 0v3z",
+  blocked: "M14 8A6 6 0 1 1 2 8a6 6 0 1 1 12 0M3.8 3.8l8.4 8.4",
   screen: "M2 2.5h12v8.5H2zM8 11v2.5M5 13.5h6",
   translate: "M1 3h9M5 1v2M8 3c-1 4-3 6-6 8M3 5c1 3 3 5 5 6M9 14l3-7 3 7M10 12h4",
   extension: "M2 2h4a2 2 0 1 1 4 0h4v4a2 2 0 1 0 0 4v4H9a2 2 0 1 0-4 0H2V9a2 2 0 1 0 0-4z",
