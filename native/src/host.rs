@@ -65,7 +65,8 @@ use winit::{
     window::{Fullscreen, Icon, Window, WindowId},
 };
 use wry::{
-    PageLoadEvent, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows,
+    PageLoadEvent, ScrollBarStyle, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
+    WebViewExtWindows,
 };
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../dist");
@@ -118,6 +119,7 @@ fn browsing_webview(
 ) -> WebViewBuilder<'_> {
     let builder = WebViewBuilder::new_with_web_context(context)
         .with_additional_browser_args(browser_args(false, devtools_mcp))
+        .with_scroll_bar_style(ScrollBarStyle::FluentOverlay)
         .with_browser_extensions_enabled(true);
     if let Some(environment) = environment {
         builder.with_environment(environment)
