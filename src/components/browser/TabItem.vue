@@ -78,42 +78,44 @@ function activate() {
     @keydown.enter.self.prevent="activate"
     @contextmenu.prevent="emit('menu', $event, primary)"
   >
-    <span
-      v-for="label in labels"
-      :key="label.tab.bookmarkId || label.tab.id"
-      class="tab-label"
-      :class="{ sleeping: label.sleeping, loading: label.tab.loading, unloaded: label.tab.unloaded, doomed: label.doomed }"
-      :style="{ '--tab-freshness': label.fade }"
-      @auxclick.middle.prevent.stop="unload(label.tab)"
-      @contextmenu.prevent.stop="emit('menu', $event, label.tab)"
-    >
-      <span class="tab-picture">
-        <Icon v-if="isSettingsUrl(label.tab.url)" name="settings" />
-        <Icon v-else-if="isHistoryUrl(label.tab.url)" name="history" />
-        <Favicon v-else :url="label.tab.url" :favicon="label.tab.favicon" />
-      </span>
-      <span class="tab-title">{{ label.title }}</span>
-      <span v-if="label.permission" class="tab-permission-dot" :title="b.t('有权限请求')" aria-hidden="true" />
-      <button
-        v-if="label.audio"
-        class="tab-audio"
-        :class="{ muted: label.tab.muted }"
-        :aria-label="`${label.tab.muted ? b.t('取消静音') : b.t('静音')} ${label.title}`"
-        :title="label.tab.muted ? b.t('取消静音标签页') : b.t('静音标签页')"
-        @click.stop="b.toggleMute(label.tab)"
+    <div class="tab-surface">
+      <span
+        v-for="label in labels"
+        :key="label.tab.bookmarkId || label.tab.id"
+        class="tab-label"
+        :class="{ sleeping: label.sleeping, loading: label.tab.loading, unloaded: label.tab.unloaded, doomed: label.doomed }"
+        :style="{ '--tab-freshness': label.fade }"
+        @auxclick.middle.prevent.stop="unload(label.tab)"
+        @contextmenu.prevent.stop="emit('menu', $event, label.tab)"
       >
-        <Icon :name="label.tab.muted ? 'speakerMuted' : 'speaker'" :size="12" />
+        <span class="tab-picture">
+          <Icon v-if="isSettingsUrl(label.tab.url)" name="settings" />
+          <Icon v-else-if="isHistoryUrl(label.tab.url)" name="history" />
+          <Favicon v-else :url="label.tab.url" :favicon="label.tab.favicon" />
+        </span>
+        <span class="tab-title">{{ label.title }}</span>
+        <span v-if="label.permission" class="tab-permission-dot" :title="b.t('有权限请求')" aria-hidden="true" />
+        <button
+          v-if="label.audio"
+          class="tab-audio"
+          :class="{ muted: label.tab.muted }"
+          :aria-label="`${label.tab.muted ? b.t('取消静音') : b.t('静音')} ${label.title}`"
+          :title="label.tab.muted ? b.t('取消静音标签页') : b.t('静音标签页')"
+          @click.stop="b.toggleMute(label.tab)"
+        >
+          <Icon :name="label.tab.muted ? 'speakerMuted' : 'speaker'" :size="12" />
+        </button>
+      </span>
+      <button
+        class="tab-close"
+        :aria-label="`${closeLabel} ${labels[0].title}`"
+        :title="away ? closeLabel : primary.bookmarkId ? b.t('卸载网页（保留固定项）') : b.t('关闭 {name}', { name: labels[0].title })"
+        :disabled="primary.unloaded"
+        @click.stop="close"
+      >
+        <Icon :name="away ? 'back' : 'close'" :size="11" />
       </button>
-    </span>
-    <button
-      class="tab-close"
-      :aria-label="`${closeLabel} ${labels[0].title}`"
-      :title="away ? closeLabel : primary.bookmarkId ? b.t('卸载网页（保留固定项）') : b.t('关闭 {name}', { name: labels[0].title })"
-      :disabled="primary.unloaded"
-      @click.stop="close"
-    >
-      <Icon :name="away ? 'back' : 'close'" :size="11" />
-    </button>
+    </div>
   </div>
 </template>
 

@@ -37,11 +37,23 @@ html[data-reduce-motion="true"] :is(.bubble-enter-active, .bubble-leave-active) 
 .desk-leave-to {
   opacity: 0;
 }
-.tab-row,
+.tab-surface,
 .favorites button,
 .icon-button,
 .address-field {
   transition: background var(--motion-quick) var(--ease-out);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .tab-surface {
+    transition:
+      background var(--motion-quick) var(--ease-out),
+      scale var(--motion-selection) var(--ease-out);
+  }
+  /* Scale the surface so hit testing and drag measurements use the full row. */
+  :root:not([data-reduce-motion="true"]) .tab-row:active:not(.tab-drag-source, :has(button:active)) > .tab-surface {
+    scale: 0.97;
+    transition-duration: var(--motion-quick);
+  }
 }
 .navigation-arrow {
   transition: transform var(--motion-selection) var(--ease-out);
