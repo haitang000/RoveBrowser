@@ -51,7 +51,7 @@ test("Clear closes the other tabs and previews the rows it would remove", async 
   const before = await regularRows(page).count();
   const clear = page.locator(".clear-tabs");
   // Enter the list first so the hover-only button becomes hit-testable.
-  await page.locator(".space-list .section-label").hover();
+  await page.locator(".space-list > .section-label").hover();
   await clear.hover();
   await expect(clear).toBeVisible();
   // The rows it would close sink back while the button is hovered.
@@ -72,7 +72,7 @@ test("the Clear button arms only after it has been visible for a moment", async 
 }) => {
   await openPage(page, "https://example.com/docs");
   const count = await regularRows(page).count();
-  await page.locator(".space-list .section-label").hover();
+  await page.locator(".space-list > .section-label").hover();
   const clear = page.locator(".clear-tabs");
   await clear.click({ force: true });
   // A click during the arming window must not wipe the tab list.

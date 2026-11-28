@@ -15,6 +15,10 @@ const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab]; scroll: [id: str
 const b = useBrowser(), list = ref<HTMLElement>();
 const space = computed(() => b.state.spaces.find((s) => s.id === props.spaceId));
 const pages = computed(() => b.state.tabs.filter((t) => t.spaceId === props.spaceId));
+const agentTab = computed(() => {
+  const id = b.codexSharedTab;
+  return id ? pages.value.find((tab) => tab.id === id) : undefined;
+});
 const favorites = computed(() => pages.value.filter((t) => b.state.favorites.some((f) => f.id === t.bookmarkId)));
 const tabs = computed(() => pages.value.filter((t) => !t.pinned && !favorites.value.includes(t)));
 const pins = computed<Tab[]>((previous) => shareSnapshot(previous, (b.state.pins || []).filter((f) => f.spaceId === props.spaceId)
@@ -23,7 +27,17 @@ const pins = computed<Tab[]>((previous) => shareSnapshot(previous, (b.state.pins
     return { ...(live || { id: f.id, spaceId: props.spaceId, url: f.url, splitWith: f.splitWith, unloaded: true }), title: f.title, favicon: live?.favicon || f.favicon, pinned: true, bookmarkId: f.id };
   })));
 const folders = computed(() => pinFolderById(b.state.pinLayouts?.[props.spaceId]));
-const rows = computed(() => sidebarTabRows(pins.value, tabs.value, favorites.value, b.state.activeTab, folders.value));
+const rows = computed(() => {
+  const agentId = agentTab.value?.id;
+  const outsideAgentGroup = (list: Tab[]) => agentId ? list.filter((tab) => tab.id !== agentId) : list;
+  return sidebarTabRows(
+    outsideAgentGroup(pins.value),
+    outsideAgentGroup(tabs.value),
+    outsideAgentGroup(favorites.value),
+    b.state.activeTab,
+    folders.value,
+  );
+});
 // The scrollbar is ambient: it only paints while the list is actually moving.
 // Restoring a pane's scroll position on mount is not a scroll the user made, so
 // it must not flash the bar.
@@ -118,7 +132,7 @@ function clickClear() {
 
 <template>
   <section ref="list" class="space-list" :class="{ scrolling }" :data-space-id="spaceId" :aria-label="space?.name" @scroll="onScroll">
-    <PinnedTabs :space-id="spaceId" :rows="rows.pins" :doomed-ids="doomedIds" @menu="(e, t) => emit('menu', e, t)" />
+    <PinnedTabs :space-id="spaceId" :rows="rows.pins" :agent-tab="agentTab" :doomed-ids="doomedIds" @menu="(e, t) => emit('menu', e, t)" />
     <div class="section-label">
       <span>Tabs</span>
       <span class="section-label-end">

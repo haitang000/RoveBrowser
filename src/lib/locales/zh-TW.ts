@@ -13,6 +13,7 @@ export const traditionalChinese: Readonly<Record<string, string>> = {
   "实验性": "實驗性",
   "网页调试": "網頁偵錯",
   "允许 Codex 使用此标签页": "允許 Codex 使用此分頁",
+  "Agent 操作中": "Agent 操作中",
   "Codex 可读取此网页并点击或填写页面元素": "Codex 可讀取此網頁並點擊或填寫頁面元素",
   "停止与 Codex 共享": "停止與 Codex 分享",
   "复制 Codex MCP 配置": "複製 Codex MCP 設定",

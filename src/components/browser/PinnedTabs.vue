@@ -8,7 +8,7 @@ import type { TabRow } from "../../lib/tab-rows";
 import Icon from "../common/Icon.vue";
 import TabList from "./TabList.vue";
 
-const props = defineProps<{ spaceId: string; rows: TabRow[]; doomedIds?: string[] }>();
+const props = defineProps<{ spaceId: string; rows: TabRow[]; agentTab?: Tab; doomedIds?: string[] }>();
 const emit = defineEmits<{ menu: [event: MouseEvent, tab: Tab] }>();
 const b = useBrowser();
 const drag = useTabDrag();
@@ -26,7 +26,9 @@ const groupedRows = computed(() => {
 });
 
 function containsActive(folder: PinFolder) {
-  return [b.active, b.splitPartner].some((tab) => tab?.bookmarkId && folder.pins.includes(tab.bookmarkId));
+  return [b.active, b.splitPartner].some((tab) =>
+    tab?.bookmarkId && tab.id !== props.agentTab?.id && folder.pins.includes(tab.bookmarkId),
+  );
 }
 
 function toggle(folder: PinFolder) {
@@ -54,6 +56,15 @@ function openMenu(event: MouseEvent, id?: string) {
         <Icon name="plus" :size="14" />
       </button>
     </div>
+    <details v-if="agentTab" :key="agentTab.id" class="agent-pin-group" data-agent-pin-group open>
+      <summary class="pin-folder-header pin-folder-toggle">
+        <Icon name="chevronDown" :size="12" />
+        <Icon name="folder" :size="16" />
+        <span>{{ b.t('Agent 操作中') }}</span>
+      </summary>
+      <TabList class="pin-folder-tabs" :rows="[{ tab: agentTab }]" :aria-label="b.t('Agent 操作中')"
+        :doomed-ids="doomedIds" @menu="(e, t) => emit('menu', e, t)" />
+    </details>
     <TabList class="pinned-tabs" :rows="groupedRows.get(undefined) ?? []" :folders="layout?.folders"
       :order="layout?.root" :doomed-ids="doomedIds" :aria-label="b.t('固定标签页')" @menu="(e, t) => emit('menu', e, t)">
       <template #folder="{ folder }">
@@ -96,7 +107,7 @@ function openMenu(event: MouseEvent, id?: string) {
   color: var(--ink);
 }
 .pin-folder-header:hover { background: var(--hover); }
-.pin-folder-active { background: var(--selected); border-color: var(--edge); }
+.pin-folder-active, .agent-pin-group:not([open]) > summary { background: var(--selected); border-color: var(--edge); }
 .pin-folder-drop { background: var(--selected); border-color: var(--accent); }
 .pin-folder-toggle {
   display: flex;
@@ -114,8 +125,11 @@ function openMenu(event: MouseEvent, id?: string) {
   color: color-mix(in srgb, var(--folder-color) 82%, var(--ink));
   opacity: 1;
 }
-.pin-folder-toggle[aria-expanded="false"] > svg:first-child { transform: rotate(-90deg); }
+.pin-folder-toggle[aria-expanded="false"] > svg:first-child,
+.agent-pin-group:not([open]) > summary > svg:first-child { transform: rotate(-90deg); }
 .pin-folder-toggle > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-pin-group > summary { list-style: none; cursor: pointer; }
+.agent-pin-group > summary::-webkit-details-marker { display: none; }
 .pin-folder-action {
   display: grid;
   place-items: center;

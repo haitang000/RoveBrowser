@@ -12,6 +12,7 @@ export const english: Readonly<Record<string, string>> = {
   "实验性": "Experimental",
   "网页调试": "Web debugging",
   "允许 Codex 使用此标签页": "Allow Codex to use this tab",
+  "Agent 操作中": "Agent in control",
   "Codex 可读取此网页并点击或填写页面元素": "Codex can read this page and click or fill page elements",
   "停止与 Codex 共享": "Stop sharing with Codex",
   "复制 Codex MCP 配置": "Copy Codex MCP configuration",

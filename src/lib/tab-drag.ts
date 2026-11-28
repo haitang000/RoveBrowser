@@ -103,6 +103,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
     if (!(event.target instanceof Element) || event.target.closest("button:not(.favorite-open):not(.pin-folder-toggle)")) return;
     const row = event.target.closest<HTMLElement>(".tab-row, .favorite-tile, [data-pin-folder-header]");
     if (!row || !(row.dataset.tabId || row.dataset.bookmarkId || row.dataset.pinFolderHeader)) return;
+    if (row.closest("[data-agent-pin-group]")) return;
     reset();
     pressed = { row, pointerId: event.pointerId, x: event.clientX, y: event.clientY };
   }
@@ -157,7 +158,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
     const rootTarget = hit?.closest("[data-pin-root-target]")?.closest(".pinned-area")?.querySelector<HTMLElement>(".pinned-tabs");
     const list = drag.folder ? hit?.closest<HTMLElement>(".pinned-tabs") ?? rootTarget
       : intoFolder ? undefined : hit?.closest<HTMLElement>(".tab-list") ?? rootTarget;
-    const target = list && sidebar.value?.contains(list) ? list : undefined;
+    const target = list && !list.closest("[data-agent-pin-group]") && sidebar.value?.contains(list) ? list : undefined;
     // Use layout positions so moving neighbours cannot push the insertion point back and forth.
     const rows = target ? rowsIn(target, drag.key) : [];
     const top = target?.getBoundingClientRect().top ?? 0;
@@ -307,7 +308,7 @@ export function provideTabDrag(sidebar: Ref<HTMLElement | undefined>) {
   }
   function visibilityChanged() { if (document.hidden) reset(); }
   watch([() => b.state.tabs, () => b.state.pins, () => b.state.pinLayouts], () => { if (pending) reset(); });
-  watch([() => b.state.activeSpace, () => b.state.sidebarCollapsed, () => b.spaceFormOpen], reset);
+  watch([() => b.state.activeSpace, () => b.state.sidebarCollapsed, () => b.spaceFormOpen, () => b.codexSharedTab], reset);
   onMounted(() => {
     document.addEventListener("pointerdown", allowClick, true);
     document.addEventListener("pointermove", move);
