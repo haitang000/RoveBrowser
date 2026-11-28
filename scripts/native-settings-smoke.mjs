@@ -327,7 +327,7 @@ try {
   checks.push("内部设置与真实网页支持分屏并可恢复单页");
   const tracking = ui.getByRole("combobox", { name: "跟踪防护", exact: true });
   assert.equal(await tracking.inputValue(), "balanced");
-  for (const level of ["basic", "strict"]) {
+  for (const level of ["basic", "balanced"]) {
     await tracking.selectOption(level);
     await waitFor(async () => (await state()).settings.trackingProtection === level, `apply ${level} tracking prevention`);
   }
@@ -396,7 +396,25 @@ try {
   await expectSecureDnsMode("automatic");
   await webRtcToggle("WebRTC address protection").click();
   await waitFor(async () => (await state()).settings.webRtcAddressProtection, "enable WebRTC address protection");
+  await Promise.all([
+    page.waitForEvent("close"),
+    send({ type: "close", id: fixtureId }),
+  ]);
+  await webBrowser.close();
+  webBrowser = undefined;
+  await waitFor(async () => (await debugTargets(port + 1).catch(() => [])).length === 0, "no browsing WebViews");
+  const englishTracking = ui.getByRole("combobox", { name: "Tracking prevention", exact: true });
+  await englishTracking.selectOption("strict");
+  await waitFor(async () => (await state()).settings.trackingProtection === "strict", "save tracking prevention with only Settings open");
+  await openWebRtcFixture();
+  await send({ type: "settingsOpen", pane: "privacy" });
+  await englishTracking.waitFor();
   await stop();
+  await waitFor(async () => {
+    const path = join(profile, "WebView2", "EBWebView", "Default", "Preferences");
+    const preferences = JSON.parse(await readFile(path, "utf8"));
+    return preferences.enhanced_tracking_prevention?.user_pref === 3;
+  }, "strict tracking prevention persisted by WebView2");
   await launch();
   const restored = await state();
   assert.equal(restored.settings.downloadFolder, downloads);
@@ -423,7 +441,7 @@ try {
   checks.push("设置和浏览器菜单即时切换英语；重启后恢复界面语言、引擎、外观、动态效果、快捷键、下载路径及设置分类");
   assert.equal(await hasDirectWebRtcCandidates(await openWebRtcFixture()), false);
   assert.equal(await ui.evaluate(() => window.__settingsTest.events.some((e) => e.type === "error" && /跟踪防护/.test(e.message))), false);
-  checks.push("通过真实 WebView2 配置切换基础和严格跟踪防护，重启后恢复严格等级");
+  checks.push("有网页时可切换跟踪防护，关闭最后一个网页后仍可保存，并在重新打开网页和重启后应用严格等级");
   await send({ type: "settingsOpen", pane: "privacy" });
   await secureDnsToggle().click();
   await waitFor(async () => (await state()).settings.secureDns === true, "enable Secure DNS");

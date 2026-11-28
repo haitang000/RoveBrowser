@@ -30,12 +30,8 @@ pub enum BrowsingDataKind {
     Downloads,
 }
 
-pub fn tracking_profile(view: &WebView) -> windows::core::Result<ICoreWebView2Profile3> {
-    unsafe { view.webview().cast::<ICoreWebView2_13>()?.Profile()?.cast() }
-}
-
 pub fn set_tracking_protection(
-    profile: &ICoreWebView2Profile3,
+    view: &WebView,
     protection: TrackingProtection,
 ) -> windows::core::Result<()> {
     let level = match protection {
@@ -45,6 +41,11 @@ pub fn set_tracking_protection(
     };
     let mut applied = Default::default();
     unsafe {
+        let profile: ICoreWebView2Profile3 = view.webview().cast::<ICoreWebView2_13>()?.Profile()?.cast()?;
+        profile.PreferredTrackingPreventionLevel(&mut applied)?;
+        if applied == level {
+            return Ok(());
+        }
         profile.SetPreferredTrackingPreventionLevel(level)?;
         profile.PreferredTrackingPreventionLevel(&mut applied)?;
     }

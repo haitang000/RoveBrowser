@@ -26,7 +26,7 @@ use webview2_com::{
     TrySuspendCompletedHandler, ZoomFactorChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DownloadOperation, ICoreWebView2Environment,
-        ICoreWebView2NavigationStartingEventArgs3, ICoreWebView2Profile3,
+        ICoreWebView2NavigationStartingEventArgs3,
         ICoreWebView2NewWindowRequestedEventArgs2, ICoreWebView2NewWindowRequestedEventArgs3,
         ICoreWebView2_15, ICoreWebView2_2, ICoreWebView2_3,
         ICoreWebView2_4, ICoreWebView2_9,
@@ -490,7 +490,6 @@ struct App {
     /// Reuse the first WebView2 environment for every controller in the
     /// browsing profile. WebContext only stores its data path on Windows.
     web_environment: Option<ICoreWebView2Environment>,
-    tracking_profile: Option<ICoreWebView2Profile3>,
     // Snapshot the preference at startup for every WebView2 environment this process creates.
     devtools_mcp_enabled: bool,
     devtools_mcp_from_env: bool,
@@ -697,7 +696,6 @@ pub fn run(update_message: Option<String>) -> Result<(), Box<dyn std::error::Err
         window: None,
         context: WebContext::new(Some(browsing_data)),
         web_environment: None,
-        tracking_profile: None,
         devtools_mcp_enabled: state.settings.devtools_mcp || devtools_mcp_from_env,
         devtools_mcp_from_env,
         web_preference_failures,
@@ -2162,19 +2160,24 @@ impl App {
         }
     }
     fn remember_web_environment(&mut self, view: &WebView) {
-        if self.web_environment.is_none() {
-            self.web_environment = Some(view.environment());
-            match web_settings::tracking_profile(view) {
-                Ok(profile) => {
-                    let result = web_settings::set_tracking_protection(&profile, self.state.settings.tracking_protection);
-                    self.tracking_profile = Some(profile);
-                    if result.is_err() {
-                        self.error("无法应用跟踪防护等级，请重试。");
-                    }
-                }
-                Err(_) => self.error("无法应用跟踪防护等级，请重试。"),
-            }
+        self.web_environment.get_or_insert_with(|| view.environment());
+        if web_settings::set_tracking_protection(view, self.state.settings.tracking_protection).is_err() {
+            self.error("无法应用跟踪防护等级，请重试。");
         }
+    }
+
+    fn update_tracking_protection(&self) -> windows::core::Result<()> {
+        // A profile handle can become invalid after the last browsing WebView closes.
+        let view = self.pages.values().next().map(|page| &page.view)
+            .or_else(|| self.peek.as_ref().map(|peek| &peek.page.view))
+            .or_else(|| self.preview_renders.values().next().map(|preview| &preview.view))
+            .or_else(|| self.extension_view.as_ref().map(|extension| &extension.view))
+            .or_else(|| self.data_clear.as_ref().and_then(|clear| clear.view.as_ref()));
+        let Some(view) = view else {
+            // The next browsing WebView applies the saved choice when it opens.
+            return Ok(());
+        };
+        web_settings::set_tracking_protection(view, self.state.settings.tracking_protection)
     }
 
     fn build_page(&mut self, tab: &Tab) -> Result<Page, Box<dyn std::error::Error>> {
@@ -5215,10 +5218,9 @@ impl App {
                     self.error(e);
                     return;
                 }
-                if self.state.settings.tracking_protection != previous_tracking && self.web_environment.is_some()
-                    && !self.tracking_profile.as_ref().is_some_and(|profile| {
-                        web_settings::set_tracking_protection(profile, self.state.settings.tracking_protection).is_ok()
-                    }) {
+                if self.state.settings.tracking_protection != previous_tracking
+                    && self.update_tracking_protection().is_err()
+                {
                     self.state.settings.tracking_protection = previous_tracking;
                     self.error("无法应用跟踪防护等级，请重试。");
                 }
