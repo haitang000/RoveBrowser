@@ -128,7 +128,7 @@ try {
   await add.click();
   await expectVerifiedReview(dialog, dialog.getByRole("alert"));
   await expectLoadedImage(dialog.locator(".extension-icon img"));
-  await expectLoadedImage(popup.locator(".extension-install-backdrop img"));
+  await expectLoadedImage(popup.locator(".extension-dialog-backdrop img"));
   assert.notEqual(await confirm.evaluate(button => getComputedStyle(button).backgroundColor), darkAccent);
   await popup.screenshot({ path: join(profile, "extension-dialog.png") });
   await expect(settings).toHaveCount(0);
@@ -156,8 +156,12 @@ try {
   await send({ type: "settingsOpen", pane: "extensions" });
   await expect(toggle()).toHaveAttribute("aria-checked", "false");
   await expectLoadedImage(icon());
+  const removalPopup = await waitFor(() => ui.context().pages().find(page => page.url().endsWith("?popup")), "removal popup");
+  const removalDialog = removalPopup.getByRole("dialog", { name: "确认卸载扩展" });
   await ui.getByRole("button", { name: /卸载 uBlock Origin Lite/i }).click();
-  await ui.getByRole("button", { name: "确认卸载" }).click();
+  await expectLoadedImage(removalDialog.locator(".extension-icon img"));
+  await removalDialog.getByRole("button", { name: "确认卸载" }).click();
+  await expect(removalDialog).toHaveCount(0);
   await expect(ui.getByText("还没有安装扩展。")).toBeVisible();
   assert.deepEqual(await readdir(packages), []);
   await stop();

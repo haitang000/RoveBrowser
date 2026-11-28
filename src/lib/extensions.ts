@@ -40,6 +40,7 @@ export interface ExtensionReview {
 export interface ExtensionsState {
   items: ExtensionItem[] | null;
   review: ExtensionReview | null;
+  removal: { ticket: string; item: ExtensionItem } | null;
   popup: boolean;
   busy: boolean;
   error: string | null;

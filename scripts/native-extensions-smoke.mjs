@@ -189,8 +189,29 @@ try {
   await review().getByRole("button", { name: "安装扩展" }).click();
   await expect(ui.getByRole("alert")).toContainText("该扩展已安装");
   assert.deepEqual(await readdir(packages), [installed]);
-  await ui.getByRole("button", { name: "卸载 " + fixtureName }).click();
-  await ui.getByRole("button", { name: "确认卸载" }).click();
+  const removalPopup = await waitFor(() => ui.context().pages().find(page => page.url().endsWith("?popup")), "extension popup");
+  const removeButton = ui.getByRole("button", { name: "卸载 " + fixtureName });
+  const removalDialog = removalPopup.getByRole("dialog", { name: "确认卸载扩展" });
+  const cancelRemoval = removalDialog.getByRole("button", { name: "取消" });
+  const confirmRemoval = removalDialog.getByRole("button", { name: "确认卸载" });
+
+  await removeButton.click();
+  await expect(removalDialog).toContainText(fixtureName);
+  await expect(cancelRemoval).toBeFocused();
+  await cancelRemoval.click();
+  await expect(removalDialog).toHaveCount(0);
+  await expect(toggle()).toHaveAttribute("aria-checked", "true");
+  assert.deepEqual(await readdir(packages), [installed]);
+
+  await removeButton.click();
+  await expect(cancelRemoval).toBeFocused();
+  await cancelRemoval.press("Escape");
+  await expect(removalDialog).toHaveCount(0);
+  await expect(toggle()).toHaveAttribute("aria-checked", "true");
+
+  await removeButton.click();
+  await confirmRemoval.click();
+  await expect(removalDialog).toHaveCount(0);
   await expect(ui.getByText("还没有安装扩展。")).toBeVisible();
   assert.deepEqual(await readdir(packages), []);
   await browse("/removed", false);
@@ -209,8 +230,8 @@ try {
   const expectedId = createHash("sha256").update(key).digest("hex").slice(0, 32)
     .replace(/[0-9a-f]/g, hex => String.fromCharCode(97 + parseInt(hex, 16)));
   assert.equal(record.id, expectedId);
-  await ui.getByRole("button", { name: "卸载 " + fixtureName }).click();
-  await ui.getByRole("button", { name: "确认卸载" }).click();
+  await removeButton.click();
+  await confirmRemoval.click();
   await expect(ui.getByText("还没有安装扩展。")).toBeVisible();
   await stop();
   console.log("通过：目录校验、权限确认、取消、安装副本、网页脚本与拦截、界面隔离、启停、重启、重复安装、公钥标识和卸载。");

@@ -21,7 +21,7 @@ import BrowserMenu from "./BrowserMenu.vue";
 import QuitDialog from "./QuitDialog.vue";
 import SplitControls from "./SplitControls.vue";
 import PermissionPrompt from "./PermissionPrompt.vue";
-import ExtensionInstallDialog from "./ExtensionInstallDialog.vue";
+import ExtensionDialog from "./ExtensionDialog.vue";
 import ExtensionMenu from "./ExtensionMenu.vue";
 import { browserKey, browserKeyUp } from "../../lib/browser-key";
 import { shadowBleed, surfaceRegion } from "../../lib/popup-layer";
@@ -49,7 +49,7 @@ function dismissPreview() {
   if (b.hoverPreview) b.send({ type: "tabPreview", id: null, rect: null, ticket: b.hoverPreview.ticket });
 }
 function report() {
-  const modals = ".quit-scrim, .extension-install-scrim, .extension-menu-layer, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer, .tab-switcher-layer";
+  const modals = ".quit-scrim, .extension-dialog-scrim, .extension-menu-layer, .command-scrim, .settings-scrim, .menu-scrim, .desk, .downloads-layer, .browser-menu-layer, .tab-switcher-layer";
   const surfaces = document.querySelectorAll<HTMLElement>(`${modals}, .peek-layer, .permission-layer, .tab-hover-preview, .error-toast, .find-bar, .status-toast, .action-toast, .reader-controls, .reader-options-layer, .split-controls, .split-controls-dismiss`);
   const preview = document.getElementById("tab-hover-preview");
   if (preview !== observedPreview) {
@@ -84,7 +84,7 @@ function report() {
   }
   if (focus) {
     const selector = active === "pageMenu" ? ".page-context-menu"
-      : active === "tabSwitcher" ? ".tab-switcher-panel" : active === "quit" ? ".quit-dialog" : active === "extension" ? ".extension-install-dialog [autofocus]" : active === "extensionsMenu" ? ".extension-menu-panel" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
+      : active === "tabSwitcher" ? ".tab-switcher-panel" : active === "quit" ? ".quit-dialog" : active === "extension" ? ".extension-dialog [autofocus]" : active === "extensionsMenu" ? ".extension-menu-panel" : active === "command" ? ".command-panel input" : active === "settings" ? ".settings-panel input" : active === "desk" ? ".desk input" : active === "find" ? ".find-bar input" : active === "downloads" ? ".downloads-panel" : active === "browserMenu" ? ".browser-menu button:not(:disabled)" : active === "splitControls" ? ".split-controls button" : active === "permission" ? ".permission-prompt" : ".context-menu input, .context-menu button, .pin-folder-editor input[type=text]";
     document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: active === "pageMenu" || active === "menu" });
   }
 }
@@ -120,6 +120,6 @@ onBeforeUnmount(() => {
   <TabSwitcher />
   <PermissionPrompt v-if="b.permissionPrompt" :key="b.permissionPrompt.id" :prompt="b.permissionPrompt" />
   <ExtensionMenu />
-  <ExtensionInstallDialog v-if="b.extensions.popup && !b.quitOpen" />
+  <ExtensionDialog v-if="b.extensions.popup && !b.quitOpen" />
   <QuitDialog v-if="b.quitOpen" />
 </template>

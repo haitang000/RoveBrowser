@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { CHROME_STORE_URL, type ExtensionItem } from "../../lib/extensions";
+import { CHROME_STORE_URL } from "../../lib/extensions";
 import type { Command } from "../../lib/types";
 import { useBrowser } from "../../stores/browser";
 import ExtensionIcon from "./ExtensionIcon.vue";
 import ExtensionReviewDetails from "./ExtensionReviewDetails.vue";
 
 const b = useBrowser();
-const removal = ref<ExtensionItem | null>(null);
 const choose = ref<HTMLButtonElement>();
 const reviewPanel = ref<HTMLElement>();
 const cancelReview = ref<HTMLButtonElement>();
-const cancelRemoval = ref<HTMLButtonElement>();
 const storeInput = ref("");
 const inlineReview = computed(() => b.extensions.popup ? null : b.extensions.review);
+const unavailable = computed(() => !b.native || b.extensions.busy || b.extensions.popup || !!b.extensions.review);
 
 function run(command: Command) {
   if (!b.native || b.extensions.busy || b.extensions.popup) return;
@@ -25,11 +24,6 @@ function review(ticket: string, install: boolean) {
   run({ type: "extensionsReview", ticket, install });
 }
 
-function remove(id: string) {
-  removal.value = null;
-  run({ type: "extensionsRemove", id });
-}
-
 watch(inlineReview, async (current, previous) => {
   if (current?.ticket === previous?.ticket) return;
   await nextTick();
@@ -38,13 +32,6 @@ watch(inlineReview, async (current, previous) => {
     cancelReview.value?.focus({ preventScroll: true });
   } else choose.value?.focus();
 });
-watch(removal, async (item) => {
-  if (item) {
-    await nextTick();
-    cancelRemoval.value?.focus();
-  }
-});
-
 onMounted(() => {
   if (b.extensions.busy) b.send({ type: "extensionsList" });
   else run({ type: "extensionsList" });
@@ -66,10 +53,10 @@ onMounted(() => {
           maxlength="4096"
           autocomplete="off"
           spellcheck="false"
-          :disabled="!b.native || b.extensions.busy || !!b.extensions.review || !!removal"
+          :disabled="unavailable"
           required
         />
-        <button class="setting-button" :disabled="!b.native || b.extensions.busy || !!b.extensions.review || !!removal || !storeInput.trim()">
+        <button class="setting-button" :disabled="unavailable || !storeInput.trim()">
           {{ b.t('查看权限') }}
         </button>
       </form>
@@ -84,7 +71,7 @@ onMounted(() => {
       <button
         ref="choose"
         class="setting-button"
-        :disabled="!b.native || b.extensions.busy || !!b.extensions.review || !!removal"
+        :disabled="unavailable"
         @click="run({ type: 'extensionsChoose' })"
       >{{ b.t('加载本地扩展…') }}</button>
     </div>
@@ -134,27 +121,17 @@ onMounted(() => {
             role="switch"
             :aria-label="b.t('启用 {name}', { name: item.name })"
             :aria-checked="item.enabled"
-            :disabled="b.extensions.busy || !!b.extensions.review || !!removal"
+            :disabled="unavailable"
             @click="run({ type: 'extensionsEnable', id: item.id, enabled: !item.enabled })"
           ><span /></button>
           <button
             class="setting-button"
             :aria-label="b.t('卸载 {name}', { name: item.name })"
-            :disabled="b.extensions.busy || !!b.extensions.review || !!removal"
-            @click="removal = item"
+            :disabled="unavailable"
+            @click="run({ type: 'extensionsRequestRemoval', id: item.id })"
           >{{ b.t('卸载…') }}</button>
         </div>
       </div>
-      <section v-if="removal" class="extension-review" :aria-label="b.t('确认卸载扩展')" @keydown.esc.stop="removal = null">
-        <div class="setting-description">
-          <strong>{{ b.t('卸载 {name}？', { name: removal.name }) }}</strong>
-          <p>{{ b.t('扩展及其应用内副本会被移除。') }}</p>
-        </div>
-        <div class="extension-actions">
-          <button ref="cancelRemoval" class="setting-button" @click="removal = null">{{ b.t('取消') }}</button>
-          <button class="primary-button" @click="remove(removal.id)">{{ b.t('确认卸载') }}</button>
-        </div>
-      </section>
     </div>
   </section>
 </template>

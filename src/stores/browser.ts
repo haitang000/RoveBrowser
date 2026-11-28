@@ -293,7 +293,7 @@ export const useBrowser = defineStore("browser", () => {
   }, { flush: "sync" });
   const importSources = ref<ImportSource[]>([]);
   const importBusy = ref(false);
-  const extensions = ref<ExtensionsState>({ items: null, review: null, popup: false, busy: false, error: null });
+  const extensions = ref<ExtensionsState>({ items: null, review: null, removal: null, popup: false, busy: false, error: null });
   const extensionBackground = shallowRef<{ rect: Rect; image: string }[]>([]);
   const extensionMenuAnchor = ref<Rect & { tabId?: string; extensionId?: string }>();
   const pinnedExtensions = computed(() => (state.value.extensionPins ?? []).flatMap(id => {

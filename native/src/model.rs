@@ -296,8 +296,10 @@ pub enum Command {
     DismissExtensionPopup,
     #[serde(rename = "extensionsEnable")]
     EnableExtension { id: String, enabled: bool },
+    #[serde(rename = "extensionsRequestRemoval")]
+    RequestExtensionRemoval { id: String },
     #[serde(rename = "extensionsRemove")]
-    RemoveExtension { id: String },
+    RemoveExtension { ticket: String },
     #[serde(rename = "updateCheck")]
     UpdateCheck,
     #[serde(rename = "updateInstall")]

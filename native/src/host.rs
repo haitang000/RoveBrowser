@@ -398,6 +398,11 @@ struct ExtensionView {
     next_measure: Option<Instant>,
 }
 
+struct ExtensionPopup {
+    ticket: uuid::Uuid,
+    removal: Option<extensions::Item>,
+}
+
 struct App {
     _instance: crate::instance::Instance,
     agent_tabs: Option<crate::agent_tabs::Tabs>,
@@ -414,7 +419,7 @@ struct App {
     extensions_root: PathBuf,
     extension_candidate: Option<extensions::Prepared>,
     extension_preparation: Option<uuid::Uuid>,
-    extension_popup: Option<uuid::Uuid>,
+    extension_popup: Option<ExtensionPopup>,
     extension_error: Option<String>,
     extension_view: Option<ExtensionView>,
     // Drop child controllers before their parent HWND and shared context.
@@ -3646,11 +3651,15 @@ impl App {
                 self.publish();
             }
         }
+        let removal = self.extension_popup.as_ref().and_then(|popup| {
+            popup.removal.as_ref().map(|item| json!({ "ticket": popup.ticket.to_string(), "item": item }))
+        });
         self.emit(json!({
             "type": "extensionsState",
             "extensions": {
                 "items": items,
                 "review": self.extension_candidate.as_ref().map(|extension| &extension.review),
+                "removal": removal,
                 "busy": self.extension_preparation.is_some(),
                 "popup": self.extension_popup.is_some(),
                 "error": self.extension_error,
@@ -3778,7 +3787,13 @@ impl App {
         });
     }
 
-    fn capture_extension_background(&self, popup: uuid::Uuid) {
+    fn open_extension_popup(&mut self, removal: Option<extensions::Item>) {
+        self.close_extension_menu();
+        self.extension_popup = Some(ExtensionPopup { ticket: uuid::Uuid::new_v4(), removal });
+    }
+
+    fn capture_extension_background(&self) {
+        let Some(popup) = self.extension_popup.as_ref().map(|popup| popup.ticket) else { return };
         let Some(active) = self.state.active() else { return };
         for (id, rect) in std::iter::once((&active.id, self.primary))
             .chain(active.split_with.as_ref().zip(self.secondary))
@@ -3822,7 +3837,10 @@ impl App {
             return;
         }
         if self.extension_preparation.is_some() && !matches!(command, Command::ListExtensions) { return; }
-        if matches!(command, Command::EnableExtension { .. } | Command::RemoveExtension { .. }) {
+        if self.extension_popup.as_ref().is_some_and(|popup| popup.removal.is_some())
+            && !matches!(command, Command::ListExtensions | Command::RemoveExtension { .. })
+        { return; }
+        if matches!(command, Command::EnableExtension { .. }) {
             self.close_extension_menu();
         }
         let result = match command {
@@ -3913,13 +3931,39 @@ impl App {
                 profile.enable(root, &id, enabled)?;
                 profile.list(root)
             }),
-            Command::RemoveExtension { id } => {
+            Command::RequestExtensionRemoval { id } => {
+                if self.extension_popup.is_some() || self.extension_candidate.is_some() || self.quit_pending {
+                    return;
+                }
+                let item = self.extension_profile(|profile, root| {
+                    profile.list(root)?.into_iter().find(|item| item.id == id)
+                        .ok_or_else(|| "未找到已安装的扩展".into())
+                });
+                match item {
+                    Ok(item) => {
+                        self.open_extension_popup(Some(item));
+                        self.emit_extensions(None, None);
+                        self.capture_extension_background();
+                    }
+                    Err(error) => self.emit_extensions(None, Some(error.to_string())),
+                }
+                return;
+            }
+            Command::RemoveExtension { ticket } => {
+                let Ok(ticket) = uuid::Uuid::parse_str(&ticket) else { return };
+                let Some(id) = self.extension_popup.as_ref()
+                    .filter(|popup| popup.ticket == ticket && self.extension_error.is_none())
+                    .and_then(|popup| popup.removal.as_ref())
+                    .map(|item| item.id.clone()) else { return };
                 let result = self.extension_profile(|profile, root| {
                     let removed = profile.remove(root, &id);
                     Ok((profile.list(root)?, removed.err()))
                 });
                 match result {
-                    Ok((items, error)) => self.emit_extensions(Some(items), error.map(|error| error.to_string())),
+                    Ok((items, error)) => {
+                        if error.is_none() { self.extension_popup = None; }
+                        self.emit_extensions(Some(items), error.map(|error| error.to_string()));
+                    }
                     Err(error) => self.emit_extensions(None, Some(format!("卸载扩展失败：{error}"))),
                 }
                 return;
@@ -4217,19 +4261,17 @@ impl App {
                     chrome_store::detail_id(&url::Url::parse(&current).ok()?).map(str::to_owned)
                 });
             if let Some(input) = extension_id {
-                self.close_extension_menu();
-                let popup = uuid::Uuid::new_v4();
-                self.extension_popup = Some(popup);
+                self.open_extension_popup(None);
                 self.extension_candidate = None;
                 self.extension_command(Command::PrepareChromeStoreExtension { input });
-                self.capture_extension_background(popup);
+                self.capture_extension_background();
             } else if expected_url.is_none() {
                 self.error("当前标签页不是 Chrome 网上应用店的扩展详情页");
             }
             return;
         }
         if matches!(c, Command::ListExtensions | Command::SetExtensionPinned { .. } | Command::ChooseExtension | Command::PrepareChromeStoreExtension { .. } | Command::ReviewExtension { .. } | Command::DismissExtensionPopup
-            | Command::EnableExtension { .. } | Command::RemoveExtension { .. }) {
+            | Command::EnableExtension { .. } | Command::RequestExtensionRemoval { .. } | Command::RemoveExtension { .. }) {
             self.extension_command(c);
             return;
         }
@@ -5450,7 +5492,7 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::ExtensionBackground(popup, rect, image) => {
-                if self.extension_popup == Some(popup) {
+                if self.extension_popup.as_ref().is_some_and(|active| active.ticket == popup) {
                     self.emit(json!({
                         "type": "extensionBackground", "image": image,
                         "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
